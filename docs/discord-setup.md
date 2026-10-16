@@ -28,11 +28,26 @@ Du brauchst Admin- bzw. „Server verwalten“-Rechte auf dem Server. Dauer: ca.
 | **View Channels** | Event- und Log-Kanal sehen |
 | **Send Messages** | Event-Posts und Log-Meldungen |
 | **Embed Links** | die formatierten Event-Karten |
-| **Read Message History** | eigene Posts nach Neustart wiederfinden (verhindert Duplikate) |
-| **Pin Messages** | den „Läuft gerade“-Post anheften. Falls es den Punkt nicht gibt: stattdessen **Manage Messages** |
+| **Read Message History** | eigene Posts nach einem Neustart wiederfinden (verhindert Duplikate) |
+| **Pin Messages** | den „Läuft gerade“-Post anheften |
 | **Create Events** | Kalendereinträge (Server-Events) anlegen und eigene bearbeiten |
+| **Manage Events** | Server-Events bearbeiten und aufräumen |
+| **Create Public Threads** | Erinnerungs-Thread unter der Event-Karte |
+| **Send Messages in Threads** | Erinnerungen im Thread |
+| **Manage Threads** | Erinnerungs-Threads archivieren und aufräumen |
+| **Create Private Threads** | für spätere Funktionen vorgesehen |
+| **Add Reactions** | für spätere Funktionen vorgesehen |
+| **Use Application Commands** | Slash-Befehle wie `/ffevents setup` |
 
    **Nicht** anhaken: Administrator, Manage Server, Mention Everyone und alles andere.
+
+   Fertiger Einladungslink mit genau diesen Rechten:
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=1560738471470043236&permissions=2269797874224192&integration_type=0&scope=bot+applications.commands
+   ```
+
+   Wer eine eigene Bot-App betreibt, ersetzt die `client_id` durch die eigene Application ID.
 4. Ganz unten den **Generated URL** kopieren.
 
 ## 4. Bot auf einen Server einladen
@@ -43,7 +58,7 @@ Jeder mit „Server verwalten“ auf seinem Server kann den Link nutzen.
 3. Der Bot erscheint offline in der Mitgliederliste. Online geht er erst, wenn er gestartet wird.
 
 ## 5. Kanäle vorbereiten
-1. **Event-Kanal** (z. B. `#ff14-events`), in den der Bot postet. In den Kanal-Einstellungen → Berechtigungen für die Bot-Rolle prüfen: Kanal ansehen, Nachrichten senden, Links einbetten, Nachrichtenverlauf lesen, Nachrichten anheften = ✅.
+1. **Event-Kanal** (z. B. `#ff14-events`), in den der Bot postet. In den Kanal-Einstellungen → Berechtigungen für die Bot-Rolle prüfen: Kanal ansehen, Nachrichten senden, Links einbetten, Nachrichtenverlauf lesen, Nachrichten anheften, Öffentliche Threads erstellen, Nachrichten in Threads senden = ✅.
 2. **Log-Kanal** (z. B. `#ff14-bot-log`) für Warnungen wie „Belohnungen unsicher“ oder „Lodestone nicht lesbar“. Am besten **privat** (nur Admins + Bot-Rolle), gleiche Rechte wie oben.
 
 ## 6. `.env` anlegen
