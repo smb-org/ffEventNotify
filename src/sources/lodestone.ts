@@ -1,6 +1,7 @@
 // Parses Lodestone list and detail HTML without making network requests.
 
 import { load } from 'cheerio';
+import { cacheResolvedShortLink, getCachedShortLink, type Store } from '../store.ts';
 import type { FetchText, ParsedListEntry, ParsedMaintenanceEntry } from '../types.ts';
 
 export const LODESTONE_BASE_URL = 'https://de.finalfantasyxiv.com';
@@ -124,7 +125,12 @@ export function normalizeLodestoneUrl(value: string): string {
   return url.toString();
 }
 
-export async function resolveShortLinks(links: readonly string[], fetchText: FetchText): Promise<ShortLinkResolution> {
+export async function resolveShortLinks(
+  links: readonly string[],
+  fetchText: FetchText,
+  store?: Store,
+  resolvedAt?: string,
+): Promise<ShortLinkResolution> {
   const resolved = await Promise.all(links.map(async (link): Promise<string | undefined> => {
     let url: URL;
     try {
@@ -133,17 +139,23 @@ export async function resolveShortLinks(links: readonly string[], fetchText: Fet
       return link;
     }
     if (url.hostname.toLocaleLowerCase('en') !== 'sqex.to') return link;
+    url.protocol = 'https:';
+    url.search = '';
+    url.hash = '';
     const shortUrl = url.toString();
+    const cached = store === undefined ? undefined : getCachedShortLink(store, shortUrl);
+    if (cached) return cached.finalUrl;
     try {
       const response = await fetchText(shortUrl, { priority: 'detail' });
       if (response.status < 200 || response.status >= 300) return undefined;
       const target = response.finalUrl || shortUrl;
       const targetUrl = new URL(target, shortUrl);
       if (targetUrl.hostname.toLocaleLowerCase('en') === 'sqex.to') return undefined;
-      if (/^(?:de|eu|na|fr)\.finalfantasyxiv\.com$/i.test(targetUrl.hostname)) {
-        return normalizeLodestoneUrl(targetUrl.toString());
-      }
-      return target;
+      const finalUrl = /^(?:de|eu|na|fr)\.finalfantasyxiv\.com$/i.test(targetUrl.hostname)
+        ? normalizeLodestoneUrl(targetUrl.toString())
+        : target;
+      if (store !== undefined) cacheResolvedShortLink(store, { shortUrl, finalUrl, ...(resolvedAt ? { resolvedAt } : {}) });
+      return finalUrl;
     } catch {
       return undefined;
     }

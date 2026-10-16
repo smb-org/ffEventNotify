@@ -107,6 +107,12 @@ export interface StoreEventSource {
   firstSeenAt: string;
 }
 
+export interface CachedShortLink {
+  shortUrl: string;
+  finalUrl: string;
+  resolvedAt: string;
+}
+
 export interface CachedItem {
   itemId: string;
   name: string;
@@ -187,6 +193,12 @@ const SCHEMA = `
     name TEXT NOT NULL,
     icon_url TEXT,
     fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS short_links (
+    short_url TEXT PRIMARY KEY,
+    final_url TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   );
 
   CREATE TABLE IF NOT EXISTS seen_entries (
@@ -278,7 +290,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -330,6 +342,19 @@ function migrateV2ToV3(db: Store): void {
     }
     db.exec(SCHEMA);
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (3)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV3ToV4(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -351,8 +376,12 @@ function initializeSchema(db: Store): void {
   } else if (version === 1) {
     migrateV1ToV2(db);
     migrateV2ToV3(db);
+    migrateV3ToV4(db);
   } else if (version === 2) {
     migrateV2ToV3(db);
+    migrateV3ToV4(db);
+  } else if (version === 3) {
+    migrateV3ToV4(db);
   } else {
     db.exec(SCHEMA);
   }
@@ -385,6 +414,28 @@ export function openDb(path: string): Store {
 export function isFirstRun(db: Store): boolean {
   const row = db.prepare("SELECT value FROM meta WHERE key = 'first_run_done'").get() as { value: string } | undefined;
   return row?.value !== '1';
+}
+
+export function getCachedShortLink(db: Store, shortUrl: string): CachedShortLink | undefined {
+  const row = db.prepare(`
+    SELECT short_url AS shortUrl, final_url AS finalUrl, resolved_at AS resolvedAt
+    FROM short_links WHERE short_url = ?
+  `).get(shortUrl) as CachedShortLink | undefined;
+  return row;
+}
+
+export function cacheResolvedShortLink(
+  db: Store,
+  input: { shortUrl: string; finalUrl: string; resolvedAt?: string },
+): boolean {
+  return db.prepare(`
+    INSERT INTO short_links (short_url, final_url, resolved_at)
+    VALUES (?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+    ON CONFLICT(short_url) DO UPDATE SET
+      final_url = excluded.final_url,
+      resolved_at = excluded.resolved_at
+    WHERE short_links.final_url IS NOT excluded.final_url
+  `).run(input.shortUrl, input.finalUrl, input.resolvedAt ?? null).changes > 0;
 }
 
 export function markFirstRunDone(db: Store): void {

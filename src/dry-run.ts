@@ -33,6 +33,43 @@ export interface FetchStatistics {
   failures: number;
   durationMs: number;
   requestTimeMs: number;
+  byType: Record<FetchRequestType, number>;
+}
+
+export type FetchRequestType =
+  | 'lists'
+  | 'feed'
+  | 'topicDetails'
+  | 'maintenanceDetails'
+  | 'shortLinks'
+  | 'specialPages'
+  | 'items'
+  | 'wiki';
+
+function emptyRequestTypes(): Record<FetchRequestType, number> {
+  return {
+    lists: 0,
+    feed: 0,
+    topicDetails: 0,
+    maintenanceDetails: 0,
+    shortLinks: 0,
+    specialPages: 0,
+    items: 0,
+    wiki: 0,
+  };
+}
+
+function requestType(url: string): FetchRequestType {
+  const parsed = new URL(url);
+  if (parsed.hostname.toLocaleLowerCase('en') === 'sqex.to') return 'shortLinks';
+  if (parsed.hostname.toLocaleLowerCase('en') !== 'de.finalfantasyxiv.com') return 'wiki';
+  if (parsed.pathname.startsWith('/lodestone/topics/detail/')) return 'topicDetails';
+  if (parsed.pathname.startsWith('/lodestone/news/detail/')) return 'maintenanceDetails';
+  if (parsed.pathname.startsWith('/lodestone/special/')) return 'specialPages';
+  if (parsed.pathname.startsWith('/lodestone/news/news.xml')) return 'feed';
+  if (parsed.pathname.startsWith('/lodestone/topics/') || parsed.pathname.startsWith('/lodestone/news/category/')) return 'lists';
+  if (parsed.pathname.startsWith('/lodestone/playguide/db/item/')) return 'items';
+  return 'wiki';
 }
 
 export class FetchMetrics {
@@ -43,6 +80,7 @@ export class FetchMetrics {
   private notModifiedCount = 0;
   private failureCount = 0;
   private requestTime = 0;
+  private readonly requestTypes = emptyRequestTypes();
 
   constructor(dumpDir?: string) {
     this.dumpDir = dumpDir;
@@ -52,6 +90,7 @@ export class FetchMetrics {
     const finishedAt = performance.now();
     this.requestCount += 1;
     this.requestTime += durationMs;
+    this.requestTypes[requestType(url)] += 1;
     this.firstRequestAt ??= finishedAt - durationMs;
     this.lastRequestAt = finishedAt;
     if (status === 304) this.notModifiedCount += 1;
@@ -68,6 +107,7 @@ export class FetchMetrics {
         ? 0
         : Math.max(0, this.lastRequestAt - this.firstRequestAt),
       requestTimeMs: this.requestTime,
+      byType: { ...this.requestTypes },
     };
   }
 
@@ -454,6 +494,8 @@ function buildReport(
     '',
     'Abrufstatistik:',
     `- Anfragen: ${statistics.requests}; 304: ${statistics.notModified}; Fehler: ${statistics.failures}`,
+    `- Anfragen nach Typ: Listen ${statistics.byType.lists}; Feed ${statistics.byType.feed}; Topic-Details ${statistics.byType.topicDetails}; Wartungsdetails ${statistics.byType.maintenanceDetails}; Kurzlinks ${statistics.byType.shortLinks}; Sonderseiten ${statistics.byType.specialPages}; Items ${statistics.byType.items}; Wiki ${statistics.byType.wiki}`,
+    `- Duplikate vermieden: ${cycle.duplicatesAvoided}`,
     `- Dauer: ${(statistics.durationMs / 1_000).toFixed(2)} s gesamt; ${(statistics.requestTimeMs / 1_000).toFixed(2)} s kumulierte Anfragezeit`,
   );
   return sections.join('\n');

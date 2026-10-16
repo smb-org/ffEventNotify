@@ -19,7 +19,8 @@ test('v1 schema migrates idempotently, preserving warnings and single-guild Disc
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 3);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+    assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
       'guild_id', 'key', 'content', 'status', 'created_at', 'sent_at',
@@ -68,7 +69,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 3);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');

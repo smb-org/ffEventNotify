@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { openDb, type Store } from '../src/store.ts';
 import {
   articleBodyLinks,
   normalizeLodestoneUrl,
@@ -96,4 +99,55 @@ test('a failed or non-successful short-link resolution is reported as unresolved
 
   assert.deepEqual(rejected, { links: [undefined], unresolvedUrls: ['https://sqex.to/oZP2Y'] });
   assert.deepEqual(notFound, { links: [undefined], unresolvedUrls: ['https://sqex.to/oZP2Y'] });
+});
+
+test('successful short-link resolutions persist and are reused without another request', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-short-links-'));
+  const path = join(directory, 'links.sqlite');
+  let db: Store = openDb(path);
+  let calls = 0;
+  const fetchText = async (url: string) => {
+    calls += 1;
+    return { status: 200, body: '', finalUrl: 'https://de.finalfantasyxiv.com/lodestone/special/fallguys/' };
+  };
+  try {
+    const first = await resolveShortLinks(['http://sqex.to/oZP2Y?utm_source=test'], fetchText, db, '2026-10-16T12:00:00.000Z');
+    db.close();
+    db = openDb(path);
+    const second = await resolveShortLinks(['https://sqex.to/oZP2Y'], fetchText, db, '2026-10-16T13:00:00.000Z');
+
+    assert.deepEqual(first.links, ['https://de.finalfantasyxiv.com/lodestone/special/fallguys/']);
+    assert.deepEqual(second, first);
+    assert.equal(calls, 1);
+    assert.deepEqual({ ...db.prepare('SELECT short_url AS shortUrl, final_url AS finalUrl, resolved_at AS resolvedAt FROM short_links WHERE short_url = ?')
+      .get('https://sqex.to/oZP2Y') as { shortUrl: string; finalUrl: string; resolvedAt: string } }, {
+      shortUrl: 'https://sqex.to/oZP2Y',
+      finalUrl: 'https://de.finalfantasyxiv.com/lodestone/special/fallguys/',
+      resolvedAt: '2026-10-16T12:00:00.000Z',
+    });
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('failed short-link resolutions are not cached and can succeed on a later attempt', async () => {
+  const db = openDb(':memory:');
+  let calls = 0;
+  try {
+    const first = await resolveShortLinks(['https://sqex.to/oZP2Y'], async (url) => {
+      calls += 1;
+      return { status: 503, body: '', finalUrl: url };
+    }, db);
+    const second = await resolveShortLinks(['https://sqex.to/oZP2Y'], async (url) => {
+      calls += 1;
+      return { status: 200, body: '', finalUrl: 'https://de.finalfantasyxiv.com/lodestone/special/fallguys/' };
+    }, db);
+
+    assert.deepEqual(first, { links: [undefined], unresolvedUrls: ['https://sqex.to/oZP2Y'] });
+    assert.deepEqual(second.links, ['https://de.finalfantasyxiv.com/lodestone/special/fallguys/']);
+    assert.equal(calls, 2);
+  } finally {
+    db.close();
+  }
 });

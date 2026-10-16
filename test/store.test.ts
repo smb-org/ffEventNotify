@@ -65,6 +65,7 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'reminders',
       'schema_version',
       'seen_entries',
+      'short_links',
       'warnings_sent',
     ]);
 

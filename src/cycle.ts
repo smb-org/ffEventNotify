@@ -17,6 +17,7 @@ import {
   getGuildEventObject,
   getGuild,
   getPendingWarnings,
+  isFirstRun,
   markGuildFirstRunDone,
   markGuildEventFirstRunSuppressed,
   markGuildNeedsSetup,
@@ -54,12 +55,14 @@ import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { SourceHealthMonitor } from './health.ts';
+import { parseGermanDateTime } from './time.ts';
 import type {
   Classification,
   DiscordPort,
   EventType,
   ExtractResult,
   FetchText,
+  FetchTextResult,
   FieldStatus,
   ListEntry,
   ParsedListEntry,
@@ -88,6 +91,45 @@ export interface CycleResult {
   capturedEvents: number;
   postedEvents: number;
   blind: boolean;
+  requests: number;
+  duplicatesAvoided: number;
+  syncedGuildIds: string[];
+}
+
+interface CycleFetchMemo {
+  fetchText: FetchText;
+  requests(): number;
+  duplicatesAvoided(): number;
+}
+
+function createCycleFetchMemo(fetchText: FetchText): CycleFetchMemo {
+  const responses = new Map<string, Promise<FetchTextResult>>();
+  let requestCount = 0;
+  let duplicateCount = 0;
+  const memoized: FetchText = (url, options) => {
+    let key = url;
+    try {
+      const parsed = new URL(url);
+      parsed.hash = '';
+      key = parsed.toString();
+    } catch {
+      // Keep non-URL keys exact; FetchText normally receives absolute URLs.
+    }
+    const existing = responses.get(key);
+    if (existing) {
+      duplicateCount += 1;
+      return existing;
+    }
+    requestCount += 1;
+    const response = fetchText(url, options);
+    responses.set(key, response);
+    return response;
+  };
+  return {
+    fetchText: memoized,
+    requests: () => requestCount,
+    duplicatesAvoided: () => duplicateCount,
+  };
 }
 
 interface CycleContext extends Omit<CycleOptions, 'health'> {
@@ -537,8 +579,52 @@ function findMaintenanceMatch(context: CycleContext, entry: ListEntry): { eventI
   return { ambiguity: 'missing' };
 }
 
+const maintenanceMonths: Readonly<Record<string, string>> = {
+  jan: 'Januar', januar: 'Januar', feb: 'Februar', februar: 'Februar', mär: 'März', märz: 'März',
+  apr: 'April', april: 'April', mai: 'Mai', jun: 'Juni', juni: 'Juni', jul: 'Juli', juli: 'Juli',
+  aug: 'August', august: 'August', sep: 'September', sept: 'September', september: 'September',
+  okt: 'Oktober', oktober: 'Oktober', nov: 'November', november: 'November', dez: 'Dezember', dezember: 'Dezember',
+};
+
+function staleMaintenanceListEntry(entry: ListEntry, now: Date): boolean {
+  if (entry.source !== 'maintenance' || entry.publishedEpoch === undefined || !Number.isFinite(entry.publishedEpoch)) return false;
+  const bracket = /\((?<firstDay>\d{1,2})\.?\s*(?:-\s*(?<lastDay>\d{1,2})\.?)?\s*(?<month>[\p{L}]+)\.?\)/iu.exec(entry.title);
+  if (!bracket?.groups) return false;
+  const month = maintenanceMonths[bracket.groups.month!.replace(/\.$/, '').toLocaleLowerCase('de-DE')];
+  if (!month) return false;
+  const year = new Date(entry.publishedEpoch * 1_000).getUTCFullYear();
+  const day = bracket.groups.lastDay ?? bracket.groups.firstDay!;
+  const end = parseGermanDateTime(`${day}. ${month} ${year}`, '23:59');
+  if (end.status !== 'ok') return false;
+  return Date.parse(end.utc) < now.getTime() - 2 * 24 * 60 * 60 * 1_000;
+}
+
+function hasOpenMaintenanceMatch(context: CycleContext, entry: ListEntry): boolean {
+  const sourceEventId = findEventBySourceUrl(context.store, normalizeLodestoneUrl(entry.url));
+  const openEvents = getOpenEvents(context.store, context.currentTime).filter((event) => event.eventType === 'maintenance');
+  const openIds = new Set(openEvents.map((event) => event.id));
+  if (sourceEventId !== undefined && openIds.has(sourceEventId)) return true;
+  const stem = maintenanceStem(entry.title);
+  const target = maintenanceTarget(entry.title) ?? 'unknown';
+  const matchingOpen = openEvents.some((event) => {
+    if (maintenanceStem(event.title) !== stem) return false;
+    const eventTarget = /^maintenance:([^:]+):/.exec(event.eventKey)?.[1]
+      ?? maintenanceTarget(event.title)
+      ?? 'unknown';
+    return eventTarget === target;
+  });
+  if (matchingOpen) return true;
+  const sameCycleOriginal = context.processedMaintenanceOriginals.get(`${target}\u0000${stem}`);
+  return sameCycleOriginal !== undefined && openIds.has(sameCycleOriginal);
+}
+
 async function explicitMaintenanceTarget(context: CycleContext, html: string): Promise<number | undefined> {
-  const resolution = await resolveShortLinks([...articleBodyLinks(html), ...articleRelatedLinks(html)], context.fetchText);
+  const resolution = await resolveShortLinks(
+    [...articleBodyLinks(html), ...articleRelatedLinks(html)],
+    context.fetchText,
+    context.store,
+    context.currentTime.toISOString(),
+  );
   const targets = new Set<number>();
   for (const link of resolution.links) {
     if (link === undefined) continue;
@@ -560,6 +646,11 @@ async function processMaintenance(
   await classifyAndLog(context, entry, classification);
   context.processedSources.add(entry.url);
   if (classification.status !== 'classified') {
+    finishPendingDiscovery(context, sourceUrl);
+    return undefined;
+  }
+
+  if (staleMaintenanceListEntry(entry, context.currentTime) && !hasOpenMaintenanceMatch(context, entry)) {
     finishPendingDiscovery(context, sourceUrl);
     return undefined;
   }
@@ -637,7 +728,12 @@ async function processTopic(
   }
 
   const articleLinks = articleBodyLinks(detailHtml);
-  const linkResolution = await resolveShortLinks(articleLinks, context.fetchText);
+  const linkResolution = await resolveShortLinks(
+    articleLinks,
+    context.fetchText,
+    context.store,
+    context.currentTime.toISOString(),
+  );
   const specialUrls = [...new Set(linkResolution.links
     .filter((link): link is string => link !== undefined)
     .map(normalizeLodestoneUrl)
@@ -1031,6 +1127,8 @@ async function syncGuildStatus(context: CycleContext, guild: CycleGuild, blind: 
 export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const clock = options.now ?? (() => new Date());
   const currentTime = clock();
+  const globalFirstRun = isFirstRun(options.store);
+  const cycleFetchMemo = createCycleFetchMemo(options.fetchText);
   const configured: CycleGuild[] = options.guilds ?? getConfiguredGuilds(options.store).map((guild: StoredGuild) => ({
     guildId: guild.guildId,
     eventChannelId: guild.eventChannelId!,
@@ -1072,9 +1170,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     });
     if (validatedGuild) guilds.push(validatedGuild);
   }
-  const firstRun = guilds.some((guild) => guild.firstRun);
+  const firstRun = globalFirstRun || guilds.some((guild) => guild.firstRun);
   const context: CycleContext = {
     ...options,
+    fetchText: cycleFetchMemo.fetchText,
     guilds,
     health: options.health ?? new SourceHealthMonitor(options.store),
     clock,
@@ -1090,9 +1189,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     pendingDiscoveries: loadPendingDiscoveries(options.store),
   };
   await drainPendingWarnings(context);
-  if (guilds.length === 0) return { firstRun, capturedEvents: 0, postedEvents: 0, blind: false };
 
-  const lists = await readLists(context, firstRun);
+  const lists = await readLists(context, globalFirstRun);
   const health = context.health.recordCycleHealth(lists.counts, lists.succeeded, currentTime);
   await logHealthTransition(context);
 
@@ -1114,11 +1212,13 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   }
 
   let postedEvents = 0;
+  const syncedGuildIds: string[] = [];
   for (const guild of guilds) {
     await withGuildDiscordLock(guild.guildId, async () => {
       const currentGuild = getGuild(options.store, guild.guildId);
       if (!currentGuild || currentGuild.needsSetup || currentGuild.eventChannelId !== guild.eventChannelId
         || currentGuild.logChannelId !== guild.logChannelId) return;
+      syncedGuildIds.push(guild.guildId);
       const lockedGuild = { ...guild, firstRun: !currentGuild.firstRunDone };
       if (lockedGuild.firstRun) {
         for (const event of getAllEvents(options.store)) {
@@ -1143,13 +1243,20 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     });
   }
 
-  // Explicit guild overrides are used by dry-run and compatibility callers without guild rows.
-  if (!options.skipGlobalFirstRunMark && options.guilds && guilds.some((guild) => guild.firstRun) && lists.succeeded && !health.isBlind) {
+  if (!options.skipGlobalFirstRunMark && globalFirstRun && lists.succeeded && !health.isBlind) {
     markFirstRunDone(options.store);
   }
 
   await runWikiCrossCheck(context);
-  return { firstRun, capturedEvents: context.capturedEventIds.size, postedEvents, blind: health.isBlind };
+  return {
+    firstRun,
+    capturedEvents: context.capturedEventIds.size,
+    postedEvents,
+    blind: health.isBlind,
+    requests: cycleFetchMemo.requests(),
+    duplicatesAvoided: cycleFetchMemo.duplicatesAvoided(),
+    syncedGuildIds,
+  };
 }
 
 async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId: string): Promise<void> {

@@ -2,6 +2,7 @@
 
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { performance } from 'node:perf_hooks';
 import {
   Client,
   ChannelType,
@@ -26,7 +27,7 @@ import {
 import { readConfig } from './config.ts';
 import { createTrackedFetch, FetchMetrics, runDryRunCycle } from './dry-run.ts';
 import { SourceHealthMonitor } from './health.ts';
-import { runCycle } from './cycle.ts';
+import { runCycle, type CycleResult } from './cycle.ts';
 import { runGuildSyncFromStoredData } from './cycle.ts';
 import { openDb } from './store.ts';
 import { LodestoneRequestQueue } from './sources/queue.ts';
@@ -39,7 +40,9 @@ import {
   getGuild,
   getStoredGuildIds,
   markGuildNeedsSetup,
+  isFirstRun,
   upsertGuildSetup,
+  type Store,
 } from './store.ts';
 import { syncEventReminders } from './sync/reminders.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
@@ -412,13 +415,27 @@ export async function startHourlyScheduler(
   await activeCycle;
 }
 
-export function createCoalescedCycleRunner(cycleBody: CycleBody): CycleBody {
-  let active: Promise<void> | undefined;
+export function createCoalescedCycleRunner<T>(cycleBody: () => Promise<T>): () => Promise<T> {
+  let active: Promise<T> | undefined;
   return () => {
     if (active) return active;
     const run = cycleBody().finally(() => { active = undefined; });
     active = run;
     return run;
+  };
+}
+
+export function createSetupSyncRunner(
+  store: Store,
+  runSharedCycle: () => Promise<CycleResult | undefined>,
+  runGuildSync: (guildId: string) => Promise<void>,
+): (guildId: string) => Promise<void> {
+  return async (guildId) => {
+    if (isFirstRun(store)) {
+      const result = await runSharedCycle();
+      if (result?.syncedGuildIds.includes(guildId)) return;
+    }
+    await runGuildSync(guildId);
   };
 }
 
@@ -545,6 +562,7 @@ export async function startBot(): Promise<void> {
     await client.login(config.discordToken);
     await ready;
     reconcileStoredGuilds(store, new Set(client.guilds.cache.keys()));
+    console.log(`Verbunden als ${client.user?.tag ?? 'unbekannt'}, ${getConfiguredGuilds(store).length} Server eingerichtet`);
     const application = client.application;
     if (!application) throw new Error('Discord application is unavailable after login.');
     await registerGlobalFfEventsCommand(application.commands);
@@ -555,11 +573,20 @@ export async function startBot(): Promise<void> {
         fetchText,
         health,
       };
-    const runSerializedCycle = createCoalescedCycleRunner(() =>
-      runCycle(cycleOptions).then(() => undefined).catch((error: unknown) => {
+    const runSerializedCycle = createCoalescedCycleRunner(async () => {
+      const startedAt = performance.now();
+      console.log('Zyklus gestartet');
+      try {
+        const result = await runCycle(cycleOptions);
+        console.log(`Zyklus fertig: ${result.capturedEvents} neue Events, ${result.postedEvents} Posts, ${result.requests} Anfragen in ${Math.round((performance.now() - startedAt) / 1_000)} s`);
+        return result;
+      } catch (error) {
         console.error('Der Stundenzyklus ist fehlgeschlagen.', error);
-      }));
+        return undefined;
+      }
+    });
     const runGuildSync = (guildId: string): Promise<void> => runGuildSyncFromStoredData(cycleOptions, guildId);
+    const runSetupSync = createSetupSyncRunner(store, runSerializedCycle, runGuildSync);
     const runReminderPass = createCoalescedCycleRunner(async (): Promise<void> => {
       for (const guild of getConfiguredGuilds(store)) {
         try {
@@ -584,7 +611,7 @@ export async function startBot(): Promise<void> {
 
     client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
-        void handleFfEventsSetup(interaction, store, runGuildSync).catch((error: unknown) => {
+        void handleFfEventsSetup(interaction, store, runSetupSync).catch((error: unknown) => {
           console.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
         });
       } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
@@ -602,7 +629,7 @@ export async function startBot(): Promise<void> {
       });
     });
 
-    await startHourlyScheduler(runSerializedCycle, {
+    await startHourlyScheduler(async () => { await runSerializedCycle(); }, {
       signal: controller.signal,
       onCycleError: (error) => console.error('Der Stundenzyklus ist fehlgeschlagen.', error),
     });
@@ -624,6 +651,7 @@ export async function handleFfEventsSetup(
     await interaction.reply({ content: 'Dieser Befehl funktioniert nur auf einem Server.', flags: MessageFlags.Ephemeral });
     return;
   }
+  const guildName = interaction.guild.name;
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: 'Dafür brauchst du die Berechtigung „Server verwalten“.', flags: MessageFlags.Ephemeral });
     return;
@@ -666,6 +694,7 @@ export async function handleFfEventsSetup(
         logChannelId: logChannel.id,
       });
       await runGuildSync(interaction.guildId);
+      console.log(`Server ${guildName} eingerichtet`);
     });
   } catch (error) {
     console.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);

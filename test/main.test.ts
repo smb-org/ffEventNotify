@@ -381,11 +381,14 @@ test('setup defers before fetching the bot member and completes with editReply',
     PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages,
   ]);
   const guildId = '123456789012345678';
+  const loggedMessages: string[] = [];
+  const originalLog = console.log;
+  console.log = (...values: unknown[]) => { loggedMessages.push(values.map(String).join(' ')); };
   const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
   const logChannel = { id: '423456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
   const interaction = {
     guildId,
-    guild: { members: { fetchMe: async () => { order.push('fetch'); return { permissions: new PermissionsBitField([PermissionFlagsBits.CreateEvents]) }; } } },
+    guild: { name: 'Testserver', members: { fetchMe: async () => { order.push('fetch'); return { permissions: new PermissionsBitField([PermissionFlagsBits.CreateEvents]) }; } } },
     memberPermissions: new PermissionsBitField([PermissionFlagsBits.ManageGuild]),
     inGuild: () => true,
     options: { getSubcommand: () => 'setup', getChannel: (name: string) => name === 'event-kanal' ? eventChannel : logChannel },
@@ -395,7 +398,9 @@ test('setup defers before fetching the bot member and completes with editReply',
   try {
     await handleFfEventsSetup(interaction as never, db, async (selectedGuildId) => { order.push(`sync:${selectedGuildId}`); });
     assert.deepEqual(order, ['defer', 'fetch', `sync:${guildId}`, 'edit']);
+    assert.deepEqual(loggedMessages, ['Server Testserver eingerichtet']);
   } finally {
+    console.log = originalLog;
     db.close();
   }
 });

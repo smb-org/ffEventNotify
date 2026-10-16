@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { load } from 'cheerio';
 import test from 'node:test';
+import { createCoalescedCycleRunner, createSetupSyncRunner } from '../src/main.ts';
 import { SourceHealthMonitor } from '../src/health.ts';
 import { applyField, attachSource, createEvent, deleteGuild, getAllEvents, getEventSources, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
@@ -421,15 +422,199 @@ test('ignored banner log uses the page title instead of an empty title', async (
   }
 });
 
+test('first shared crawl runs and stores events with no configured guilds', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const calls: string[] = [];
+  const baseFetch = fixtureFetcher();
+  const fetchText: FetchText = async (url, options) => {
+    calls.push(url);
+    return baseFetch(url, options);
+  };
+  try {
+    const result = await runCycle({ store: db, discord, fetchText, guilds: [], now: () => new Date(NOW) });
+
+    assert.equal(result.firstRun, true);
+    assert.ok(calls.some((url) => new URL(url).pathname === '/lodestone/topics/' && new URL(url).searchParams.get('page') === '3'));
+    assert.ok(calls.some((url) => new URL(url).pathname === '/lodestone/news/category/2' && new URL(url).searchParams.get('page') === '3'));
+    assert.ok(getAllEvents(db).some((event) => event.title.includes('Allerschutzheiligen')));
+    assert.equal(result.postedEvents, 0);
+    assert.equal(discord.createMessageCount, 0);
+    assert.equal(isFirstRun(db), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('setup before the first shared crawl finishes awaits the coalesced crawl and posts once', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const baseFetch = fixtureFetcher();
+  let enteredFirstList!: () => void;
+  let releaseFirstList!: () => void;
+  const firstListEntered = new Promise<void>((resolve) => { enteredFirstList = resolve; });
+  const firstListGate = new Promise<void>((resolve) => { releaseFirstList = resolve; });
+  let paused = false;
+  let globalCycleRuns = 0;
+  const fetchCalls: string[] = [];
+  const fetchText: FetchText = async (url, options) => {
+    fetchCalls.push(url);
+    if (!paused && options.priority === 'list') {
+      paused = true;
+      enteredFirstList();
+      await firstListGate;
+    }
+    return baseFetch(url, options);
+  };
+  try {
+    const { createSetupSyncRunner } = await import('../src/main.ts');
+    assert.equal(typeof createSetupSyncRunner, 'function');
+    const runGlobalCycle = createCoalescedCycleRunner(async () => {
+      globalCycleRuns += 1;
+      return runCycle({ store: db, discord, fetchText, guilds: [], now: () => new Date(NOW) });
+    });
+    const activeCycle = runGlobalCycle();
+    await firstListEntered;
+
+    upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+    const runSetupSync = createSetupSyncRunner(db, runGlobalCycle, (guildId) =>
+      runGuildSyncFromStoredData({ store: db, discord, fetchText, now: () => new Date(NOW) }, guildId));
+    const setupSync = runSetupSync('guild');
+    releaseFirstList();
+    await Promise.all([activeCycle, setupSync]);
+
+    assert.equal(globalCycleRuns, 1);
+    assert.equal(fetchCalls.filter((url) => new URL(url).pathname === '/lodestone/topics/' && new URL(url).searchParams.get('page') === null).length, 1);
+    assert.equal(eventEmbeds(discord).length, 3);
+    assert.equal(discord.createMessageCount, 4, 'three event cards and one live-status post are created once');
+    assert.equal(discord.createScheduledCount, 3);
+  } finally {
+    db.close();
+  }
+});
+
+test('setup before any shared crawl starts it and avoids a second guild sync', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  let globalCycleRuns = 0;
+  let storedGuildSyncs = 0;
+  upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+  const runGlobalCycle = createCoalescedCycleRunner(async () => {
+    globalCycleRuns += 1;
+    return runCycle({ store: db, discord, fetchText: fixtureFetcher(), now: () => new Date(NOW) });
+  });
+  const runSetupSync = createSetupSyncRunner(db, runGlobalCycle, async () => { storedGuildSyncs += 1; });
+  try {
+    await runSetupSync('guild');
+
+    assert.equal(globalCycleRuns, 1);
+    assert.equal(storedGuildSyncs, 0, 'the coalesced cycle already synchronized the new guild');
+    assert.equal(eventEmbeds(discord).length, 3);
+    assert.equal(discord.createMessageCount, 4);
+    assert.equal(discord.createScheduledCount, 3);
+  } finally {
+    db.close();
+  }
+});
+
+test('stale maintenance entries are classified and seen without fetching their detail page', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const url = 'https://de.finalfantasyxiv.com/lodestone/news/detail/stale-june-maintenance';
+  let detailRequests = 0;
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', '2026-06-03');
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Nicht klassifizierbare Nachricht', url: '/lodestone/topics/detail/stale-maintenance-health' }]),
+    maintenanceList: maintenanceListHtml([{
+      tag: 'Wartung', title: 'Wartung aller Welten (2. Jun.)', url,
+      publishedEpoch: Math.floor(Date.parse('2025-06-01T12:00:00.000Z') / 1_000),
+    }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (requestedUrl) => {
+      if (new URL(requestedUrl).pathname === '/lodestone/topics/detail/stale-maintenance-health') {
+        return { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: requestedUrl };
+      }
+      if (new URL(requestedUrl).pathname !== new URL(url).pathname) return undefined;
+      detailRequests += 1;
+      return { status: 200, body: '<html></html>', finalUrl: requestedUrl };
+    },
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText, now: () => new Date('2026-06-03T12:00:00.000Z') });
+
+    assert.equal(detailRequests, 0);
+    assert.equal(isSeen(db, url), true);
+    assert.equal(getAllEvents(db).filter((event) => event.eventType === 'maintenance').length, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('a stale maintenance entry is still fetched when it matches an open maintenance event', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const url = 'https://de.finalfantasyxiv.com/lodestone/news/detail/open-june-maintenance';
+  const eventId = createEvent(db, {
+    eventKey: 'maintenance:all-worlds:Wartung aller Welten (2. Jun.)',
+    eventType: 'maintenance',
+    title: 'Wartung aller Welten (2. Jun.)',
+  });
+  attachSource(db, { eventId, url, kind: 'maintenance' });
+  applyField(db, eventId, 'end', { status: 'ok', value: '2026-06-06T09:00:00Z' }, url);
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', '2026-06-05');
+  let detailRequests = 0;
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Nicht klassifizierbare Nachricht', url: '/lodestone/topics/detail/open-maintenance-health' }]),
+    maintenanceList: maintenanceListHtml([{
+      tag: 'Wartung', title: 'Wartung aller Welten (2. Jun.)', url,
+      publishedEpoch: Math.floor(Date.parse('2026-06-02T12:00:00.000Z') / 1_000),
+    }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (requestedUrl) => {
+      if (new URL(requestedUrl).pathname === '/lodestone/topics/detail/open-maintenance-health') {
+        return { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: requestedUrl };
+      }
+      if (new URL(requestedUrl).pathname !== new URL(url).pathname) return undefined;
+      detailRequests += 1;
+      return {
+        status: 200,
+        body: '<article class="news__detail"><header class="news__header"><h1>Wartung aller Welten</h1></header><div class="news__detail__wrapper">[Datum &amp; Uhrzeit] Von Dienstag, den 2. Juni 2026 um 10:00 Uhr bis Dienstag, den 2. Juni 2026 um 11:00 Uhr</div></article>',
+        finalUrl: requestedUrl,
+      };
+    },
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText, now: () => new Date('2026-06-05T12:00:00.000Z') });
+    assert.equal(detailRequests, 1);
+    assert.equal(getAllEvents(db).find((event) => event.id === eventId)?.endUtc, '2026-06-06T09:00:00Z');
+  } finally {
+    db.close();
+  }
+});
+
 test('first-run replay of live list fixtures posts only All Saints, Fall Guys, and Mog Mog and logs the summary', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
+  const fetchCalls: string[] = [];
+  const baseFetch = fixtureFetcher();
+  const fetchText: FetchText = async (url, options) => {
+    fetchCalls.push(url);
+    return baseFetch(url, options);
+  };
   try {
-    const result = await runCycle(cycleOptions(db, discord));
+    const result = await runCycle({ ...cycleOptions(db, discord), fetchText });
     const posted = eventEmbeds(discord);
     const status = discord.messages.find((message) => message.embeds.some((embed) => embed.title === 'Läuft gerade'));
 
     assert.equal(result.firstRun, true);
+    assert.ok(fetchCalls.length <= 160, `expected at most 160 first-run requests, got ${fetchCalls.length}`);
+    assert.equal(fetchCalls.length, result.requests);
+    assert.equal(new Set(fetchCalls).size, fetchCalls.length, 'each fixture URL is fetched at most once in a cycle');
+    assert.ok(result.duplicatesAvoided > 0);
+    assert.equal(fetchCalls.filter((url) => new URL(url).pathname.startsWith('/lodestone/news/detail/')).length, 0,
+      'past maintenance entries from the three-page fixture replay need no detail requests');
     assert.equal(posted.length, 3);
     const postedTitles = getAllEvents(db)
       .filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId !== null && getGuildEventObject(db, 'guild', event.eventKey)?.messageId !== undefined)
@@ -446,7 +631,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Mog Mog-Kollektion/);
     assert.deepEqual(discord.logs, [
       'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404.',
-      'Erststart: 21 erfasst, 3 gepostet, 14 unklassifiziert, 37 ignoriert',
+      'Erststart: 8 erfasst, 3 gepostet, 14 unklassifiziert, 37 ignoriert',
     ]);
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 3);
 
@@ -576,6 +761,14 @@ test('dry-run reports fixture events and records Discord effects without contact
     assert.match(result.report, /beim Erststart unterdrückt|Event beendet/);
     assert.match(result.report, /Log-Kanal-Meldungen/);
     assert.match(result.report, /Abrufstatistik/);
+    assert.match(result.report, /Anfragen nach Typ/);
+    assert.match(result.report, /Duplikate vermieden: \d+/);
+    assert.ok(result.fetchStatistics.byType);
+    assert.equal(result.fetchStatistics.requests, Object.values(result.fetchStatistics.byType).reduce((sum, count) => sum + count, 0));
+    assert.equal(result.fetchStatistics.requests, result.cycle.requests);
+    assert.ok(result.fetchStatistics.byType.shortLinks > 0);
+    assert.ok(result.fetchStatistics.byType.specialPages > 0);
+    assert.ok(result.fetchStatistics.byType.items > 0);
     assert.match(result.report, /Lodestone blind/);
     assert.match(result.report, /Würde als Event-Beitrag veröffentlicht \(3\)/);
     const logCount = Number(/Log-Kanal-Meldungen, die gesendet würden \((\d+)\)/.exec(result.report)?.[1]);
