@@ -5,8 +5,10 @@ import {
   getChecklistReminderRecipients,
   getEventSources,
   getGuild,
+  getGuildEventObject,
   markReminderDeliveriesAttempted,
   markReminderDeliveriesSent,
+  setGuildDiscordIds,
   type ReminderDeliveryKey,
   type Store,
   type StoreEvent,
@@ -58,9 +60,42 @@ const MAX_MESSAGE_LENGTH = 2_000;
 const REMINDER_RECOVERY_LIMIT = 200;
 const REMINDER_RECOVERY_CHANNEL_SCAN_LIMIT = 2_000;
 const REMINDER_MARKER_PLACEHOLDER = `ffe-r-${'0'.repeat(32)}`;
+const REMINDER_THREAD_AUTO_ARCHIVE_DURATION = 10_080;
 
 function reminderLeadLabel(leadHours: 24 | 72): string {
   return leadHours === 72 ? 'Noch 3 Tage' : 'Noch 1 Tag';
+}
+
+function reminderThreadName(event: StoreEvent): string {
+  const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+  return Array.from(`Erinnerungen: ${title}`.replace(/\s+/g, ' ').trim()).slice(0, 100).join('');
+}
+
+async function ensureReminderThread(
+  event: StoreEvent,
+  guildId: string,
+  channelId: string,
+  store: Store,
+  discord: DiscordPort,
+): Promise<string | undefined> {
+  const card = getGuildEventObject(store, guildId, event.eventKey);
+  if (!card?.messageId || card.messageChannelId !== channelId) return undefined;
+  let thread = await discord.fetchThread(channelId, card.reminderThreadId, card.messageId);
+  if (thread && thread.starterMessageId !== card.messageId) {
+    thread = await discord.fetchThread(channelId, null, card.messageId);
+  }
+  if (!thread) {
+    thread = await discord.startThreadOnMessage(
+      channelId,
+      card.messageId,
+      reminderThreadName(event),
+      REMINDER_THREAD_AUTO_ARCHIVE_DURATION,
+    );
+  }
+  if (thread.id !== card.reminderThreadId) {
+    setGuildDiscordIds(store, guildId, event.eventKey, { reminderThreadId: thread.id });
+  }
+  return thread.id;
 }
 
 function recipientsForEvent(
@@ -160,8 +195,16 @@ async function syncEventRemindersUnlocked({
       const firstAttemptBoundary = requiresChannelStart ? undefined : unsentStates
         .map((state) => state.firstAttemptAt!)
         .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+      let threadId: string | undefined;
+      try {
+        threadId = await ensureReminderThread(event, guildId, channelId, store, discord);
+      } catch (error) {
+        console.warn(`Der Erinnerungs-Thread für „${displayTitle}“ konnte nicht abgerufen werden.`, error);
+        continue;
+      }
+      if (!threadId) continue;
       const recentMessages = await discord.fetchRecentBotMessages(
-        channelId,
+        threadId,
         requiresChannelStart ? REMINDER_RECOVERY_CHANNEL_SCAN_LIMIT : REMINDER_RECOVERY_LIMIT,
         requiresChannelStart ? { requireChannelStart: true } : { olderThan: firstAttemptBoundary },
       );
@@ -184,7 +227,7 @@ async function syncEventRemindersUnlocked({
         const content = message.content.replace(REMINDER_MARKER_PLACEHOLDER, marker);
         markReminderDeliveriesAttempted(store, delivery, message.userIds, now.toISOString());
         try {
-          await discord.createMessage(channelId, {
+          await discord.sendToThread(threadId, {
             content,
             allowedMentions: { parse: [], users: message.userIds },
             suppressEmbeds: true,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ButtonStyle, ChannelType, Client, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel } from 'discord.js';
+import { ButtonStyle, ChannelType, Client, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
 import test from 'node:test';
 import { readConfig } from '../src/config.ts';
 import { CYCLE_INTERVAL_MS, createCoalescedCycleRunner, createDiscordClient, DiscordJsPort, handleChannelDelete, handleFfEventsSetup, parseCliArgs, reconcileStoredGuilds, REMINDER_INTERVAL_MS, startHourlyScheduler, startReminderScheduler } from '../src/main.ts';
@@ -166,6 +166,91 @@ function rawMessage(guildId: string, channelId: string, id: string, content: str
     components: [{ type: 1, components: [{ type: 2, style: ButtonStyle.Primary, label: 'Meine Checkliste', custom_id: 'ffe:cl:0123456789abcdef0123456789abcdef' }] }],
   };
 }
+
+function rawThread(guildId: string, parentId: string, id: string, starterMessageId: string, archived = false) {
+  return {
+    id, type: ChannelType.PublicThread, guild_id: guildId, parent_id: parentId, name: 'Erinnerungen: Test',
+    last_message_id: null, rate_limit_per_user: 0,
+    thread_metadata: {
+      archived, auto_archive_duration: 10080, archive_timestamp: new Date('2026-10-16T12:00:00.000Z').toISOString(),
+      locked: false, create_timestamp: new Date('2026-10-16T12:00:00.000Z').toISOString(),
+    },
+    member: { id, user_id: '523456789012345678', join_timestamp: new Date('2026-10-16T12:00:00.000Z').toISOString(), flags: 0 },
+    message: { id: starterMessageId },
+  };
+}
+
+test('DiscordJsPort starts, fetches, and sends to a public thread with real discord.js objects', async () => {
+  const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
+  const guildId = '123456789012345678';
+  const channelId = '323456789012345678';
+  const cardId = '423456789012345678';
+  const threadId = cardId;
+  const guild = Reflect.construct(Guild as unknown as Function, [client, rawGuild(guildId)]) as Guild;
+  const channel = Reflect.construct(TextChannel as unknown as Function, [guild, rawTextChannel(guildId, channelId), client]) as TextChannel;
+  const card = Reflect.construct(Message as unknown as Function, [client, rawMessage(guildId, channelId, cardId, 'card')],) as Message;
+  client.guilds.cache.set(guild.id, guild as never);
+  guild.channels.cache.set(channel.id, channel as never);
+  client.channels.cache.set(channel.id, channel as never);
+  let serverThreadArchived = false;
+  let unarchivedByMessage = false;
+  client.rest.get = async (route) => {
+    if (String(route).includes(`/messages/${cardId}`)) return rawMessage(guildId, channelId, cardId, 'card');
+    if (String(route).includes(`/channels/${threadId}`)) return rawThread(guildId, channelId, threadId, cardId, serverThreadArchived);
+    throw new Error(`Unexpected GET ${String(route)}`);
+  };
+  let threadCreateBody: unknown;
+  let messageBody: unknown;
+  client.rest.post = async (route, options) => {
+    if (String(route).includes(`/messages/${cardId}/threads`)) {
+      threadCreateBody = options?.body;
+      return rawThread(guildId, channelId, threadId, cardId);
+    }
+    if (String(route).includes(`/channels/${threadId}/messages`)) {
+      messageBody = options?.body;
+      unarchivedByMessage = serverThreadArchived;
+      serverThreadArchived = false;
+      return rawMessage(guildId, threadId, '623456789012345678', 'reminder');
+    }
+    throw new Error(`Unexpected POST ${String(route)}`);
+  };
+  const rawPort = new DiscordJsPort(client) as unknown as {
+    startThreadOnMessage(parentId: string, starterId: string, name: string, autoArchiveDuration: number): Promise<{ id: string; archived: boolean; starterMessageId: string | null }>;
+    fetchThread(parentId: string, threadId: string | null, starterMessageId: string | null): Promise<{ id: string; archived: boolean; starterMessageId: string | null } | null>;
+    sendToThread(threadId: string, payload: { content: string; allowedMentions: { parse: []; users: string[] }; suppressEmbeds: boolean }): Promise<{ id: string; channelId: string }>;
+  };
+  try {
+    const created = await rawPort.startThreadOnMessage(channelId, card.id, 'Erinnerungen: Test', 10080);
+    assert.equal(created.id, threadId);
+    assert.deepEqual(threadCreateBody, {
+      name: 'Erinnerungen: Test', auto_archive_duration: 10080, type: ChannelType.PublicThread,
+      invitable: undefined, rate_limit_per_user: undefined,
+    });
+
+    serverThreadArchived = true;
+    const thread = Reflect.construct(ThreadChannel as unknown as Function, [guild, rawThread(guildId, channelId, threadId, cardId, true), client]) as ThreadChannel;
+    client.channels.cache.set(thread.id, thread as never);
+    channel.threads.cache.set(thread.id, thread as never);
+    const recovered = await rawPort.fetchThread(channelId, null, cardId);
+    assert.equal(recovered?.id, threadId);
+    assert.equal(recovered?.starterMessageId, cardId);
+    assert.equal(recovered?.archived, true);
+
+    const sent = await rawPort.sendToThread(threadId, {
+      content: '<@523456789012345678> #ffe-r-marker',
+      allowedMentions: { parse: [], users: ['523456789012345678'] },
+      suppressEmbeds: true,
+    });
+    assert.equal(sent.channelId, threadId);
+    const body = messageBody as { content: string; allowed_mentions: { parse: string[]; users: string[] }; flags: number };
+    assert.equal(body.content, '<@523456789012345678> #ffe-r-marker');
+    assert.deepEqual(body.allowed_mentions, { parse: [], users: ['523456789012345678'] });
+    assert.equal(body.flags, MessageFlags.SuppressEmbeds);
+    assert.equal(unarchivedByMessage, true, 'sending to an archived thread activates it');
+  } finally {
+    client.destroy();
+  }
+});
 
 test('DiscordJsPort forces stored-message REST reads and snapshots raw component payloads', async () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -399,6 +484,7 @@ test('setup defers before fetching the bot member and completes with editReply',
   const channelPermissions = new PermissionsBitField([
     PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
     PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendMessagesInThreads,
   ]);
   const guildId = '123456789012345678';
   const loggedMessages: string[] = [];
@@ -438,6 +524,7 @@ test('setup reports a bot-member fetch failure after acknowledging the interacti
   const channelPermissions = new PermissionsBitField([
     PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
     PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendMessagesInThreads,
   ]);
   const guildId = '123456789012345678';
   const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
@@ -465,6 +552,34 @@ test('setup reports a bot-member fetch failure after acknowledging the interacti
     assert.match(String(loggedErrors[0]?.[1]), /raw Discord failure/);
   } finally {
     console.error = originalError;
+    db.close();
+  }
+});
+
+test('setup reply lists missing public-thread permissions in German', async () => {
+  const db = openDb(':memory:');
+  const basePermissions = new PermissionsBitField([
+    PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages,
+  ]);
+  const eventChannel = { id: '323456789012345678', guildId: '123456789012345678', type: ChannelType.GuildText, permissionsFor: () => basePermissions };
+  const logChannel = { id: '423456789012345678', guildId: '123456789012345678', type: ChannelType.GuildText, permissionsFor: () => basePermissions };
+  let reply = '';
+  const interaction = {
+    guildId: '123456789012345678',
+    guild: { name: 'Testserver', members: { fetchMe: async () => ({ permissions: new PermissionsBitField([PermissionFlagsBits.CreateEvents]) }) } },
+    memberPermissions: new PermissionsBitField([PermissionFlagsBits.ManageGuild]),
+    inGuild: () => true,
+    options: { getSubcommand: () => 'setup', getChannel: (name: string) => name === 'event-kanal' ? eventChannel : logChannel },
+    deferReply: async () => {},
+    editReply: async (payload: { content: string }) => { reply = payload.content; },
+  };
+  try {
+    await handleFfEventsSetup(interaction as never, db, async () => assert.fail('sync must not run with missing thread permissions'));
+    assert.match(reply, /Mir fehlen noch diese Berechtigungen:/);
+    assert.match(reply, /Event-Kanal: Öffentliche Threads erstellen/);
+    assert.match(reply, /Event-Kanal: Nachrichten in Threads senden/);
+  } finally {
     db.close();
   }
 });

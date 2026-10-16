@@ -22,6 +22,8 @@ Benötigte Bot-Rechte:
 - Links einbetten
 - Nachrichtenverlauf lesen
 - Nachrichten anheften oder Nachrichten verwalten (für den angehefteten Statusbeitrag)
+- Öffentliche Threads erstellen (für Erinnerungs-Threads an Event-Karten)
+- Nachrichten in Threads senden (für Erinnerungen)
 - Events erstellen. Diese Berechtigung deckt auch Änderungen an eigenen Events ab; eine zusätzliche Berechtigung „Events verwalten“ ist dafür nicht erforderlich.
 
 Gateway-Intent: **Guilds** (keine weiteren Intents).

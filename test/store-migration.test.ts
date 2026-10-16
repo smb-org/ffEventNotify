@@ -19,7 +19,7 @@ test('v1 schema migrates idempotently, preserving warnings and single-guild Disc
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
     assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
@@ -69,12 +69,41 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 4);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');
     assert.deepEqual((db.prepare('PRAGMA table_info(reminder_deliveries)').all() as Array<{ name: string }>)
       .map(({ name }) => name), ['guild_id', 'event_key', 'lead_hours', 'user_id', 'status', 'first_attempt_at', 'sent_at']);
+  } finally {
+    db?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('v4 schema migration adds a nullable reminder thread id without changing guild event keys', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-v4-migration-'));
+  const path = join(directory, 'v4.sqlite');
+  let db: ReturnType<typeof openDb> | undefined;
+  try {
+    const seeded = new DatabaseSync(path);
+    seeded.exec(`
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version (version) VALUES (4);
+      CREATE TABLE guild_event_objects (
+        guild_id TEXT NOT NULL, event_key TEXT NOT NULL, message_id TEXT, message_channel_id TEXT,
+        scheduled_event_id TEXT, first_post_attempt_at TEXT, status TEXT NOT NULL DEFAULT 'pending',
+        last_error TEXT, first_run_suppressed INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO guild_event_objects (guild_id, event_key, message_id) VALUES ('guild', 'event', 'card');
+    `);
+    seeded.close();
+
+    db = openDb(path);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
+    assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'reminder_thread_id'));
+    assert.equal((db.prepare('SELECT message_id AS messageId, reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { messageId: string; reminderThreadId: string | null }).messageId, 'card');
+    assert.equal((db.prepare('SELECT reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { reminderThreadId: string | null }).reminderThreadId, null);
   } finally {
     db?.close();
     rmSync(directory, { recursive: true, force: true });

@@ -14,6 +14,7 @@ import type {
   DiscordMessagePayload,
   DiscordMessageSnapshot,
   DiscordPort,
+  DiscordThreadSnapshot,
   FetchText,
   ScheduledEventPayload,
   ScheduledEventSnapshot,
@@ -101,6 +102,18 @@ class FakeDiscordPort implements DiscordPort {
 
   async isTextChannel(_channelId: string): Promise<boolean> {
     return true;
+  }
+
+  async startThreadOnMessage(channelId: string, starterMessageId: string, name: string): Promise<DiscordThreadSnapshot> {
+    return { id: `thread-${starterMessageId}`, parentChannelId: channelId, starterMessageId, name, archived: false };
+  }
+
+  async fetchThread(_channelId: string, _threadId: string | null, _starterMessageId: string | null): Promise<DiscordThreadSnapshot | null> {
+    return null;
+  }
+
+  async sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    return this.makeMessage(threadId, payload);
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {

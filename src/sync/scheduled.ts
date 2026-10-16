@@ -1,11 +1,11 @@
 // Synchronizes Discord-managed external scheduled events without setting status.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { getGuildEventObject, setGuildDiscordIds } from '../store.ts';
+import { getGuild, getGuildEventObject, setGuildDiscordIds } from '../store.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import {
   bestEventSourceUrl,
-  eventSourceLink,
+  eventMarkerFragment,
   hasEventMarkerUrl,
   stableEventIdentity,
 } from '../event-identity.ts';
@@ -43,6 +43,7 @@ export function scheduledEventPayloadFor(
   event: StoreEvent,
   sourceUrls: readonly string[],
   now: Date,
+  cardJumpLink?: string,
 ): ScheduledEventPayload | undefined {
   if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
   const nowMs = now.getTime();
@@ -52,9 +53,14 @@ export function scheduledEventPayloadFor(
 
   const urls = orderedUrls(sourceUrls);
   const chosenUrl = bestEventSourceUrl(urls);
-  const selectedLocation = chosenUrl && chosenUrl.length <= 100 ? chosenUrl : LOCATION_FALLBACK;
-  const markedLink = eventSourceLink(event.eventKey, urls);
-  const description = markedLink ? `[Zur Lodestone-Ankündigung](${markedLink})` : '';
+  const selectedLocation = cardJumpLink && cardJumpLink.length <= 100
+    ? cardJumpLink
+    : chosenUrl && chosenUrl.length <= 100 ? chosenUrl : LOCATION_FALLBACK;
+  const sourceUrl = bestEventSourceUrl(urls);
+  const description = [
+    ...(sourceUrl ? [`[Zur Lodestone-Ankündigung](${sourceUrl})`] : []),
+    `#${eventMarkerFragment(event.eventKey)}`,
+  ].join('\n');
 
   const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
   if (!(nowMs < scheduledStart && scheduledStart < endMs)) return undefined;
@@ -106,7 +112,8 @@ function linksInDescription(description: string): string[] {
 }
 
 function hasExactMarkerLink(description: string, event: StoreEvent): boolean {
-  return linksInDescription(description).some((link) => hasEventMarkerUrl(link, event.eventKey));
+  return description.split(/\r?\n/).includes(`#${eventMarkerFragment(event.eventKey)}`)
+    || linksInDescription(description).some((link) => hasEventMarkerUrl(link, event.eventKey));
 }
 
 function hasExactLegacyStableMarker(description: string, event: StoreEvent): boolean {
@@ -159,8 +166,9 @@ async function createReplacement(
   store: Store,
   now: Date,
   clock?: () => Date,
+  cardJumpLink?: string,
 ): Promise<string | undefined> {
-  const payload = scheduledEventPayloadFor(event, sourceUrls, clock?.() ?? now);
+  const payload = scheduledEventPayloadFor(event, sourceUrls, clock?.() ?? now, cardJumpLink);
   if (!payload) return undefined;
   const created = await discord.createScheduledEvent(guildId, payload);
   setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
@@ -178,14 +186,22 @@ async function syncScheduledEventUnlocked({
 }: SyncScheduledEventOptions): Promise<string | undefined> {
   if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
 
+  const guild = getGuild(store, guildId);
+  const guildEventObject = getGuildEventObject(store, guildId, event.eventKey);
+  if (!guild?.eventChannelId || !guildEventObject?.messageId
+    || guildEventObject.messageChannelId !== guild.eventChannelId) return undefined;
+  const card = await discord.fetchMessage(guild.eventChannelId, guildEventObject.messageId);
+  if (!card?.authorIsBot || !card.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) return undefined;
+  const cardJumpLink = `https://discord.com/channels/${guildId}/${guild.eventChannelId}/${guildEventObject.messageId}`;
+
   const schedules = await discord.listScheduledEvents(guildId);
-  const storedObject = getGuildEventObject(store, guildId, event.eventKey);
+  const storedObject = guildEventObject;
   const stored = storedObject?.scheduledEventId === null || storedObject?.scheduledEventId === undefined
     ? undefined
     : schedules.find((candidate) => candidate.id === storedObject.scheduledEventId);
   const matched = stored ?? findByMarker(schedules, event, sourceUrls);
   const currentTime = clock?.() ?? now;
-  const initialPayload = scheduledEventPayloadFor(event, sourceUrls, currentTime);
+  const initialPayload = scheduledEventPayloadFor(event, sourceUrls, currentTime, cardJumpLink);
   if (!initialPayload) return undefined;
   if (!matched) {
     const created = await discord.createScheduledEvent(guildId, initialPayload);
@@ -195,11 +211,11 @@ async function syncScheduledEventUnlocked({
 
   setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: matched.id });
   if (matched.status === 'COMPLETED' || matched.status === 'CANCELED') {
-    return createReplacement(event, sourceUrls, guildId, discord, store, currentTime, clock);
+    return createReplacement(event, sourceUrls, guildId, discord, store, currentTime, clock, cardJumpLink);
   }
 
   const editTime = clock?.() ?? currentTime;
-  const basePayload = scheduledEventPayloadFor(event, sourceUrls, editTime);
+  const basePayload = scheduledEventPayloadFor(event, sourceUrls, editTime, cardJumpLink);
   const preserveStart = matched.status === 'ACTIVE' || Date.parse(event.startUtc) < editTime.getTime();
   const payload = basePayload && preserveStart ? { ...basePayload, startUtc: matched.startUtc } : basePayload;
   if (!payload || sameSchedule(matched, payload)) return matched.id;
@@ -212,7 +228,7 @@ async function syncScheduledEventUnlocked({
     const refreshed = await discord.listScheduledEvents(guildId);
     const current = refreshed.find((candidate) => candidate.id === matched.id);
     if (current && (current.status === 'COMPLETED' || current.status === 'CANCELED')) {
-      return createReplacement(event, sourceUrls, guildId, discord, store, editTime, clock);
+      return createReplacement(event, sourceUrls, guildId, discord, store, editTime, clock, cardJumpLink);
     }
     throw error;
   }

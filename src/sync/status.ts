@@ -1,9 +1,9 @@
 // Keeps the single pinned live status message current without needless edits.
 
 import type { StoreEvent } from '../store.ts';
-import { deliverWarning, getEventSources, getGuild, setGuildStatusMessage, type Store } from '../store.ts';
+import { deliverWarning, getGuild, getGuildEventObject, setGuildStatusMessage, type Store } from '../store.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
-import { eventSourceLink } from '../event-identity.ts';
+import { hasEventMarkerUrl } from '../event-identity.ts';
 import type { DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
 
 export interface SyncLiveStatusOptions {
@@ -17,20 +17,35 @@ export interface SyncLiveStatusOptions {
   suppressLogs?: boolean;
 }
 
-function statusEmbed(events: readonly StoreEvent[], now: Date, store: Store): DiscordEmbed {
+async function statusEmbed(
+  events: readonly StoreEvent[],
+  now: Date,
+  guildId: string,
+  channelId: string,
+  store: Store,
+  discord: DiscordPort,
+): Promise<DiscordEmbed> {
   const nowMs = now.getTime();
   const running = events
     .filter((event) => event.startStatus === 'ok' && event.endStatus === 'ok' && event.startUtc !== null && event.endUtc !== null)
     .filter((event) => Date.parse(event.startUtc!) <= nowMs && nowMs < Date.parse(event.endUtc!))
     .sort((left, right) => Date.parse(left.endUtc!) - Date.parse(right.endUtc!) || left.title.localeCompare(right.title));
-  const lines = running.map((event) => {
+  const lines: string[] = [];
+  for (const event of running) {
     const displayTitle = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
     const title = displayTitle.slice(0, 256).replace(/[\\[\]()*_~`|>]/g, '\\$&');
-    const sourceUrls = getEventSources(store, event.id).map((source) => source.url);
-    const link = eventSourceLink(event.eventKey, sourceUrls);
-    const linkedTitle = link ? `[**${title}**](${link})` : `**${title}**`;
-    return `• ${linkedTitle} — endet <t:${Math.floor(Date.parse(event.endUtc!) / 1_000)}:R>`;
-  });
+    const guildEvent = getGuildEventObject(store, guildId, event.eventKey);
+    const storedGuild = getGuild(store, guildId);
+    let cardLink: string | undefined;
+    if (guildEvent?.messageId && guildEvent.messageChannelId === channelId && storedGuild?.eventChannelId === channelId) {
+      const card = await discord.fetchMessage(channelId, guildEvent.messageId);
+      if (card?.authorIsBot && card.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) {
+        cardLink = `https://discord.com/channels/${guildId}/${channelId}/${guildEvent.messageId}`;
+      }
+    }
+    const linkedTitle = cardLink ? `[${title}](<${cardLink}>)` : title;
+    lines.push(`• ${linkedTitle} — endet <t:${Math.floor(Date.parse(event.endUtc!) / 1_000)}:R>`);
+  }
   const overflow = '… Weitere Events sind im Event-Kanal aufgeführt.';
   let description = lines.join('\n');
   if (description.length > 4096) {
@@ -55,7 +70,7 @@ async function syncLiveStatusPostUnlocked({
   suppressLogs = false,
   guildId,
 }: SyncLiveStatusOptions): Promise<void> {
-  const desired = statusEmbed(events, now, store);
+  const desired = await statusEmbed(events, now, guildId, channelId, store, discord);
   const payload = { embeds: [desired] };
   const guild = getGuild(store, guildId);
   let existing: DiscordMessageSnapshot | null = null;

@@ -22,6 +22,8 @@ import {
   type ChatInputCommandInteraction,
   type GuildScheduledEvent,
   type Message,
+  type ThreadAutoArchiveDuration,
+  type ThreadChannel,
   type TextChannel,
 } from 'discord.js';
 import { readConfig } from './config.ts';
@@ -56,6 +58,7 @@ import type {
   DiscordMessageHistoryOptions,
   DiscordMessageSnapshot,
   DiscordPort,
+  DiscordThreadSnapshot,
   FetchText,
   ScheduledEventPayload,
   ScheduledEventSnapshot,
@@ -333,6 +336,86 @@ export class DiscordJsPort implements DiscordPort {
   async isTextChannel(channelId: string): Promise<boolean> {
     const channel = await this.client.channels.fetch(channelId);
     return Boolean(channel && channel.isTextBased() && 'messages' in channel);
+  }
+
+  private threadSnapshot(thread: ThreadChannel, starterMessageId: string | null = thread.id): DiscordThreadSnapshot {
+    return {
+      id: thread.id,
+      parentChannelId: thread.parentId ?? '',
+      starterMessageId,
+      name: thread.name,
+      archived: thread.archived ?? false,
+    };
+  }
+
+  private isUnknownDiscordResource(error: unknown): boolean {
+    return typeof error === 'object' && error !== null && 'code' in error
+      && (error.code === 10003 || error.code === 10008);
+  }
+
+  async startThreadOnMessage(
+    channelId: string,
+    starterMessageId: string,
+    name: string,
+    autoArchiveDuration: number,
+  ): Promise<DiscordThreadSnapshot> {
+    const channel = await this.textChannel(channelId);
+    const message = await channel.messages.fetch({ message: starterMessageId, force: true });
+    const thread = await message.startThread({
+      name,
+      autoArchiveDuration: autoArchiveDuration as ThreadAutoArchiveDuration,
+    });
+    return this.threadSnapshot(thread, starterMessageId);
+  }
+
+  async fetchThread(
+    channelId: string,
+    threadId: string | null,
+    starterMessageId: string | null,
+  ): Promise<DiscordThreadSnapshot | null> {
+    const parent = await this.textChannel(channelId);
+    const fetchThreadChannel = async (id: string): Promise<DiscordThreadSnapshot | null> => {
+      try {
+        const channel = await this.client.channels.fetch(id, { force: true });
+        if (!channel || !channel.isThread() || channel.parentId !== parent.id) return null;
+        const associatedStarter = starterMessageId && id === starterMessageId ? starterMessageId : channel.id;
+        return this.threadSnapshot(channel, associatedStarter);
+      } catch (error) {
+        if (this.isUnknownDiscordResource(error)) return null;
+        throw error;
+      }
+    };
+
+    if (threadId) {
+      const stored = await fetchThreadChannel(threadId);
+      if (stored) return stored;
+    }
+    if (!starterMessageId) return null;
+
+    try {
+      const message = await parent.messages.fetch({ message: starterMessageId, force: true });
+      if (message.thread && message.thread.parentId === parent.id) {
+        return this.threadSnapshot(message.thread, starterMessageId);
+      }
+    } catch (error) {
+      if (!this.isUnknownDiscordResource(error)) throw error;
+    }
+
+    // Message based thread IDs equal their starter message IDs, including archived threads.
+    return fetchThreadChannel(starterMessageId);
+  }
+
+  async sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel || !channel.isThread()) throw new Error(`Discord channel ${threadId} is not a thread.`);
+    const message = await channel.send({
+      content: payload.content,
+      embeds: payload.embeds?.map(embedBuilder),
+      ...(payload.components === undefined ? {} : { components: actionRowBuilders(payload.components) }),
+      allowedMentions: { parse: [], users: payload.allowedMentions?.users ?? [] },
+      ...(payload.suppressEmbeds ? { flags: MessageFlags.SuppressEmbeds } : {}),
+    });
+    return messageSnapshot(message, this.client.user?.id);
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {

@@ -87,6 +87,7 @@ export interface GuildEventObject {
   messageId: string | null;
   messageChannelId: string | null;
   scheduledEventId: string | null;
+  reminderThreadId: string | null;
   firstPostAttemptAt: string | null;
   status: 'pending' | 'synced' | 'failed';
   lastError: string | null;
@@ -164,6 +165,7 @@ const SCHEMA = `
     message_id TEXT,
     message_channel_id TEXT,
     scheduled_event_id TEXT,
+    reminder_thread_id TEXT,
     first_post_attempt_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'synced', 'failed')),
     last_error TEXT,
@@ -290,7 +292,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -355,6 +357,23 @@ function migrateV3ToV4(db: Store): void {
   try {
     db.exec(SCHEMA);
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (4)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV4ToV5(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(SCHEMA);
+    const columns = tableColumns(db, 'guild_event_objects');
+    if (columns.size > 0 && !columns.has('reminder_thread_id')) {
+      db.exec('ALTER TABLE guild_event_objects ADD COLUMN reminder_thread_id TEXT');
+    }
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -377,11 +396,16 @@ function initializeSchema(db: Store): void {
     migrateV1ToV2(db);
     migrateV2ToV3(db);
     migrateV3ToV4(db);
+    migrateV4ToV5(db);
   } else if (version === 2) {
     migrateV2ToV3(db);
     migrateV3ToV4(db);
+    migrateV4ToV5(db);
   } else if (version === 3) {
     migrateV3ToV4(db);
+    migrateV4ToV5(db);
+  } else if (version === 4) {
+    migrateV4ToV5(db);
   } else {
     db.exec(SCHEMA);
   }
@@ -496,7 +520,7 @@ export function upsertGuildSetup(
     `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
     if (eventChannelChanged) {
       db.prepare(`UPDATE guild_event_objects
-        SET message_id = NULL, message_channel_id = NULL, first_post_attempt_at = NULL,
+        SET message_id = NULL, message_channel_id = NULL, reminder_thread_id = NULL, first_post_attempt_at = NULL,
             status = 'pending', last_error = NULL
         WHERE guild_id = ?`).run(input.guildId);
     }
@@ -558,6 +582,7 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
   const row = db.prepare(`
     SELECT guild_id AS guildId, event_key AS eventKey, message_id AS messageId,
            message_channel_id AS messageChannelId, scheduled_event_id AS scheduledEventId,
+           reminder_thread_id AS reminderThreadId,
            first_post_attempt_at AS firstPostAttemptAt,
            status, last_error AS lastError, first_run_suppressed AS firstRunSuppressed
     FROM guild_event_objects WHERE guild_id = ? AND event_key = ?
@@ -596,12 +621,13 @@ export function setGuildDiscordIds(
   db: Store,
   guildId: string,
   eventKey: string,
-  ids: { messageId?: string | null; messageChannelId?: string | null; scheduledEventId?: string | null },
+  ids: { messageId?: string | null; messageChannelId?: string | null; scheduledEventId?: string | null; reminderThreadId?: string | null },
 ): void {
   const assignments: string[] = [];
   const values: Array<string | null> = [];
   for (const [key, column] of [
     ['messageId', 'message_id'], ['messageChannelId', 'message_channel_id'], ['scheduledEventId', 'scheduled_event_id'],
+    ['reminderThreadId', 'reminder_thread_id'],
   ] as const) {
     if (ids[key] !== undefined) {
       assignments.push(`${column} = ?`);

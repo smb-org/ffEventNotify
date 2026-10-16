@@ -55,15 +55,22 @@ test('setup permission check requires posting and history in both channels plus 
     PermissionFlagsBits.EmbedLinks,
     PermissionFlagsBits.ReadMessageHistory,
     PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.CreatePublicThreads,
+    PermissionFlagsBits.SendMessagesInThreads,
   ]);
   assert.deepEqual(missingSetupPermissions(
     new PermissionsBitField([PermissionFlagsBits.CreateEvents]), channelPermissions, channelPermissions,
   ), []);
 
   const missing = missingSetupPermissions(new PermissionsBitField(), channelPermissions, new PermissionsBitField());
+  const missingEventChannel = missingSetupPermissions(
+    new PermissionsBitField([PermissionFlagsBits.CreateEvents]), new PermissionsBitField(), channelPermissions,
+  );
   assert.ok(missing.includes('Server: Events erstellen'));
   assert.ok(missing.includes('Log-Kanal: Nachrichten senden'));
   assert.ok(missing.includes('Log-Kanal: Nachrichten anheften oder Nachrichten verwalten'));
+  assert.ok(missingEventChannel.includes('Event-Kanal: Öffentliche Threads erstellen'));
+  assert.ok(missingEventChannel.includes('Event-Kanal: Nachrichten in Threads senden'));
 });
 
 test('command signature changes only when the registered definition changes', () => {

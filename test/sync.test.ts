@@ -5,6 +5,7 @@ import type {
   DiscordMessagePayload,
   DiscordMessageSnapshot,
   DiscordPort,
+  DiscordThreadSnapshot,
   ScheduledEventPayload,
   ScheduledEventSnapshot,
 } from '../src/types.ts';
@@ -23,7 +24,7 @@ import {
 } from '../src/store.ts';
 import { buildEventEmbed, syncEventEmbed } from '../src/sync/embed.ts';
 import { scheduleEventReminders } from '../src/sync/reminders.ts';
-import { syncScheduledEvent } from '../src/sync/scheduled.ts';
+import { scheduledEventPayloadFor, syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { syncLiveStatusPost } from '../src/sync/status.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
 import { collectRecentBotMessages } from '../src/discord-history.ts';
@@ -112,6 +113,19 @@ class FakeDiscordPort implements DiscordPort {
     return true;
   }
 
+  async startThreadOnMessage(channelId: string, starterMessageId: string, name: string): Promise<DiscordThreadSnapshot> {
+    return { id: `thread-${starterMessageId}`, parentChannelId: channelId, starterMessageId, name, archived: false };
+  }
+
+  async fetchThread(_channelId: string, _threadId: string | null, _starterMessageId: string | null): Promise<DiscordThreadSnapshot | null> {
+    return null;
+  }
+
+  async sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    return { id: `thread-message-${this.messages.length + 1}`, channelId: threadId, authorIsBot: true, pinned: false,
+      content: payload.content ?? '', embeds: discordEmbedSnapshots(payload.embeds), components: componentSnapshots(payload.components) };
+  }
+
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
     this.createScheduledCount += 1;
     const event: ScheduledEventSnapshot = {
@@ -194,6 +208,21 @@ function seedEvent(
   return getOpenEvents(db, NOW).find((event) => event.id === id)!;
 }
 
+async function syncScheduledWithCard(options: Parameters<typeof syncScheduledEvent>[0]): Promise<string | undefined> {
+  const channelId = getGuild(options.store, options.guildId)?.eventChannelId;
+  if (!channelId) return undefined;
+  await syncEventEmbed({
+    event: options.event,
+    sourceUrls: options.sourceUrls,
+    guildId: options.guildId,
+    channelId,
+    discord: options.discord,
+    store: options.store,
+    ...(options.now ? { now: options.now } : {}),
+  });
+  return syncScheduledEvent(options);
+}
+
 function embedOf(message: DiscordMessageSnapshot): DiscordEmbed {
   const embed = message.embeds[0];
   assert.ok(embed);
@@ -211,7 +240,7 @@ test('two parallel events get separate messages and scheduled events and share o
     for (const event of events) {
       const sources = [`https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`];
       await syncEventEmbed({ event, sourceUrls: sources, channelId: 'events', discord, store: db });
-      await syncScheduledEvent({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW });
+      await syncScheduledWithCard({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW });
     }
     await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events, discord, store: db, now: NOW });
     await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events, discord, store: db, now: NOW });
@@ -225,7 +254,121 @@ test('two parallel events get separate messages and scheduled events and share o
     assert.ok(status?.pinned);
     assert.match(embedOf(status).description ?? '', /Allerschutzheiligen.*Fall Guys|Fall Guys.*Allerschutzheiligen/s);
     assert.match(embedOf(status).description ?? '', /<t:\d+:R>/);
-    assert.match(embedOf(status).description ?? '', new RegExp(`#ffe-${stableEventIdentity(events[0]!.eventKey)}`));
+    const firstCard = getGuildEventObject(db, 'guild', events[0]!.eventKey)!;
+    assert.match(embedOf(status).description ?? '', new RegExp(`https://discord\\.com/channels/guild/events/${firstCard.messageId}`));
+  } finally {
+    db.close();
+  }
+});
+
+test('live status links each event title to its Discord card and leaves a missing card title plain', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const linked = seedEvent(db, 'status-linked', 'Verknüpftes Event');
+    const plain = seedEvent(db, 'status-plain', 'Karte fehlt');
+    const linkedSource = [`https://de.finalfantasyxiv.com/lodestone/special/${linked.eventKey}/`];
+    await syncEventEmbed({ event: linked, sourceUrls: linkedSource, guildId: 'guild', channelId: 'events', discord, store: db });
+    await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events: [linked, plain], discord, store: db, now: NOW });
+
+    const description = embedOf(discord.messages.find((message) => embedOf(message).title === 'Läuft gerade')!).description ?? '';
+    const cardId = getGuildEventObject(db, 'guild', linked.eventKey)?.messageId;
+    assert.ok(cardId);
+    assert.match(description, new RegExp(`• \\[Verknüpftes Event\\]\\(<https://discord\\.com/channels/guild/events/${cardId}>\\) — endet <t:`));
+    assert.match(description, /• Karte fehlt — endet <t:/);
+    assert.doesNotMatch(description, /• \[Karte fehlt\]/);
+  } finally {
+    db.close();
+  }
+});
+
+test('scheduled event location uses the event card jump link and stays within Discord location bounds', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'scheduled-card-link', 'Karten-Link');
+    const sourceUrls = [`https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`];
+    await syncEventEmbed({ event, sourceUrls, guildId: 'guild', channelId: 'events', discord, store: db });
+    const messageId = getGuildEventObject(db, 'guild', event.eventKey)?.messageId;
+    assert.ok(messageId);
+    const jumpLink = `https://discord.com/channels/guild/events/${messageId}`;
+    assert.ok(jumpLink.length <= 100);
+    await syncScheduledWithCard({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+
+    assert.equal(discord.scheduledEvents[0]?.location, jumpLink);
+    assert.ok((discord.scheduledEvents[0]?.location.length ?? 101) <= 100);
+    assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(sourceUrls[0]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const [lodestoneLink, recoveryMarker] = (discord.scheduledEvents[0]?.description ?? '').split('\n');
+    assert.match(lodestoneLink ?? '', /^\[Zur Lodestone-Ankündigung\]\(/);
+    assert.equal(recoveryMarker, `#ffe-${stableEventIdentity(event.eventKey)}`);
+  } finally {
+    db.close();
+  }
+});
+
+test('Discord snowflake jump links fit the scheduled-event location limit', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const guildId = '12345678901234567890';
+  const channelId = '22345678901234567890';
+  const messageId = '32345678901234567890';
+  try {
+    const event = seedEvent(db, 'snowflake-card-link', 'Snowflake-Karte');
+    const sourceUrl = `https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`;
+    upsertGuildSetup(db, { guildId, eventChannelId: channelId, logChannelId: '42345678901234567890' });
+    setGuildDiscordIds(db, guildId, event.eventKey, { messageId, messageChannelId: channelId });
+    discord.messages.push({
+      id: messageId, channelId, authorIsBot: true, pinned: false, content: '',
+      embeds: [buildEventEmbed(event, [sourceUrl], NOW)],
+    });
+    const jumpLink = `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+    assert.ok(jumpLink.length <= 100);
+
+    await syncScheduledEvent({ event, sourceUrls: [sourceUrl], guildId, discord, store: db, now: NOW });
+
+    assert.equal(discord.scheduledEvents[0]?.location, jumpLink);
+    assert.ok((discord.scheduledEvents[0]?.location.length ?? 101) <= 100);
+  } finally {
+    db.close();
+  }
+});
+
+test('scheduled events are not created before an event card exists', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'scheduled-waits-for-card', 'Wartet auf Karte');
+    const id = await syncScheduledEvent({
+      event,
+      sourceUrls: [`https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`],
+      guildId: 'guild', discord, store: db, now: NOW,
+    });
+    assert.equal(id, undefined);
+    assert.equal(discord.createScheduledCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('scheduled location follows a recreated event card', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'scheduled-card-recreated', 'Neu erstellte Karte');
+    const sourceUrls = [`https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`];
+    await syncScheduledWithCard({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+    const oldCard = getGuildEventObject(db, 'guild', event.eventKey)?.messageId;
+    assert.ok(oldCard);
+    const cardIndex = discord.messages.findIndex((message) => message.id === oldCard);
+    assert.notEqual(cardIndex, -1);
+    const replacementCardId = '923456789012345678';
+    discord.messages[cardIndex] = { ...discord.messages[cardIndex]!, id: replacementCardId };
+    setGuildDiscordIds(db, 'guild', event.eventKey, { messageId: replacementCardId, messageChannelId: 'events' });
+
+    await syncScheduledWithCard({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+
+    assert.equal(discord.editScheduledCount, 1);
+    assert.equal(discord.scheduledEvents[0]?.location, `https://discord.com/channels/guild/events/${replacementCardId}`);
   } finally {
     db.close();
   }
@@ -636,8 +779,11 @@ test('scheduled event uses a short preferred source URL and moves a running star
     const event = seedEvent(db, 'wake', 'Allerschutzheiligen');
     const specialUrl = 'https://de.finalfantasyxiv.com/lodestone/special/wake/';
     const topicUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/a-shorter-url';
-    await syncScheduledEvent({ event, sourceUrls: [topicUrl, specialUrl], guildId: 'guild', discord, store: db, now: NOW });
-    assert.equal(discord.scheduledEvents[0]?.location, specialUrl);
+    await syncScheduledWithCard({ event, sourceUrls: [topicUrl, specialUrl], guildId: 'guild', discord, store: db, now: NOW });
+    const cardId = getGuildEventObject(db, 'guild', event.eventKey)?.messageId;
+    const jumpLink = `https://discord.com/channels/guild/events/${cardId}`;
+    assert.ok(jumpLink.length <= 100);
+    assert.equal(discord.scheduledEvents[0]?.location, jumpLink);
     assert.equal(discord.scheduledEvents[0]?.startUtc, '2026-10-16T12:02:00.000Z');
     assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(`#ffe-${stableEventIdentity(event.eventKey)}`));
     assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(specialUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -653,9 +799,9 @@ test('an existing scheduled event keeps its start when an hour passes after it b
   try {
     const event = seedEvent(db, 'running-stable-start', 'Laufendes Event');
     const sources = ['https://de.finalfantasyxiv.com/lodestone/special/running-stable-start/'];
-    await syncScheduledEvent({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW });
     const initialStart = discord.scheduledEvents[0]?.startUtc;
-    await syncScheduledEvent({
+    await syncScheduledWithCard({
       event, sourceUrls: sources, guildId: 'guild', discord, store: db,
       now: new Date(NOW.getTime() + 60 * 60 * 1_000),
     });
@@ -663,7 +809,7 @@ test('an existing scheduled event keeps its start when an hour passes after it b
     assert.equal(discord.editScheduledCount, 0);
 
     discord.scheduledEvents[0]!.status = 'ACTIVE';
-    await syncScheduledEvent({
+    await syncScheduledWithCard({
       event, sourceUrls: sources, guildId: 'guild', discord, store: db,
       now: new Date(NOW.getTime() + 2 * 60 * 60 * 1_000),
     });
@@ -695,7 +841,7 @@ test('schedule recovery does not match a complete marker for a longer event key'
       status: 'SCHEDULED',
     });
 
-    await syncScheduledEvent({
+    await syncScheduledWithCard({
       event: target,
       sourceUrls: ['https://de.finalfantasyxiv.com/lodestone/special/identity-one/'],
       guildId: 'guild', discord, store: db, now: NOW,
@@ -727,7 +873,7 @@ test('legacy stable scheduled markers recover an event after its title changes',
       status: 'SCHEDULED',
     });
 
-    await syncScheduledEvent({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
 
     assert.equal(discord.createScheduledCount, 0);
     assert.equal(discord.editScheduledCount, 1);
@@ -744,8 +890,8 @@ test('unchanged scheduled timestamps compare by instant after Discord normalizes
   try {
     const event = seedEvent(db, 'normalized-time', 'Unveränderter Termin', '2026-10-16T13:00:00Z', '2026-10-20T14:59:00Z');
     const sourceUrls = ['https://de.finalfantasyxiv.com/lodestone/special/normalized-time/'];
-    await syncScheduledEvent({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
-    await syncScheduledEvent({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
 
     assert.equal(discord.createScheduledCount, 1);
     assert.equal(discord.editScheduledCount, 0);
@@ -803,7 +949,7 @@ test('scheduled event is skipped when the two-minute running-start offset would 
   const discord = new FakeDiscordPort();
   try {
     const event = seedEvent(db, 'ending-soon', 'Endet gleich', '2026-10-16T11:00:00.000Z', '2026-10-16T12:01:00.000Z');
-    const scheduledId = await syncScheduledEvent({
+    const scheduledId = await syncScheduledWithCard({
       event,
       sourceUrls: ['https://de.finalfantasyxiv.com/lodestone/special/ending-soon/'],
       guildId: 'guild',
@@ -875,7 +1021,7 @@ test('unverified fallback titles never appear in scheduled events or the live st
     applyField(db, id, 'start', { status: 'ok', value: '2026-10-15T08:00:00.000Z' }, sourceUrl);
     applyField(db, id, 'end', { status: 'ok', value: '2026-10-20T12:00:00.000Z' }, sourceUrl);
     const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
-    await syncScheduledEvent({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
     await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events: [event], discord, store: db, now: NOW });
 
     assert.equal(discord.scheduledEvents[0]?.name, 'FFXIV-Event');
@@ -888,14 +1034,17 @@ test('unverified fallback titles never appear in scheduled events or the live st
   }
 });
 
-test('scheduled event falls back when the preferred source URL is longer than one hundred characters', async () => {
+test('scheduled event location stays short when the Lodestone URL is longer than one hundred characters', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
   try {
     const event = seedEvent(db, 'long', 'Lange Quelle');
     const longUrl = `https://de.finalfantasyxiv.com/lodestone/special/${'very-long-event-name/'.repeat(6)}`;
-    await syncScheduledEvent({ event, sourceUrls: [longUrl], guildId: 'guild', discord, store: db, now: NOW });
-    assert.equal(discord.scheduledEvents[0]?.location, 'Lodestone – Link in der Beschreibung');
+    await syncScheduledWithCard({ event, sourceUrls: [longUrl], guildId: 'guild', discord, store: db, now: NOW });
+    const cardId = getGuildEventObject(db, 'guild', event.eventKey)?.messageId;
+    assert.equal(discord.scheduledEvents[0]?.location, `https://discord.com/channels/guild/events/${cardId}`);
+    assert.ok((discord.scheduledEvents[0]?.location.length ?? 101) <= 100);
+    assert.equal(scheduledEventPayloadFor(event, [longUrl], NOW)?.location, 'Lodestone – Link in der Beschreibung');
   } finally {
     db.close();
   }
@@ -920,7 +1069,7 @@ test('a completed scheduled event is replaced on extension while the event messa
     const extended = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
 
     await syncEventEmbed({ event: extended, sourceUrls: [sourceUrl], channelId: 'events', discord, store: db });
-    await syncScheduledEvent({ event: extended, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event: extended, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
 
     assert.equal(discord.createMessageCount, 1);
     assert.equal(discord.createScheduledCount, 1);
@@ -937,12 +1086,12 @@ test('a modify rejected after Discord completes the event creates a replacement 
   try {
     const event = seedEvent(db, 'rejected-extension', 'Wartung aller Welten');
     const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/special/rejected-extension/';
-    await syncScheduledEvent({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
     applyField(db, event.id, 'end', { status: 'ok', value: '2026-10-22T14:59:00.000Z' }, sourceUrl, '2026-10-16T11:00:00.000Z');
     const extended = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
     discord.failModifyScheduledAsCompleted = true;
 
-    await syncScheduledEvent({ event: extended, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event: extended, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
 
     assert.equal(discord.editScheduledCount, 1);
     assert.equal(discord.createScheduledCount, 2);
@@ -965,7 +1114,7 @@ test('sync adopts messages and scheduled events left behind by a crash before sa
     await syncEventEmbed({ event, sourceUrls: sources, channelId: 'events', discord, store: db });
     discord.failAfterCreateScheduled = true;
     await assert.rejects(syncScheduledEvent({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW }));
-    await syncScheduledEvent({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledWithCard({ event, sourceUrls: sources, guildId: 'guild', discord, store: db, now: NOW });
 
     assert.equal(discord.createMessageCount, 1);
     assert.equal(discord.createScheduledCount, 1);

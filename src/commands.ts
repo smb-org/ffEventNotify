@@ -88,6 +88,12 @@ export function missingSetupPermissions(
     if (!eventChannelPermissions?.has(permission)) missing.push(`Event-Kanal: ${label}`);
     if (!logChannelPermissions?.has(permission)) missing.push(`Log-Kanal: ${label}`);
   }
+  if (!eventChannelPermissions?.has(PermissionFlagsBits.CreatePublicThreads)) {
+    missing.push('Event-Kanal: Öffentliche Threads erstellen');
+  }
+  if (!eventChannelPermissions?.has(PermissionFlagsBits.SendMessagesInThreads)) {
+    missing.push('Event-Kanal: Nachrichten in Threads senden');
+  }
   const canPinEvent = eventChannelPermissions?.has(PermissionFlagsBits.PinMessages) || eventChannelPermissions?.has(PermissionFlagsBits.ManageMessages);
   if (!canPinEvent) missing.push('Event-Kanal: Nachrichten anheften oder Nachrichten verwalten');
   const canPinLog = logChannelPermissions?.has(PermissionFlagsBits.PinMessages) || logChannelPermissions?.has(PermissionFlagsBits.ManageMessages);

@@ -22,6 +22,7 @@ import type {
   DiscordMessagePayload,
   DiscordMessageSnapshot,
   DiscordPort,
+  DiscordThreadSnapshot,
   FetchText,
   ScheduledEventPayload,
   ScheduledEventSnapshot,
@@ -165,6 +166,9 @@ export type RecordingDiscordAction =
   | { type: 'fetch-messages'; channelId: string; limit: number }
   | { type: 'create-message'; channelId: string; payload: DiscordMessagePayload }
   | { type: 'edit-message'; channelId: string; messageId: string; payload: DiscordMessagePayload }
+  | { type: 'start-thread'; channelId: string; starterMessageId: string; name: string; autoArchiveDuration: number }
+  | { type: 'fetch-thread'; channelId: string; threadId: string | null; starterMessageId: string | null }
+  | { type: 'send-thread'; threadId: string; payload: DiscordMessagePayload }
   | { type: 'pin-message'; channelId: string; messageId: string }
   | { type: 'create-scheduled-event'; guildId: string; payload: ScheduledEventPayload }
   | { type: 'edit-scheduled-event'; guildId: string; eventId: string; payload: ScheduledEventPayload }
@@ -197,6 +201,7 @@ function copyPayload(payload: DiscordMessagePayload): DiscordMessagePayload {
       }),
     })) }),
     ...(payload.allowedMentions === undefined ? {} : { allowedMentions: { parse: [], users: [...payload.allowedMentions.users] } }),
+    ...(payload.suppressEmbeds ? { suppressEmbeds: true } : {}),
   };
 }
 
@@ -206,8 +211,11 @@ export class RecordingDiscordPort implements DiscordPort {
   readonly logMessages: string[] = [];
   private readonly messages = new Map<string, DiscordMessageSnapshot>();
   private readonly scheduledEvents = new Map<string, ScheduledEventSnapshot>();
+  private readonly threads = new Map<string, DiscordThreadSnapshot>();
+  private readonly threadsByStarter = new Map<string, string>();
   private messageSequence = 0;
   private scheduledSequence = 0;
+  private threadSequence = 0;
 
   async createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     const messageId = `dry-message-${++this.messageSequence}`;
@@ -250,6 +258,36 @@ export class RecordingDiscordPort implements DiscordPort {
 
   async isTextChannel(_channelId: string): Promise<boolean> {
     return true;
+  }
+
+  async startThreadOnMessage(channelId: string, starterMessageId: string, name: string, autoArchiveDuration: number): Promise<DiscordThreadSnapshot> {
+    const existingId = this.threadsByStarter.get(starterMessageId);
+    const existing = existingId ? this.threads.get(existingId) : undefined;
+    if (existing) return { ...existing };
+    const thread = {
+      id: `dry-thread-${++this.threadSequence}`, parentChannelId: channelId, starterMessageId,
+      name, archived: false,
+    };
+    this.recordedActions.push({ type: 'start-thread', channelId, starterMessageId, name, autoArchiveDuration });
+    this.threads.set(thread.id, thread);
+    this.threadsByStarter.set(starterMessageId, thread.id);
+    return { ...thread };
+  }
+
+  async fetchThread(channelId: string, threadId: string | null, starterMessageId: string | null): Promise<DiscordThreadSnapshot | null> {
+    this.recordedActions.push({ type: 'fetch-thread', channelId, threadId, starterMessageId });
+    const byId = threadId ? this.threads.get(threadId) : undefined;
+    const byStarterId = starterMessageId ? this.threadsByStarter.get(starterMessageId) : undefined;
+    const thread = byId ?? (byStarterId ? this.threads.get(byStarterId) : undefined);
+    return thread?.parentChannelId === channelId ? { ...thread } : null;
+  }
+
+  async sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    this.recordedActions.push({ type: 'send-thread', threadId, payload: copyPayload(payload) });
+    const messageId = `dry-message-${++this.messageSequence}`;
+    const message = this.messageSnapshot(messageId, threadId, payload, false);
+    this.messages.set(messageId, message);
+    return message;
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {

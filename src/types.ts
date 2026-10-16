@@ -195,6 +195,14 @@ export interface ScheduledEventSnapshot extends ScheduledEventPayload {
   status: ScheduledEventStatus;
 }
 
+export interface DiscordThreadSnapshot {
+  id: string;
+  parentChannelId: string;
+  starterMessageId: string | null;
+  name: string;
+  archived: boolean;
+}
+
 export interface DiscordPort {
   createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
@@ -202,6 +210,9 @@ export interface DiscordPort {
   fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]>;
   fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null>;
   isTextChannel(channelId: string): Promise<boolean>;
+  startThreadOnMessage(channelId: string, starterMessageId: string, name: string, autoArchiveDuration: number): Promise<DiscordThreadSnapshot>;
+  fetchThread(channelId: string, threadId: string | null, starterMessageId: string | null): Promise<DiscordThreadSnapshot | null>;
+  sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   editScheduledEvent(guildId: string, eventId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   listScheduledEvents(guildId: string): Promise<ScheduledEventSnapshot[]>;
