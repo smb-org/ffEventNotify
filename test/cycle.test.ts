@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { load } from 'cheerio';
 import test from 'node:test';
 import { SourceHealthMonitor } from '../src/health.ts';
-import { applyField, attachSource, createEvent, getAllEvents, getEventSources, getGuildEventObject, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, attachSource, createEvent, getAllEvents, getEventSources, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
   DiscordEmbed,
   DiscordMessagePayload,
@@ -17,7 +17,7 @@ import type {
   ScheduledEventPayload,
   ScheduledEventSnapshot,
 } from '../src/types.ts';
-import { runCycle } from '../src/cycle.ts';
+import { runCycle, runGuildSyncFromStoredData } from '../src/cycle.ts';
 import { runDryRunCycle } from '../src/dry-run.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
 
@@ -82,9 +82,9 @@ class FakeDiscordPort implements DiscordPort {
     return message;
   }
 
-  async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]> {
-    return this.messages.filter((message) => message.channelId === channelId).slice().reverse()
-      .filter((message) => message.authorIsBot).slice(0, limit);
+  async fetchRecentBotMessages(channelId: string, limit: number) {
+    return { messages: this.messages.filter((message) => message.channelId === channelId).slice().reverse()
+      .filter((message) => message.authorIsBot).slice(0, limit), complete: true };
   }
 
   async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
@@ -260,6 +260,7 @@ function eventEmbeds(discord: FakeDiscordPort): Array<{ eventId: string; embed: 
 }
 
 function cycleOptions(store: Store, discord: FakeDiscordPort, health = new SourceHealthMonitor(store)) {
+  upsertGuildSetup(store, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
   return {
     store,
     discord,
@@ -360,6 +361,43 @@ test('FFXV period from the topic supplies the seasonal event when its special pa
   }
 });
 
+test('a period-free special refresh preserves and refreshes the topic-owned period', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const topicUrl = '/lodestone/topics/detail/0f1a2726a316f0bce54721fa018a68802564efaa';
+  const specialUrl = '/lodestone/special/ffxv/8ghatq7szp/';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'FINAL FANTASY XIV & FINAL FANTASY XV', url: '/lodestone/topics/detail/filler' }]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === '/lodestone/topics/detail/filler'
+      ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+      : undefined,
+  });
+  try {
+    const originalLists = controlledFetcher({
+      topicList: topicListHtml([{ title: 'Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!', url: topicUrl }]),
+      maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+      feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    });
+    await runCycle({ ...cycleOptions(db, discord), fetchText: originalLists });
+    const before = getAllEvents(db).find((candidate) => candidate.eventType === 'seasonal-special')!;
+    assert.equal(before.endStatus, 'ok');
+    assert.equal(before.endUtc, '2026-10-13T14:59:00Z');
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText, now: () => new Date('2026-10-16T13:00:00.000Z') });
+    const after = getAllEvents(db).find((candidate) => candidate.id === before.id)!;
+    assert.equal(after.endStatus, 'ok');
+    assert.equal(after.endUtc, before.endUtc);
+    const owner = db.prepare("SELECT source_url AS sourceUrl FROM field_provenance WHERE event_id = ? AND field = 'end'")
+      .get(before.id) as { sourceUrl: string };
+    assert.equal(owner.sourceUrl, `https://de.finalfantasyxiv.com${topicUrl}`);
+  } finally {
+    db.close();
+  }
+});
+
 test('ignored banner log uses the page title instead of an empty title', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
@@ -432,7 +470,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
   }
 });
 
-test('a newly configured guild gets an immediate first sync while Lodestone is fetched once for all guilds', async () => {
+test('a new guild gets a stored-data-only sync without another Lodestone crawl', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
   upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'logs-a' });
@@ -452,7 +490,7 @@ test('a newly configured guild gets an immediate first sync while Lodestone is f
 
     upsertGuildSetup(db, { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b' });
     fetchCalls.length = 0;
-    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+    await runGuildSyncFromStoredData({ store: db, discord, fetchText, now: () => new Date(NOW) }, 'guild-b');
 
     const guildBMessages = discord.messages.filter((message) => message.channelId === 'events-b');
     assert.equal(guildAMessages.filter((message) => message.embeds.some((embed) => embed.title === 'Läuft gerade')).length, 1);
@@ -460,9 +498,8 @@ test('a newly configured guild gets an immediate first sync while Lodestone is f
     assert.equal(guildBMessages.filter((message) => message.embeds.some((embed) => embed.footer?.text)).length, 3);
     assert.equal(discord.scheduledEvents.filter((event) => event.guildId === 'guild-a').length, 3);
     assert.equal(discord.scheduledEvents.filter((event) => event.guildId === 'guild-b').length, 3);
-    assert.equal(fetchCalls.length, 7, 'three topic pages, three maintenance pages and one feed are shared by both servers');
-    assert.equal(new Set(fetchCalls).size, fetchCalls.length, 'each Lodestone list is fetched once in the cycle');
-    assert.ok(discord.logChannels.some(({ channelId, content }) => channelId === 'logs-b' && content.startsWith('Erststart:')));
+    assert.equal(fetchCalls.length, 0, 'setup sync must use the shared event data already in SQLite');
+    assert.equal(discord.logChannels.some(({ channelId, content }) => channelId === 'logs-b' && content.startsWith('Erststart:')), false);
   } finally {
     db.close();
   }
@@ -501,7 +538,8 @@ test('one event sync failure is logged for its guild and later events still sync
     assert.ok(eventTitles.includes('Späteres Event'));
     assert.ok(discord.scheduledEvents.some((event) => event.name === 'Späteres Event'));
     assert.equal(discord.logChannels.filter(({ channelId, content }) => channelId === 'logs'
-      && content.includes('Der Abgleich für „Fehlerhaftes Event“')).length, 1);
+      && content.includes('Der Discord-Abgleich für „Fehlerhaftes Event“')).length, 1);
+    assert.equal(discord.logChannels.some(({ content }) => content.includes('simulated scheduled-event failure')), false);
     assert.equal(getGuildEventObject(db, 'guild', 'sync-isolation:0')?.status, 'failed');
     assert.equal(getGuildEventObject(db, 'guild', 'sync-isolation:1')?.status, 'synced');
     const messageCount = discord.createMessageCount;
@@ -953,6 +991,120 @@ test('a first-run topic detail failure persists its URL and suppression after it
   } finally {
     db.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a first-run suppressed event is posted after recovery verifies a future end', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const specialUrl = '/lodestone/special/recoverable-period/';
+  const title = 'Wieder verifizierbares Event';
+  let specialPage = `<html><head><title>${title} | FINAL FANTASY XIV - Der Lodestone</title></head><body><main class="content__section"><p>Von Donnerstag, den 15. Oktober 2026 um 10:00 Uhr (MESZ) bis unleserlich</p></main></body></html>`;
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }], [specialUrl]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === specialUrl
+      ? { status: 200, body: specialPage, finalUrl: url }
+      : new URL(url).pathname === '/lodestone/topics/detail/filler'
+        ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+        : undefined,
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText, now: () => new Date('2026-10-16T12:00:00.000Z') });
+    const event = getAllEvents(db).find((candidate) => candidate.eventKey === `seasonal-special:${specialUrl}`)!;
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.firstRunSuppressed, true);
+    assert.equal(event.endStatus, 'unsicher');
+
+    specialPage = `<html><head><title>${title} | FINAL FANTASY XIV - Der Lodestone</title></head><body><main class="content__section"><p>Von Donnerstag, den 15. Oktober 2026 um 10:00 Uhr (MESZ) bis Montag, den 2. November 2026 um 15:59 Uhr (MEZ)</p></main></body></html>`;
+    await runCycle({ ...cycleOptions(db, discord), fetchText, now: () => new Date('2026-10-16T13:00:00.000Z') });
+    const refreshed = getAllEvents(db).find((candidate) => candidate.id === event.id)!;
+    assert.equal(refreshed.endStatus, 'ok');
+    assert.ok(getGuildEventObject(db, 'guild', event.eventKey)?.messageId);
+  } finally {
+    db.close();
+  }
+});
+
+test('a transient channel lookup failure does not mark a guild as needing setup', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+  const fetchText = fixtureFetcher();
+  let failOnce = true;
+  discord.isTextChannel = async () => {
+    if (failOnce) {
+      failOnce = false;
+      throw new Error('transient 503');
+    }
+    return true;
+  };
+  try {
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+    assert.equal(getGuild(db, 'guild')?.needsSetup, false);
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+    assert.ok(discord.messages.some((message) => message.channelId === 'events'));
+  } finally {
+    db.close();
+  }
+});
+
+test('one guild first-run does not suppress an unclassified warning for an established guild', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  upsertGuildSetup(db, { guildId: 'established', eventChannelId: 'events-a', logChannelId: 'logs-a' });
+  upsertGuildSetup(db, { guildId: 'initializing', eventChannelId: 'events-b', logChannelId: 'logs-b' });
+  markGuildFirstRunDone(db, 'established');
+  const topicUrl = '/lodestone/topics/detail/unclassified-multi-guild';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Neue Meldung ohne Klassifikation', url: topicUrl }]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === topicUrl
+      ? { status: 200, body: '<article><div class="news__detail__wrapper">Nichts erkannt.</div></article>', finalUrl: url }
+      : undefined,
+  });
+  try {
+    await runCycle({
+      store: db, discord, fetchText, now: () => new Date(NOW),
+      guilds: [
+        { guildId: 'established', eventChannelId: 'events-a', logChannelId: 'logs-a', firstRun: false },
+        { guildId: 'initializing', eventChannelId: 'events-b', logChannelId: 'logs-b', firstRun: true },
+      ],
+    });
+    assert.ok(discord.logChannels.some(({ channelId, content }) => channelId === 'logs-a' && content.includes('Nicht klassifiziert')));
+    assert.ok(!discord.logChannels.some(({ channelId, content }) => channelId === 'logs-b' && content.includes('Nicht klassifiziert')));
+  } finally {
+    db.close();
+  }
+});
+
+test('pending discovery adds every guild that joins while its first run is active', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'logs-a' });
+  const topicUrl = '/lodestone/topics/detail/pending-first-run-guild';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Patch 7.9 details', url: topicUrl }]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === topicUrl
+      ? { status: 503, body: '', finalUrl: url }
+      : undefined,
+  });
+  try {
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW), guilds: [
+      { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'logs-a', firstRun: false },
+    ] });
+    upsertGuildSetup(db, { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b' });
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW), guilds: [
+      { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'logs-a', firstRun: false },
+      { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b', firstRun: true },
+    ] });
+    const pending = JSON.parse(db.prepare("SELECT value FROM meta WHERE key = 'pending_discoveries'").get()?.value as string) as Array<{ firstRunGuildIds: string[] }>;
+    assert.ok(pending[0]?.firstRunGuildIds.includes('guild-b'));
+  } finally {
+    db.close();
   }
 });
 

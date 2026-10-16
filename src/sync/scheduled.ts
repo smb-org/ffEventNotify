@@ -59,7 +59,7 @@ export function scheduledEventPayloadFor(
   if (!(nowMs < scheduledStart && scheduledStart < endMs)) return undefined;
 
   return {
-    name: event.title.slice(0, 100),
+    name: (event.titleStatus === 'ok' ? event.title : 'FFXIV-Event').slice(0, 100),
     startUtc: new Date(scheduledStart).toISOString(),
     endUtc: event.endUtc,
     location: selectedLocation || LOCATION_FALLBACK,
@@ -198,7 +198,9 @@ export async function syncScheduledEvent({
   }
 
   const editTime = clock?.() ?? currentTime;
-  const payload = scheduledEventPayloadFor(event, sourceUrls, editTime);
+  const basePayload = scheduledEventPayloadFor(event, sourceUrls, editTime);
+  const preserveStart = matched.status === 'ACTIVE' || Date.parse(event.startUtc) < editTime.getTime();
+  const payload = basePayload && preserveStart ? { ...basePayload, startUtc: matched.startUtc } : basePayload;
   if (!payload || sameSchedule(matched, payload)) return matched.id;
 
   try {

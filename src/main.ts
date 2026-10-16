@@ -15,6 +15,7 @@ import {
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
   PermissionFlagsBits,
+  MessageFlags,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   type ChatInputCommandInteraction,
@@ -26,21 +27,27 @@ import { readConfig } from './config.ts';
 import { createTrackedFetch, FetchMetrics, runDryRunCycle } from './dry-run.ts';
 import { SourceHealthMonitor } from './health.ts';
 import { runCycle } from './cycle.ts';
+import { runGuildSyncFromStoredData } from './cycle.ts';
 import { openDb } from './store.ts';
 import { LodestoneRequestQueue } from './sources/queue.ts';
 import { collectRecentBotMessages } from './discord-history.ts';
 import { missingSetupPermissions, registerGlobalFfEventsCommand } from './commands.ts';
 import {
   deleteGuild,
+  getAllEvents,
+  getConfiguredGuilds,
   getGuild,
+  getStoredGuildIds,
   markGuildNeedsSetup,
   upsertGuildSetup,
 } from './store.ts';
+import { syncEventReminders } from './sync/reminders.ts';
 import { handleChecklistInteraction } from './interactions/checklist.ts';
 import type {
   DiscordActionRow,
   DiscordEmbed,
   DiscordMessagePayload,
+  DiscordMessageHistory,
   DiscordMessageSnapshot,
   DiscordPort,
   FetchText,
@@ -50,6 +57,7 @@ import type {
 } from './types.ts';
 
 export const CYCLE_INTERVAL_MS = 60 * 60 * 1_000;
+export const REMINDER_INTERVAL_MS = 5 * 60 * 1_000;
 
 export type CycleBody = () => Promise<void>;
 
@@ -62,6 +70,13 @@ export interface HourlySchedulerOptions {
   clock?: SchedulerClock;
   signal?: AbortSignal;
   onSkipped?: (tickAtMilliseconds: number) => void;
+  onCycleError?: (error: unknown) => void;
+}
+
+export interface ReminderSchedulerOptions {
+  clock?: SchedulerClock;
+  signal?: AbortSignal;
+  intervalMs?: number;
   onCycleError?: (error: unknown) => void;
 }
 
@@ -252,14 +267,14 @@ export class DiscordJsPort implements DiscordPort {
       content: payload.content,
       embeds: payload.embeds?.map(embedBuilder),
       ...(payload.components === undefined ? {} : { components: actionRowBuilders(payload.components) }),
-      ...(payload.allowedMentions === undefined ? {} : { allowedMentions: payload.allowedMentions }),
+      allowedMentions: { parse: [], users: payload.allowedMentions?.users ?? [] },
     });
     return messageSnapshot(message, this.client.user?.id);
   }
 
   async editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     const channel = await this.textChannel(channelId);
-    const message = await channel.messages.fetch(messageId);
+    const message = await channel.messages.fetch({ message: messageId, force: true });
     const edited = await message.edit({
       content: payload.content ?? null,
       embeds: payload.embeds?.map(embedBuilder) ?? [],
@@ -269,18 +284,20 @@ export class DiscordJsPort implements DiscordPort {
     return messageSnapshot(edited, this.client.user?.id);
   }
 
-  async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]> {
+  async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageHistory> {
     const channel = await this.textChannel(channelId);
     const botId = this.client.user?.id;
-    if (!botId) return [];
+    if (!botId) return { messages: [], complete: false };
     return collectRecentBotMessages(async (pageSize, before) => {
-      const messages = await channel.messages.fetch({ limit: pageSize, ...(before ? { before } : {}) });
+      const messages = await channel.messages.fetch({ limit: pageSize, cache: false, ...(before ? { before } : {}) });
       return [...messages.values()].map((message) => ({
         id: message.id,
         authorId: message.author.id,
         snapshot: messageSnapshot(message, botId),
       }));
-    }, botId, limit).then((messages) => messages.map(({ snapshot }) => snapshot));
+    }, botId, limit, { pageSize: 100, maxPages: 20 }).then(({ messages, complete }) => ({
+      messages: messages.map(({ snapshot }) => snapshot), complete,
+    }));
   }
 
   async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
@@ -294,12 +311,12 @@ export class DiscordJsPort implements DiscordPort {
   }
 
   async fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null> {
-    const channel = await this.textChannel(channelId);
     try {
-      const message = await channel.messages.fetch(messageId);
+      const channel = await this.textChannel(channelId);
+      const message = await channel.messages.fetch({ message: messageId, force: true });
       return messageSnapshot(message, this.client.user?.id);
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 10008) return null;
+      if (typeof error === 'object' && error !== null && 'code' in error && (error.code === 10008 || error.code === 10003)) return null;
       throw error;
     }
   }
@@ -343,13 +360,17 @@ export class DiscordJsPort implements DiscordPort {
 
   async pinMessage(channelId: string, messageId: string): Promise<void> {
     const channel = await this.textChannel(channelId);
-    const message = await channel.messages.fetch(messageId);
+    const message = await channel.messages.fetch({ message: messageId, force: true });
     await message.pin();
   }
 
   async sendLog(channelId: string, content: string): Promise<void> {
     await this.createMessage(channelId, { content });
   }
+}
+
+export function createDiscordClient(): Client {
+  return new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
 }
 
 export async function startHourlyScheduler(
@@ -385,6 +406,37 @@ export async function startHourlyScheduler(
   }
 
   await activeCycle;
+}
+
+export function createCoalescedCycleRunner(cycleBody: CycleBody): CycleBody {
+  let active: Promise<void> | undefined;
+  return () => {
+    if (active) return active;
+    const run = cycleBody().finally(() => { active = undefined; });
+    active = run;
+    return run;
+  };
+}
+
+export async function startReminderScheduler(
+  reminderBody: CycleBody,
+  options: ReminderSchedulerOptions = {},
+): Promise<void> {
+  const clock = options.clock ?? systemClock;
+  const interval = Math.max(1, options.intervalMs ?? REMINDER_INTERVAL_MS);
+  const signal = options.signal;
+  let nextTickAt = clock.now() + interval;
+  while (!signal?.aborted) {
+    const wait = Math.max(0, nextTickAt - clock.now());
+    if (wait > 0) await clock.sleep(wait, signal);
+    if (signal?.aborted) break;
+    nextTickAt = clock.now() + interval;
+    try {
+      await reminderBody();
+    } catch (error) {
+      (options.onCycleError ?? ((cause) => console.error('Der Erinnerungslauf ist fehlgeschlagen.', cause)))(error);
+    }
+  }
 }
 
 export function createQueuedFetchText(queue: LodestoneRequestQueue): FetchText {
@@ -472,7 +524,7 @@ async function startDryRun(options: CliOptions): Promise<void> {
 export async function startBot(): Promise<void> {
   const config = readConfig();
   const store = openDb(config.dbPath);
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = createDiscordClient();
   const discord = new DiscordJsPort(client);
   const fetchText = createQueuedFetchText(new LodestoneRequestQueue());
   const health = new SourceHealthMonitor(store);
@@ -488,6 +540,7 @@ export async function startBot(): Promise<void> {
     });
     await client.login(config.discordToken);
     await ready;
+    reconcileStoredGuilds(store, new Set(client.guilds.cache.keys()));
     const application = client.application;
     if (!application) throw new Error('Discord application is unavailable after login.');
     await registerGlobalFfEventsCommand(application.commands);
@@ -498,36 +551,58 @@ export async function startBot(): Promise<void> {
         fetchText,
         health,
       };
-    let cycleQueue: Promise<void> = Promise.resolve();
-    const runSerializedCycle = (): Promise<void> => {
-      const run = cycleQueue.then(async () => { await runCycle(cycleOptions); });
-      cycleQueue = run.catch((error: unknown) => {
+    const runSerializedCycle = createCoalescedCycleRunner(() =>
+      runCycle(cycleOptions).then(() => undefined).catch((error: unknown) => {
         console.error('Der Stundenzyklus ist fehlgeschlagen.', error);
-      });
-      return run;
-    };
+      }));
+    const runGuildSync = (guildId: string): Promise<void> => runGuildSyncFromStoredData(cycleOptions, guildId);
+    const runReminderPass = createCoalescedCycleRunner(async (): Promise<void> => {
+      for (const guild of getConfiguredGuilds(store)) {
+        try {
+          await syncEventReminders({
+            guildId: guild.guildId,
+            channelId: guild.eventChannelId!,
+            events: getAllEvents(store),
+            store,
+            discord,
+            now: new Date(),
+          });
+        } catch (error) {
+          console.error(`Erinnerungen für Server ${guild.guildId} konnten nicht synchronisiert werden.`, error);
+        }
+      }
+    });
+    const reminderScheduler = startReminderScheduler(runReminderPass, {
+      signal: controller.signal,
+      onCycleError: (error) => console.error('Der Erinnerungslauf ist fehlgeschlagen.', error),
+    });
+    void runReminderPass();
 
     client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
-        void handleFfEventsSetup(interaction, store, runSerializedCycle);
+        void handleFfEventsSetup(interaction, store, runGuildSync).catch((error: unknown) => {
+          console.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
+        });
       } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
-        void handleChecklistInteraction(interaction, store);
+        void handleChecklistInteraction(interaction, store).catch((error: unknown) => {
+          console.error('Die Checkliste konnte nicht verarbeitet werden.', error);
+        });
       }
     });
     client.on(Events.GuildDelete, (guild) => deleteGuild(store, guild.id));
     client.on(Events.ChannelDelete, (channel) => {
       const guildId = 'guildId' in channel ? channel.guildId : null;
       if (!guildId) return;
-      const guild = getGuild(store, guildId);
-      if (guild && (guild.eventChannelId === channel.id || guild.logChannelId === channel.id)) {
-        markGuildNeedsSetup(store, guildId);
-      }
+      void handleChannelDelete(guildId, channel.id, store, discord).catch((error: unknown) => {
+        console.error('Der gelöschte Kanal konnte nicht protokolliert werden.', error);
+      });
     });
 
     await startHourlyScheduler(runSerializedCycle, {
       signal: controller.signal,
       onCycleError: (error) => console.error('Der Stundenzyklus ist fehlgeschlagen.', error),
     });
+    await reminderScheduler;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
@@ -539,18 +614,18 @@ export async function startBot(): Promise<void> {
 export async function handleFfEventsSetup(
   interaction: ChatInputCommandInteraction,
   store: ReturnType<typeof openDb>,
-  runImmediateCycle: () => Promise<void>,
+  runGuildSync: (guildId: string) => Promise<void>,
 ): Promise<void> {
   if (!interaction.inGuild() || !interaction.guild) {
-    await interaction.reply({ content: 'Dieser Befehl funktioniert nur auf einem Server.', ephemeral: true });
+    await interaction.reply({ content: 'Dieser Befehl funktioniert nur auf einem Server.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    await interaction.reply({ content: 'Dafür brauchst du die Berechtigung „Server verwalten“.', ephemeral: true });
+    await interaction.reply({ content: 'Dafür brauchst du die Berechtigung „Server verwalten“.', flags: MessageFlags.Ephemeral });
     return;
   }
   if (interaction.options.getSubcommand() !== 'setup') {
-    await interaction.reply({ content: 'Dieser Unterbefehl ist noch nicht verfügbar.', ephemeral: true });
+    await interaction.reply({ content: 'Dieser Unterbefehl ist noch nicht verfügbar.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -559,21 +634,23 @@ export async function handleFfEventsSetup(
   const isGuildText = (channel: TextChannel) => channel.guildId === interaction.guildId &&
     (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement);
   if (!isGuildText(eventChannel) || !isGuildText(logChannel)) {
-    await interaction.reply({ content: 'Bitte wähle zwei Textkanäle dieses Servers aus.', ephemeral: true });
+    await interaction.reply({ content: 'Bitte wähle zwei Textkanäle dieses Servers aus.', flags: MessageFlags.Ephemeral });
     return;
   }
 
-  const botMember = await interaction.guild.members.fetchMe();
-  const missing = missingSetupPermissions(
-    botMember.permissions,
-    eventChannel.permissionsFor(botMember),
-    logChannel.permissionsFor(botMember),
-  );
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  let botMember;
+  try {
+    botMember = await interaction.guild.members.fetchMe();
+  } catch (error) {
+    console.error('Die Bot-Berechtigungen konnten nicht abgerufen werden.', error);
+    await interaction.editReply({ content: 'Die Berechtigungen des Bots konnten gerade nicht geprüft werden. Bitte versuche es erneut.' });
+    return;
+  }
+  const missing = missingSetupPermissions(botMember.permissions,
+    eventChannel.permissionsFor(botMember), logChannel.permissionsFor(botMember));
   if (missing.length > 0) {
-    await interaction.reply({
-      content: `Mir fehlen noch diese Berechtigungen:\n${missing.map((permission) => `• ${permission}`).join('\n')}`,
-      ephemeral: true,
-    });
+    await interaction.editReply({ content: `Mir fehlen noch diese Berechtigungen:\n${missing.map((permission) => `• ${permission}`).join('\n')}` });
     return;
   }
 
@@ -582,11 +659,35 @@ export async function handleFfEventsSetup(
     eventChannelId: eventChannel.id,
     logChannelId: logChannel.id,
   });
-  await interaction.reply({
+  try {
+    await runGuildSync(interaction.guildId);
+  } catch (error) {
+    console.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);
+  }
+  await interaction.editReply({
     content: `✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>. Der erste Abgleich für diesen Server startet jetzt.`,
-    ephemeral: true,
   });
-  void runImmediateCycle().catch((error: unknown) => console.error('Der sofortige Server-Abgleich ist fehlgeschlagen.', error));
+}
+
+export function reconcileStoredGuilds(store: ReturnType<typeof openDb>, activeGuildIds: ReadonlySet<string>): void {
+  for (const guildId of getStoredGuildIds(store)) {
+    if (!activeGuildIds.has(guildId)) deleteGuild(store, guildId);
+  }
+}
+
+export async function handleChannelDelete(
+  guildId: string,
+  channelId: string,
+  store: ReturnType<typeof openDb>,
+  discord: Pick<DiscordPort, 'sendLog'>,
+): Promise<void> {
+  const guild = getGuild(store, guildId);
+  if (!guild || (guild.eventChannelId !== channelId && guild.logChannelId !== channelId)) return;
+  markGuildNeedsSetup(store, guildId);
+  if (guild.eventChannelId === channelId && guild.logChannelId && guild.logChannelId !== channelId) {
+    await discord.sendLog(guild.logChannelId,
+      'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.');
+  }
 }
 
 export async function main(cycleBody?: CycleBody, options: HourlySchedulerOptions = {}): Promise<void> {

@@ -6,9 +6,12 @@ import {
   ButtonStyle,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  MessageFlags,
   type ButtonInteraction,
   type StringSelectMenuInteraction,
 } from 'discord.js';
+import { randomUUID } from 'node:crypto';
+import { stableEventIdentity } from '../event-identity.ts';
 import {
   ensureChecklistItems,
   ensureChecklistReminderPreference,
@@ -34,23 +37,26 @@ export function saveChecklistSelection(store: Store, selection: ChecklistSelecti
 }
 
 export type ChecklistCustomId =
-  | { action: 'open'; eventKey: string }
-  | { action: 'select'; eventKey: string; page: number }
-  | { action: 'page'; eventKey: string; page: number }
-  | { action: 'save'; eventKey: string }
-  | { action: 'reminder'; eventKey: string };
+  | { action: 'open'; eventHash: string }
+  | { action: 'select'; eventHash: string; panelToken: string; page: number }
+  | { action: 'page'; eventHash: string; panelToken: string; page: number }
+  | { action: 'save'; eventHash: string; panelToken: string }
+  | { action: 'reminder'; eventHash: string; panelToken: string };
 
 export function parseChecklistCustomId(customId: string): ChecklistCustomId | undefined {
-  if (customId.startsWith('ffe:cl:')) return { action: 'open', eventKey: customId.slice('ffe:cl:'.length) };
-  if (customId.startsWith('ffe:save:')) return { action: 'save', eventKey: customId.slice('ffe:save:'.length) };
-  if (customId.startsWith('ffe:reminder:')) return { action: 'reminder', eventKey: customId.slice('ffe:reminder:'.length) };
-  for (const action of ['select', 'page'] as const) {
-    const prefix = `ffe:${action}:`;
-    if (!customId.startsWith(prefix)) continue;
-    const divider = customId.lastIndexOf(':');
-    const page = Number(customId.slice(divider + 1));
-    const eventKey = customId.slice(prefix.length, divider);
-    if (eventKey && Number.isSafeInteger(page) && page >= 1) return { action, eventKey, page };
+  const parts = customId.split(':');
+  if (parts[0] !== 'ffe') return undefined;
+  const action = parts[1];
+  const eventHash = parts[2];
+  if (!eventHash || !/^[a-f0-9]{32}$/.test(eventHash)) return undefined;
+  if (action === 'cl' && parts.length === 3) return { action: 'open', eventHash };
+  const panelToken = parts[3];
+  if (!panelToken) return undefined;
+  if (action === 'save' && parts.length === 4) return { action, eventHash, panelToken };
+  if (action === 'reminder' && parts.length === 4) return { action, eventHash, panelToken };
+  if (action === 'select' || action === 'page') {
+    const page = Number(parts[4]);
+    if (parts.length === 5 && Number.isSafeInteger(page) && page >= 1) return { action, eventHash, panelToken, page };
   }
   return undefined;
 }
@@ -59,12 +65,14 @@ interface ChecklistSession {
   guildId: string;
   userId: string;
   eventKey: string;
-  title: string;
+  eventHash: string;
+  panelToken: string;
   itemIds: string[];
   fingerprint: string;
   doneItemIds: Set<string>;
   page: number;
   remindersEnabled: boolean;
+  expiresAt: number;
 }
 
 type ChecklistInteraction = ButtonInteraction | StringSelectMenuInteraction;
@@ -72,9 +80,24 @@ type ChecklistRow = ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSel
 
 const PAGE_SIZE = 25;
 const sessions = new Map<string, ChecklistSession>();
+const SESSION_TTL_MS = 60 * 60 * 1_000;
+const MAX_SESSIONS = 500;
 
-function sessionKey(guildId: string, userId: string, eventKey: string): string {
-  return JSON.stringify([guildId, userId, eventKey]);
+function eventForHash(store: Store, eventHash: string): StoreEvent | undefined {
+  const matches = getAllEvents(store).filter((event) => stableEventIdentity(event.eventKey).slice(0, 32) === eventHash);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function expireSessions(nowMs: number): void {
+  for (const [token, session] of sessions) {
+    if (session.expiresAt <= nowMs) sessions.delete(token);
+  }
+}
+
+function createPanelToken(): string {
+  let token = randomUUID().replaceAll('-', '');
+  while (sessions.has(token)) token = randomUUID().replaceAll('-', '');
+  return token;
 }
 
 function eventFingerprint(event: StoreEvent): string {
@@ -111,7 +134,7 @@ function checklistRows(session: ChecklistSession, event: StoreEvent): ChecklistR
   const start = session.page * PAGE_SIZE;
   const pageRewards = event.rewards.slice(start, start + PAGE_SIZE);
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`ffe:select:${session.eventKey}:${session.page + 1}`)
+    .setCustomId(`ffe:select:${session.eventHash}:${session.panelToken}:${session.page + 1}`)
     .setPlaceholder('Wähle deine erledigten Belohnungen')
     .setMinValues(0)
     .setMaxValues(pageRewards.length)
@@ -126,28 +149,28 @@ function checklistRows(session: ChecklistSession, event: StoreEvent): ChecklistR
   const rows: ChecklistRow[] = [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 
   const previous = new ButtonBuilder()
-    .setCustomId(`ffe:page:${session.eventKey}:${Math.max(1, session.page)}`)
+    .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:${Math.max(1, session.page)}`)
     .setLabel('Zurück')
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(session.page === 0);
   const indicator = new ButtonBuilder()
-    .setCustomId(`ffe:page:${session.eventKey}:${session.page + 1}`)
+    .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:${session.page + 1}`)
     .setLabel(`Seite ${session.page + 1}/${pageCount}`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(true);
   const next = new ButtonBuilder()
-    .setCustomId(`ffe:page:${session.eventKey}:${Math.min(pageCount, session.page + 2)}`)
+    .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:${Math.min(pageCount, session.page + 2)}`)
     .setLabel('Weiter')
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(session.page + 1 >= pageCount);
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(previous, indicator, next));
 
   const reminder = new ButtonBuilder()
-    .setCustomId(`ffe:reminder:${session.eventKey}`)
+    .setCustomId(`ffe:reminder:${session.eventHash}:${session.panelToken}`)
     .setLabel('Erinnerungen an/aus')
     .setStyle(session.remindersEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
   const save = new ButtonBuilder()
-    .setCustomId(`ffe:save:${session.eventKey}`)
+    .setCustomId(`ffe:save:${session.eventHash}:${session.panelToken}`)
     .setLabel('Speichern')
     .setStyle(ButtonStyle.Primary);
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(reminder, save));
@@ -166,7 +189,7 @@ function interactionOptions(session: ChecklistSession, event: StoreEvent, messag
 async function replyError(interaction: ChecklistInteraction, content: string, updateCurrent = false): Promise<void> {
   try {
     if (updateCurrent) await interaction.update({ content, components: [] });
-    else await interaction.reply({ content, ephemeral: true });
+    else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
   } catch {
     // Expired and stale Discord interactions are expected and should never escape the handler.
   }
@@ -179,6 +202,7 @@ export async function handleChecklistInteraction(
 ): Promise<void> {
   const parsed = parseChecklistCustomId(interaction.customId);
   if (!parsed) return;
+  expireSessions(now.getTime());
   if (!interaction.inGuild() || !interaction.guildId) {
     await replyError(interaction, 'Die Checkliste funktioniert nur auf einem Server.');
     return;
@@ -186,42 +210,57 @@ export async function handleChecklistInteraction(
 
   const guildId = interaction.guildId;
   const userId = interaction.user.id;
-  const key = sessionKey(guildId, userId, parsed.eventKey);
   try {
     if (parsed.action === 'open') {
-      const event = checkEvent(store, parsed.eventKey, now);
-      if (!event) {
-        await replyError(interaction, errorForEvent(store, parsed.eventKey, now));
+      const event = eventForHash(store, parsed.eventHash);
+      const eventKey = event?.eventKey ?? parsed.eventHash;
+      const checkedEvent = checkEvent(store, eventKey, now);
+      if (!checkedEvent) {
+        await replyError(interaction, errorForEvent(store, eventKey, now));
         return;
       }
-      ensureChecklistItems(store, guildId, userId, parsed.eventKey, event.rewards.map((reward) => reward.itemId));
-      const remindersEnabled = ensureChecklistReminderPreference(store, guildId, userId, parsed.eventKey);
-      const validIds = new Set(event.rewards.map((reward) => reward.itemId));
-      const doneItemIds = new Set(getChecklistDoneItemIds(store, guildId, userId, parsed.eventKey).filter((itemId) => validIds.has(itemId)));
+      const sessionEvent = checkedEvent;
+      ensureChecklistItems(store, guildId, userId, sessionEvent.eventKey, sessionEvent.rewards.map((reward) => reward.itemId));
+      const remindersEnabled = ensureChecklistReminderPreference(store, guildId, userId, sessionEvent.eventKey);
+      const validIds = new Set(sessionEvent.rewards.map((reward) => reward.itemId));
+      const doneItemIds = new Set(getChecklistDoneItemIds(store, guildId, userId, sessionEvent.eventKey).filter((itemId) => validIds.has(itemId)));
+      const panelToken = createPanelToken();
       const session: ChecklistSession = {
         guildId,
         userId,
-        eventKey: parsed.eventKey,
-        title: event.title,
-        itemIds: event.rewards.map((reward) => reward.itemId),
-        fingerprint: eventFingerprint(event),
+        eventKey: sessionEvent.eventKey,
+        eventHash: parsed.eventHash,
+        panelToken,
+        itemIds: sessionEvent.rewards.map((reward) => reward.itemId),
+        fingerprint: eventFingerprint(sessionEvent),
         doneItemIds,
         page: 0,
         remindersEnabled,
+        expiresAt: now.getTime() + SESSION_TTL_MS,
       };
-      sessions.set(key, session);
-      await interaction.reply({ ...interactionOptions(session, event), ephemeral: true });
+      while (sessions.size >= MAX_SESSIONS) {
+        const oldest = sessions.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        sessions.delete(oldest);
+      }
+      sessions.set(panelToken, session);
+      await interaction.reply({ ...interactionOptions(session, sessionEvent), flags: MessageFlags.Ephemeral });
       return;
     }
 
-    const session = sessions.get(key);
-    if (!session) {
+    const session = sessions.get(parsed.panelToken);
+    if (!session || session.eventHash !== parsed.eventHash || session.guildId !== guildId || session.userId !== userId) {
+      await replyError(interaction, 'Diese Checkliste ist abgelaufen. Bitte öffne sie erneut.', true);
+      return;
+    }
+    if (session.expiresAt <= now.getTime()) {
+      sessions.delete(parsed.panelToken);
       await replyError(interaction, 'Diese Checkliste ist abgelaufen. Bitte öffne sie erneut.', true);
       return;
     }
     const event = validateSession(store, session, now);
     if (!event) {
-      sessions.delete(key);
+      sessions.delete(parsed.panelToken);
       await replyError(interaction, 'Die Belohnungsliste hat sich geändert oder das Event ist beendet. Bitte öffne die Checkliste erneut.', true);
       return;
     }

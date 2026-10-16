@@ -1,11 +1,16 @@
 // Sends one persisted reminder slot to opted-in players who still have open rewards.
 
 import {
-  claimReminderSlot,
   getChecklistReminderRecipients,
+  getEventSources,
+  getGuild,
+  hasReminderDelivery,
+  recordReminderDelivery,
+  type ReminderDeliveryKey,
   type Store,
   type StoreEvent,
 } from '../store.ts';
+import { bestEventSourceUrl, stableEventIdentity } from '../event-identity.ts';
 import type { DiscordPort, FieldStatus } from '../types.ts';
 
 export interface ScheduledReminder {
@@ -48,7 +53,8 @@ interface ReminderRecipient {
 }
 
 const MAX_MESSAGE_LENGTH = 2_000;
-const MAX_SLOT_LATENESS_MS = 60 * 60 * 1_000;
+const REMINDER_RECOVERY_LIMIT = 200;
+const REMINDER_MARKER_PLACEHOLDER = `ffe-r-${'0'.repeat(32)}`;
 
 function reminderLeadLabel(leadHours: 24 | 72): string {
   return leadHours === 72 ? 'Noch 3 Tage' : 'Noch 1 Tag';
@@ -93,6 +99,22 @@ function splitReminderMessages(prefix: string, recipients: readonly ReminderReci
   return messages;
 }
 
+function eventLink(event: StoreEvent, store: Store, fragment: string): string | undefined {
+  const source = bestEventSourceUrl(getEventSources(store, event.id).map((entry) => entry.url));
+  if (!source) return undefined;
+  const url = new URL(source);
+  url.hash = fragment;
+  return url.toString();
+}
+
+function reminderBatchKey(guildId: string, eventKey: string, leadHours: 24 | 72, users: readonly string[]): string {
+  return stableEventIdentity(JSON.stringify([guildId, eventKey, leadHours, users])).slice(0, 32);
+}
+
+function batchMarker(guildId: string, eventKey: string, leadHours: 24 | 72, users: readonly string[]): string {
+  return `ffe-r-${reminderBatchKey(guildId, eventKey, leadHours, users)}`;
+}
+
 export async function syncEventReminders({
   guildId,
   channelId,
@@ -101,6 +123,7 @@ export async function syncEventReminders({
   discord,
   now = new Date(),
 }: SyncEventRemindersOptions): Promise<void> {
+  if (!getGuild(store, guildId)) return;
   const nowMs = now.getTime();
   if (!Number.isFinite(nowMs)) return;
   for (const event of events) {
@@ -110,20 +133,45 @@ export async function syncEventReminders({
     for (const leadHours of [72, 24] as const) {
       const dueAt = endMs - leadHours * 60 * 60 * 1_000;
       const lateness = nowMs - dueAt;
-      if (lateness < 0 || lateness > MAX_SLOT_LATENESS_MS) continue;
+      if (lateness < 0 || lateness > leadHours * 60 * 60 * 1_000 / 2) continue;
       const recipients = recipientsForEvent(event, store, guildId);
       if (recipients.length === 0) continue;
-      // Claim before sending so a timeout or restart after Discord accepted a message cannot duplicate pings.
-      if (!claimReminderSlot(store, guildId, event.eventKey, leadHours)) continue;
-      const prefix = `${reminderLeadLabel(leadHours)}: ${event.title} — offen bei euch:`;
-      for (const message of splitReminderMessages(prefix, recipients)) {
+      const placeholderLink = eventLink(event, store, REMINDER_MARKER_PLACEHOLDER);
+      if (!placeholderLink) {
+        console.warn(`Für „${event.titleStatus === 'ok' ? event.title : 'FFXIV-Event'}“ gibt es keine bestätigte Quellenadresse; die Erinnerung bleibt ausstehend.`);
+        continue;
+      }
+      const displayTitle = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+      const title = displayTitle.replace(/[\\[\]()*_~`|>]/g, '\\$&');
+      const linkedTitle = placeholderLink ? `[${title}](${placeholderLink})` : title;
+      const prefix = `${reminderLeadLabel(leadHours)}: ${linkedTitle} — offen bei euch:`;
+      const batches = splitReminderMessages(prefix, recipients);
+      let recentMessages: Awaited<ReturnType<DiscordPort['fetchRecentBotMessages']>> | undefined;
+      for (const message of batches) {
+        const batchKey = reminderBatchKey(guildId, event.eventKey, leadHours, message.userIds);
+        const delivery: ReminderDeliveryKey = { guildId, eventKey: event.eventKey, leadHours, batchKey };
+        if (hasReminderDelivery(store, delivery)) continue;
+        if (!recentMessages) {
+          recentMessages = await discord.fetchRecentBotMessages(channelId, REMINDER_RECOVERY_LIMIT);
+          if (!recentMessages.complete) {
+            console.warn(`Die Suche nach früheren Erinnerungen für „${displayTitle}“ ist unvollständig; der Versand wird wiederholt.`);
+            break;
+          }
+        }
+        const marker = batchMarker(guildId, event.eventKey, leadHours, message.userIds);
+        if (recentMessages.messages.some((candidate) => candidate.content.includes(`#${marker}`))) {
+          recordReminderDelivery(store, delivery);
+          continue;
+        }
+        const content = message.content.replace(REMINDER_MARKER_PLACEHOLDER, marker);
         try {
           await discord.createMessage(channelId, {
-            content: message.content,
+            content,
             allowedMentions: { parse: [], users: message.userIds },
           });
+          recordReminderDelivery(store, delivery);
         } catch (error) {
-          console.warn(`Erinnerung für „${event.title}“ konnte nicht gesendet werden.`, error);
+          console.warn(`Erinnerung für „${displayTitle}“ konnte nicht gesendet werden.`, error);
         }
       }
     }

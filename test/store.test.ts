@@ -28,6 +28,8 @@ import {
   deleteGuild,
   markGuildFirstRunDone,
   markGuildNeedsSetup,
+  getMetaValue,
+  setMetaValue,
 } from '../src/store.ts';
 
 function newEvent(db: ReturnType<typeof openDb>, eventKey: string, eventType: 'seasonal-special' | 'maintenance' | 'topic-generic' = 'maintenance'): number {
@@ -55,9 +57,12 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'guild_event_objects',
       'guilds',
       'items',
+      'legacy_discord_refs',
       'meta',
+      'reminder_deliveries',
       'reminder_slots',
       'reminders',
+      'schema_version',
       'seen_entries',
       'warnings_sent',
     ]);
@@ -342,6 +347,42 @@ test('event data is shared while Discord objects and warning delivery state stay
     deleteGuild(db, 'guild-a');
     assert.equal(getGuildEventObject(db, 'guild-a', 'shared-event'), undefined);
     assert.equal(getGuildEventObject(db, 'guild-b', 'shared-event')?.messageId, 'message-b');
+  } finally {
+    db.close();
+  }
+});
+
+test('Discord reconciliation writes cannot recreate a guild after its removal', () => {
+  const db = openDb(':memory:');
+  try {
+    const eventId = newEvent(db, 'removed-guild-event');
+    addSource(db, eventId, 'https://example.test/removed-guild-event', 'topic');
+    upsertGuildSetup(db, { guildId: 'departed', eventChannelId: 'events', logChannelId: 'logs' });
+    deleteGuild(db, 'departed');
+
+    setGuildDiscordIds(db, 'departed', 'removed-guild-event', { messageId: 'stale-message' });
+
+    assert.equal(getGuild(db, 'departed'), undefined);
+    assert.equal(getGuildEventObject(db, 'departed', 'removed-guild-event'), undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('removing a guild prunes its id from pending discovery first-run metadata', () => {
+  const db = openDb(':memory:');
+  try {
+    upsertGuildSetup(db, { guildId: 'departed', eventChannelId: 'events', logChannelId: 'logs' });
+    setMetaValue(db, 'pending_discoveries', JSON.stringify([{
+      entry: { title: 'pending', url: 'https://example.test/pending', source: 'topic' },
+      firstRun: true,
+      firstRunGuildIds: ['departed', 'remaining'],
+    }]));
+
+    deleteGuild(db, 'departed');
+
+    const pending = JSON.parse(getMetaValue(db, 'pending_discoveries') ?? '[]') as Array<{ firstRunGuildIds: string[] }>;
+    assert.deepEqual(pending[0]?.firstRunGuildIds, ['remaining']);
   } finally {
     db.close();
   }

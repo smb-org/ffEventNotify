@@ -1,6 +1,6 @@
 // Runs the production cycle with a Discord port that only records intended effects.
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -10,6 +10,8 @@ import {
   getEventSources,
   getMetaValue,
   isFirstRun,
+  deleteGuild,
+  upsertGuildSetup,
   type Store,
   type StoreEvent,
 } from './store.ts';
@@ -186,13 +188,13 @@ export class RecordingDiscordPort implements DiscordPort {
     return message;
   }
 
-  async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]> {
+  async fetchRecentBotMessages(channelId: string, limit: number): Promise<import('./types.ts').DiscordMessageHistory> {
     this.recordedActions.push({ type: 'fetch-messages', channelId, limit });
-    return [...this.messages.values()]
+    return { messages: [...this.messages.values()]
       .filter((message) => message.channelId === channelId)
       .slice(-Math.max(1, limit))
       .reverse()
-      .map((message) => ({ ...message, embeds: message.embeds.map(copyEmbed) }));
+      .map((message) => ({ ...message, embeds: message.embeds.map(copyEmbed) })), complete: true };
   }
 
   async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
@@ -476,18 +478,26 @@ export async function runDryRunCycle(options: DryRunCycleOptions): Promise<DryRu
   const metrics = options.fetchMetrics ?? new FetchMetrics();
   const fetchText = options.fetchMetrics ? options.fetchText : observedFetchText(options.fetchText, metrics);
   const discord = new RecordingDiscordPort();
-  const cycle = await runCycle({
-    store: options.store,
-    discord,
-    fetchText,
-    guilds: [{
-      guildId: 'dry-run-guild',
-      eventChannelId: 'dry-run-events',
-      logChannelId: 'dry-run-logs',
-      firstRun: isFirstRun(options.store),
-    }],
-    ...(options.now ? { now: options.now } : {}),
-  });
+  const guildId = `dry-run-${randomUUID()}`;
+  upsertGuildSetup(options.store, { guildId, eventChannelId: 'dry-run-events', logChannelId: 'dry-run-logs' });
+  let cycle: CycleResult;
+  try {
+    cycle = await runCycle({
+      store: options.store,
+      discord,
+      fetchText,
+      guilds: [{
+        guildId,
+        eventChannelId: 'dry-run-events',
+        logChannelId: 'dry-run-logs',
+        firstRun: isFirstRun(options.store),
+      }],
+      skipGlobalFirstRunMark: true,
+      ...(options.now ? { now: options.now } : {}),
+    });
+  } finally {
+    deleteGuild(options.store, guildId);
+  }
   const fetchStatistics = metrics.snapshot();
   const reportNow = options.now?.() ?? new Date();
   return {

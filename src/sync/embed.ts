@@ -35,9 +35,9 @@ function timestamp(utc: string, style: 'f' | 'R'): string {
 }
 
 function timeFields(event: StoreEvent): EmbedField[] {
-  if (event.startStatus !== 'ok' || !event.startUtc) return [];
+  if (!event.startUtc) return [];
   const fields: EmbedField[] = [{ name: 'Beginn', value: timestamp(event.startUtc, 'f'), inline: true }];
-  if (event.endStatus === 'ok' && event.endUtc) {
+  if (event.endUtc) {
     fields.push(
       { name: 'Ende', value: timestamp(event.endUtc, 'f'), inline: true },
       { name: 'Endet', value: timestamp(event.endUtc, 'R'), inline: true },
@@ -168,7 +168,7 @@ export function buildEventComponents(event: StoreEvent, sourceUrls: readonly str
       type: 'button',
       style: 'primary',
       label: 'Meine Checkliste',
-      customId: `ffe:cl:${event.eventKey}`,
+      customId: `ffe:cl:${stableEventIdentity(event.eventKey).slice(0, 32)}`,
     });
   }
   if (sourceUrl) {
@@ -263,23 +263,27 @@ export async function syncEventEmbed({
   const embed = buildEventEmbed(event, sourceUrls);
   const components = buildEventComponents(event, sourceUrls);
   const payload = { embeds: [embed], components };
-  const recent = await discord.fetchRecentBotMessages(channelId, 50);
+  const object = getGuildEventObject(store, guildId, event.eventKey);
+  let stored: DiscordMessageSnapshot | null = null;
+  if (object?.messageId && object.messageChannelId === channelId) {
+    const fetched = await discord.fetchMessage(channelId, object.messageId);
+    if (fetched?.authorIsBot && fetched.embeds.some((candidate) => embedHasMarker(candidate, event) || hasLegacyMarker(candidate, event, sourceUrls))) {
+      stored = fetched;
+    }
+  }
+
+  let recent: DiscordMessageSnapshot[] = [];
+  if (!stored) {
+    const search = await discord.fetchRecentBotMessages(channelId, 200);
+    if (!search.complete) throw new Error('Die Suche nach vorhandenen Meldungen ist unvollständig.');
+    recent = search.messages;
+  }
   const stableMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => embedHasMarker(candidate, event)));
   if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Meldungen tragen dieselbe Quellenmarkierung für ${event.title}.`);
   const stableMatch = stableMatches[0];
   const legacyMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => hasLegacyMarker(candidate, event, sourceUrls)));
   if (legacyMatches.length > 1) throw new Error(`Mehrere ältere Discord-Meldungen passen zu ${event.title}.`);
   const legacyMatch = legacyMatches[0];
-  const object = getGuildEventObject(store, guildId, event.eventKey);
-  let stored: DiscordMessageSnapshot | null = null;
-  if (object?.messageId && object.messageChannelId === channelId) {
-    try {
-      const fetched = await discord.fetchMessage(channelId, object.messageId);
-      if (fetched?.authorIsBot && fetched.embeds.some((candidate) => embedHasMarker(candidate, event) || hasLegacyMarker(candidate, event, sourceUrls))) stored = fetched;
-    } catch {
-      // A deleted message is treated as missing; the marker search below can still recover it.
-    }
-  }
   const existing = stored ?? stableMatch ?? legacyMatch;
 
   if (existing) {

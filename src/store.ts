@@ -58,6 +58,13 @@ export interface ChecklistReminderRecipient {
   openItemIds: string[];
 }
 
+export interface ReminderDeliveryKey {
+  guildId: string;
+  eventKey: string;
+  leadHours: 24 | 72;
+  batchKey: string;
+}
+
 export interface StoredGuild {
   guildId: string;
   eventChannelId: string | null;
@@ -101,6 +108,10 @@ export interface CachedItem {
 }
 
 const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_key TEXT NOT NULL UNIQUE,
@@ -236,11 +247,81 @@ const SCHEMA = `
     PRIMARY KEY (guild_id, event_key, lead_hours)
   );
 
+  CREATE TABLE IF NOT EXISTS reminder_deliveries (
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    lead_hours INTEGER NOT NULL CHECK (lead_hours IN (24, 72)),
+    batch_key TEXT NOT NULL,
+    sent_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (guild_id, event_key, lead_hours, batch_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS legacy_discord_refs (
+    event_key TEXT PRIMARY KEY REFERENCES events(event_key) ON DELETE CASCADE,
+    message_id TEXT,
+    scheduled_event_id TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_events_end_utc ON events(end_utc);
   CREATE INDEX IF NOT EXISTS idx_event_sources_event_id ON event_sources(event_id);
   CREATE INDEX IF NOT EXISTS idx_seen_entries_first_seen_at ON seen_entries(first_seen_at);
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
+
+const CURRENT_SCHEMA_VERSION = 2;
+
+function tableExists(db: Store, name: string): boolean {
+  return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
+}
+
+function tableColumns(db: Store, name: string): Set<string> {
+  if (!tableExists(db, name)) return new Set();
+  return new Set((db.prepare(`PRAGMA table_info(${name})`).all() as Array<{ name: string }>).map(({ name: column }) => column));
+}
+
+function migrateV1ToV2(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const warningColumns = tableColumns(db, 'warnings_sent');
+    if (warningColumns.has('key') && !warningColumns.has('guild_id') && !tableExists(db, 'legacy_warnings_sent_v1')) {
+      db.exec('ALTER TABLE warnings_sent RENAME TO legacy_warnings_sent_v1');
+    }
+    db.exec(SCHEMA);
+
+    const eventColumns = tableColumns(db, 'events');
+    if (eventColumns.has('discord_message_id') || eventColumns.has('scheduled_event_id')) {
+      const messageColumn = eventColumns.has('discord_message_id') ? 'discord_message_id' : 'NULL';
+      const scheduledColumn = eventColumns.has('scheduled_event_id') ? 'scheduled_event_id' : 'NULL';
+      db.exec(`INSERT INTO legacy_discord_refs (event_key, message_id, scheduled_event_id)
+        SELECT event_key, ${messageColumn}, ${scheduledColumn} FROM events
+        WHERE (${messageColumn} IS NOT NULL OR ${scheduledColumn} IS NOT NULL) AND 1
+        ON CONFLICT(event_key) DO NOTHING`);
+    }
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function initializeSchema(db: Store): void {
+  const hadEvents = tableExists(db, 'events');
+  const version = tableExists(db, 'schema_version')
+    ? (db.prepare('SELECT version FROM schema_version ORDER BY rowid DESC LIMIT 1').get() as { version: number } | undefined)?.version ?? 0
+    : hadEvents ? 1 : 0;
+
+  if (version > CURRENT_SCHEMA_VERSION) throw new Error(`Database schema version ${version} is newer than supported version ${CURRENT_SCHEMA_VERSION}.`);
+  if (version === 0) {
+    db.exec(SCHEMA);
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
+  } else if (version < CURRENT_SCHEMA_VERSION) {
+    migrateV1ToV2(db);
+  } else {
+    db.exec(SCHEMA);
+  }
+}
 
 function runTransaction<T>(db: Store, action: () => T): T {
   db.exec('BEGIN IMMEDIATE');
@@ -257,7 +338,7 @@ function runTransaction<T>(db: Store, action: () => T): T {
 export function openDb(path: string): Store {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON');
-  db.exec(SCHEMA);
+  initializeSchema(db);
   const eventColumns = db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>;
   if (!eventColumns.some((column) => column.name === 'image_url')) db.exec('ALTER TABLE events ADD COLUMN image_url TEXT');
   for (const field of ['start', 'end', 'rewards', 'description'] as const) {
@@ -298,34 +379,54 @@ export function getConfiguredGuilds(db: Store): StoredGuild[] {
   return ids.map(({ guildId }) => getGuild(db, guildId)!).filter(Boolean);
 }
 
+export function getStoredGuildIds(db: Store): string[] {
+  return (db.prepare('SELECT guild_id AS guildId FROM guilds ORDER BY guild_id').all() as Array<{ guildId: string }>)
+    .map(({ guildId }) => guildId);
+}
+
 export function upsertGuildSetup(
   db: Store,
   input: { guildId: string; eventChannelId: string; logChannelId: string; setupAt?: string },
 ): { created: boolean; channelsChanged: boolean } {
-  const existing = getGuild(db, input.guildId);
-  const eventChannelChanged = existing !== undefined && existing.eventChannelId !== input.eventChannelId;
-  const channelsChanged = existing !== undefined && (
-    eventChannelChanged || existing.logChannelId !== input.logChannelId
-  );
-  db.prepare(`
-    INSERT INTO guilds (guild_id, event_channel_id, log_channel_id, setup_at, first_run_done, needs_setup)
-    VALUES (?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), 0, 0)
-    ON CONFLICT(guild_id) DO UPDATE SET
-      event_channel_id = excluded.event_channel_id,
-      log_channel_id = excluded.log_channel_id,
-      setup_at = excluded.setup_at,
-      needs_setup = 0,
-      status_message_id = CASE
-        WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN NULL
-        ELSE guilds.status_message_id
-      END
-  `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
-  if (eventChannelChanged) {
-    db.prepare(`UPDATE guild_event_objects
-      SET message_id = NULL, message_channel_id = NULL, status = 'pending', last_error = NULL
-      WHERE guild_id = ?`).run(input.guildId);
-  }
-  return { created: existing === undefined, channelsChanged };
+  return runTransaction(db, () => {
+    const existing = getGuild(db, input.guildId);
+    const existingGuildCount = (db.prepare('SELECT COUNT(*) AS count FROM guilds').get() as { count: number }).count;
+    const eventChannelChanged = existing !== undefined && existing.eventChannelId !== input.eventChannelId;
+    const channelsChanged = existing !== undefined && (
+      eventChannelChanged || existing.logChannelId !== input.logChannelId
+    );
+    db.prepare(`
+      INSERT INTO guilds (guild_id, event_channel_id, log_channel_id, setup_at, first_run_done, needs_setup)
+      VALUES (?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), 0, 0)
+      ON CONFLICT(guild_id) DO UPDATE SET
+        event_channel_id = excluded.event_channel_id,
+        log_channel_id = excluded.log_channel_id,
+        setup_at = excluded.setup_at,
+        needs_setup = 0,
+        status_message_id = CASE
+          WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN NULL
+          ELSE guilds.status_message_id
+        END
+    `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
+    if (eventChannelChanged) {
+      db.prepare(`UPDATE guild_event_objects
+        SET message_id = NULL, message_channel_id = NULL, status = 'pending', last_error = NULL
+        WHERE guild_id = ?`).run(input.guildId);
+    }
+    if (!existing && existingGuildCount === 0) {
+      db.prepare(`INSERT INTO guild_event_objects (guild_id, event_key, message_id, message_channel_id, scheduled_event_id)
+        SELECT ?, event_key, message_id, ?, scheduled_event_id FROM legacy_discord_refs WHERE 1
+        ON CONFLICT(guild_id, event_key) DO NOTHING`).run(input.guildId, input.eventChannelId);
+      db.prepare('DELETE FROM legacy_discord_refs').run();
+      if (tableExists(db, 'legacy_warnings_sent_v1')) {
+        db.prepare(`INSERT INTO warnings_sent (guild_id, key, content, status, sent_at)
+          SELECT ?, key, key, 'sent', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          FROM legacy_warnings_sent_v1 WHERE 1
+          ON CONFLICT(guild_id, key) DO NOTHING`).run(input.guildId);
+      }
+    }
+    return { created: existing === undefined, channelsChanged };
+  });
 }
 
 export function markGuildNeedsSetup(db: Store, guildId: string): void {
@@ -337,18 +438,33 @@ export function markGuildFirstRunDone(db: Store, guildId: string): void {
 }
 
 export function setGuildStatusMessage(db: Store, guildId: string, messageId: string | null): void {
-  db.prepare(`INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING`).run(guildId);
   db.prepare('UPDATE guilds SET status_message_id = ? WHERE guild_id = ?').run(messageId, guildId);
 }
 
 export function deleteGuild(db: Store, guildId: string): void {
-  db.prepare('DELETE FROM guilds WHERE guild_id = ?').run(guildId);
+  runTransaction(db, () => {
+    db.prepare('DELETE FROM guilds WHERE guild_id = ?').run(guildId);
+    const pending = getMetaValue(db, 'pending_discoveries');
+    if (!pending) return;
+    try {
+      const records = JSON.parse(pending) as Array<{ firstRunGuildIds?: unknown; firstRun?: boolean }>;
+      const updated = records.map((record) => {
+        const ids = Array.isArray(record.firstRunGuildIds)
+          ? record.firstRunGuildIds.filter((id): id is string => typeof id === 'string' && id !== guildId)
+          : [];
+        return { ...record, firstRunGuildIds: ids, firstRun: ids.length > 0 };
+      });
+      setMetaValue(db, 'pending_discoveries', JSON.stringify(updated));
+    } catch {
+      // Malformed optional discovery metadata does not block guild removal.
+    }
+  });
 }
 
 function ensureGuildObject(db: Store, guildId: string, eventKey: string): void {
-  db.prepare(`INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING`).run(guildId);
-  db.prepare(`INSERT INTO guild_event_objects (guild_id, event_key) VALUES (?, ?)
-    ON CONFLICT(guild_id, event_key) DO NOTHING`).run(guildId, eventKey);
+  db.prepare(`INSERT INTO guild_event_objects (guild_id, event_key)
+    SELECT ?, ? WHERE EXISTS (SELECT 1 FROM guilds WHERE guild_id = ?)
+    ON CONFLICT(guild_id, event_key) DO NOTHING`).run(guildId, eventKey, guildId);
 }
 
 export function getGuildEventObject(db: Store, guildId: string, eventKey: string): GuildEventObject | undefined {
@@ -362,10 +478,13 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
 }
 
 export function markGuildEventFirstRunSuppressed(db: Store, guildId: string, eventKey: string): void {
-  ensureGuildObject(db, guildId, eventKey);
-  db.prepare(`UPDATE guild_event_objects SET first_run_suppressed = 1,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
-    .run(guildId, eventKey);
+  runTransaction(db, () => {
+    if (!getGuild(db, guildId)) return;
+    ensureGuildObject(db, guildId, eventKey);
+    db.prepare(`UPDATE guild_event_objects SET first_run_suppressed = 1,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
+      .run(guildId, eventKey);
+  });
 }
 
 export function setGuildDiscordIds(
@@ -374,7 +493,6 @@ export function setGuildDiscordIds(
   eventKey: string,
   ids: { messageId?: string | null; messageChannelId?: string | null; scheduledEventId?: string | null },
 ): void {
-  ensureGuildObject(db, guildId, eventKey);
   const assignments: string[] = [];
   const values: Array<string | null> = [];
   for (const [key, column] of [
@@ -387,8 +505,12 @@ export function setGuildDiscordIds(
   }
   if (assignments.length === 0) return;
   assignments.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
-  db.prepare(`UPDATE guild_event_objects SET ${assignments.join(', ')} WHERE guild_id = ? AND event_key = ?`)
-    .run(...values, guildId, eventKey);
+  runTransaction(db, () => {
+    if (!getGuild(db, guildId)) return;
+    ensureGuildObject(db, guildId, eventKey);
+    db.prepare(`UPDATE guild_event_objects SET ${assignments.join(', ')} WHERE guild_id = ? AND event_key = ?`)
+      .run(...values, guildId, eventKey);
+  });
 }
 
 export function setGuildEventSyncStatus(
@@ -398,14 +520,16 @@ export function setGuildEventSyncStatus(
   status: GuildEventObject['status'],
   lastError: string | null = null,
 ): void {
-  ensureGuildObject(db, guildId, eventKey);
-  db.prepare(`UPDATE guild_event_objects SET status = ?, last_error = ?,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
-    .run(status, lastError, guildId, eventKey);
+  runTransaction(db, () => {
+    if (!getGuild(db, guildId)) return;
+    ensureGuildObject(db, guildId, eventKey);
+    db.prepare(`UPDATE guild_event_objects SET status = ?, last_error = ?,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
+      .run(status, lastError, guildId, eventKey);
+  });
 }
 
 export function queueWarning(db: Store, guildId: string, key: string, content: string): void {
-  db.prepare(`INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING`).run(guildId);
   db.prepare(`INSERT INTO warnings_sent (guild_id, key, content, status)
     VALUES (?, ?, ?, 'pending') ON CONFLICT(guild_id, key) DO NOTHING`).run(guildId, key, content);
 }
@@ -702,6 +826,12 @@ export function getEventSources(db: Store, eventId: number): StoreEventSource[] 
   `).all(eventId) as unknown as StoreEventSource[];
 }
 
+export function getFieldProvenanceSourceUrl(db: Store, eventId: number, field: StoreField): string | undefined {
+  const row = db.prepare('SELECT source_url AS sourceUrl FROM field_provenance WHERE event_id = ? AND field = ?')
+    .get(eventId, field) as { sourceUrl: string } | undefined;
+  return row?.sourceUrl;
+}
+
 export function getMetaValue(db: Store, key: string): string | undefined {
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
   return row?.value;
@@ -774,10 +904,6 @@ export function setEventImageUrl(db: Store, eventId: number, imageUrl: string | 
   return db.prepare(`UPDATE events SET image_url = ? WHERE id = ? AND image_url IS NOT ?`).run(value, eventId, value).changes > 0;
 }
 
-function ensureChecklistGuild(db: Store, guildId: string): void {
-  db.prepare('INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING').run(guildId);
-}
-
 export function ensureChecklistItems(
   db: Store,
   guildId: string,
@@ -785,7 +911,7 @@ export function ensureChecklistItems(
   eventKey: string,
   itemIds: readonly string[],
 ): void {
-  ensureChecklistGuild(db, guildId);
+  if (!getGuild(db, guildId)) return;
   const insert = db.prepare(`INSERT INTO checklist_items (guild_id, user_id, event_key, item_id, done)
     VALUES (?, ?, ?, ?, 0) ON CONFLICT(guild_id, user_id, event_key, item_id) DO NOTHING`);
   for (const itemId of new Set(itemIds)) insert.run(guildId, userId, eventKey, itemId);
@@ -795,7 +921,7 @@ export function saveChecklistSelection(db: Store, selection: SaveChecklistSelect
   const itemIds = [...new Set(selection.itemIds)];
   const doneItemIds = new Set(selection.doneItemIds.filter((itemId) => itemIds.includes(itemId)));
   runTransaction(db, () => {
-    ensureChecklistGuild(db, selection.guildId);
+    if (!getGuild(db, selection.guildId)) return;
     db.prepare(`DELETE FROM checklist_items
       WHERE guild_id = ? AND user_id = ? AND event_key = ?`).run(selection.guildId, selection.userId, selection.eventKey);
     const insert = db.prepare(`INSERT INTO checklist_items (guild_id, user_id, event_key, item_id, done)
@@ -813,7 +939,7 @@ export function getChecklistDoneItemIds(db: Store, guildId: string, userId: stri
 }
 
 export function ensureChecklistReminderPreference(db: Store, guildId: string, userId: string, eventKey: string): boolean {
-  ensureChecklistGuild(db, guildId);
+  if (!getGuild(db, guildId)) return false;
   db.prepare(`INSERT INTO checklist_reminder_preferences (guild_id, user_id, event_key, enabled)
     VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, event_key) DO NOTHING`).run(guildId, userId, eventKey);
   return getChecklistReminderPreference(db, guildId, userId, eventKey);
@@ -832,7 +958,7 @@ export function setChecklistReminderPreference(
   eventKey: string,
   enabled: boolean,
 ): void {
-  ensureChecklistGuild(db, guildId);
+  if (!getGuild(db, guildId)) return;
   db.prepare(`INSERT INTO checklist_reminder_preferences (guild_id, user_id, event_key, enabled)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(guild_id, user_id, event_key) DO UPDATE SET
@@ -850,14 +976,16 @@ export function getChecklistReminderRecipients(
 ): ChecklistReminderRecipient[] {
   const uniqueItemIds = [...new Set(itemIds)];
   if (uniqueItemIds.length === 0) return [];
-  const placeholders = uniqueItemIds.map(() => '?').join(', ');
-  const rows = db.prepare(`SELECT c.user_id AS userId, c.item_id AS itemId
-    FROM checklist_items c
-    JOIN checklist_reminder_preferences p
-      ON p.guild_id = c.guild_id AND p.user_id = c.user_id AND p.event_key = c.event_key
-    WHERE c.guild_id = ? AND c.event_key = ? AND p.enabled = 1 AND c.done = 0
-      AND c.item_id IN (${placeholders})
-    ORDER BY c.rowid`).all(guildId, eventKey, ...uniqueItemIds) as Array<{ userId: string; itemId: string }>;
+  const requested = uniqueItemIds.map((_, index) => `(${index}, ?)`).join(', ');
+  const rows = db.prepare(`WITH requested(ordinal, item_id) AS (VALUES ${requested})
+    SELECT p.user_id AS userId, requested.item_id AS itemId
+    FROM checklist_reminder_preferences p
+    CROSS JOIN requested
+    LEFT JOIN checklist_items c
+      ON c.guild_id = p.guild_id AND c.user_id = p.user_id AND c.event_key = p.event_key
+      AND c.item_id = requested.item_id
+    WHERE p.guild_id = ? AND p.event_key = ? AND p.enabled = 1 AND COALESCE(c.done, 0) = 0
+    ORDER BY p.rowid, requested.ordinal`).all(...uniqueItemIds, guildId, eventKey) as Array<{ userId: string; itemId: string }>;
   const recipients = new Map<string, string[]>();
   for (const row of rows) {
     const openItemIds = recipients.get(row.userId) ?? [];
@@ -868,8 +996,20 @@ export function getChecklistReminderRecipients(
 }
 
 export function claimReminderSlot(db: Store, guildId: string, eventKey: string, leadHours: 24 | 72): boolean {
-  ensureChecklistGuild(db, guildId);
   return db.prepare(`INSERT INTO reminder_slots (guild_id, event_key, lead_hours)
     VALUES (?, ?, ?) ON CONFLICT(guild_id, event_key, lead_hours) DO NOTHING`)
     .run(guildId, eventKey, leadHours).changes > 0;
+}
+
+export function hasReminderDelivery(db: Store, delivery: ReminderDeliveryKey): boolean {
+  return db.prepare(`SELECT 1 FROM reminder_deliveries
+    WHERE guild_id = ? AND event_key = ? AND lead_hours = ? AND batch_key = ?`)
+    .get(delivery.guildId, delivery.eventKey, delivery.leadHours, delivery.batchKey) !== undefined;
+}
+
+export function recordReminderDelivery(db: Store, delivery: ReminderDeliveryKey): boolean {
+  return db.prepare(`INSERT INTO reminder_deliveries (guild_id, event_key, lead_hours, batch_key)
+    SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM guilds WHERE guild_id = ?)
+    ON CONFLICT(guild_id, event_key, lead_hours, batch_key) DO NOTHING`)
+    .run(delivery.guildId, delivery.eventKey, delivery.leadHours, delivery.batchKey, delivery.guildId).changes > 0;
 }

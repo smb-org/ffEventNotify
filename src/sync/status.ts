@@ -23,7 +23,8 @@ function statusEmbed(events: readonly StoreEvent[], now: Date, store: Store): Di
     .filter((event) => Date.parse(event.startUtc!) <= nowMs && nowMs < Date.parse(event.endUtc!))
     .sort((left, right) => Date.parse(left.endUtc!) - Date.parse(right.endUtc!) || left.title.localeCompare(right.title));
   const lines = running.map((event) => {
-    const title = event.title.slice(0, 256).replace(/[\\[\]()*_~`|>]/g, '\\$&');
+    const displayTitle = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+    const title = displayTitle.slice(0, 256).replace(/[\\[\]()*_~`|>]/g, '\\$&');
     const sourceUrls = getEventSources(store, event.id).map((source) => source.url);
     const link = eventSourceLink(event.eventKey, sourceUrls);
     const linkedTitle = link ? `[**${title}**](${link})` : `**${title}**`;
@@ -58,20 +59,22 @@ export async function syncLiveStatusPost({
   const guild = getGuild(store, guildId);
   let existing: DiscordMessageSnapshot | null = null;
   if (guild?.statusMessageId) {
-    try {
-      const fetched = await discord.fetchMessage(channelId, guild.statusMessageId);
-      if (fetched?.authorIsBot && fetched.embeds.some((embed) => embed.title === 'Läuft gerade')) existing = fetched;
-    } catch {
-      // A removed status message falls back to pinned-message recovery.
-    }
+    const fetched = await discord.fetchMessage(channelId, guild.statusMessageId);
+    if (fetched?.authorIsBot && fetched.embeds.some((embed) => embed.title === 'Läuft gerade')) existing = fetched;
   }
   if (!existing) {
     const pinned = await discord.fetchPinnedBotMessages(channelId);
     existing = pinned.find((message) => message.authorIsBot && message.embeds.some((embed) => embed.title === 'Läuft gerade')) ?? null;
   }
   if (!existing) {
-    const recent = await discord.fetchRecentBotMessages(channelId, 50);
-    existing = recent.find((message) => message.authorIsBot && message.embeds.some((embed) => embed.title === 'Läuft gerade')) ?? null;
+    const history = await discord.fetchRecentBotMessages(channelId, 200);
+    if (!history.complete) {
+      await deliverWarning(store, guildId, logChannelId, 'status-post:recovery-incomplete',
+        'Die vorhandene Statusmeldung konnte nicht vollständig gesucht werden. Es wurde keine neue erstellt; der Bot versucht es erneut.',
+        (target, content) => discord.sendLog(target, content));
+      return;
+    }
+    existing = history.messages.find((message) => message.authorIsBot && message.embeds.some((embed) => embed.title === 'Läuft gerade')) ?? null;
   }
 
   if (!existing) {

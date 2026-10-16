@@ -11,9 +11,11 @@ import {
   findEventBySourceUrl,
   getAllEvents,
   getEventSources,
+  getFieldProvenanceSourceUrl,
   getMetaValue,
   getOpenEvents,
   getGuildEventObject,
+  getGuild,
   getPendingWarnings,
   markGuildFirstRunDone,
   markGuildEventFirstRunSuppressed,
@@ -50,7 +52,6 @@ import { runDailyWikiCrossCheck } from './sources/wiki.ts';
 import { syncEventEmbed } from './sync/embed.ts';
 import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
-import { syncEventReminders } from './sync/reminders.ts';
 import { SourceHealthMonitor } from './health.ts';
 import type {
   Classification,
@@ -71,6 +72,7 @@ export interface CycleOptions {
   guilds?: CycleGuild[];
   now?: () => Date;
   health?: SourceHealthMonitor;
+  skipGlobalFirstRunMark?: boolean;
 }
 
 export interface CycleGuild {
@@ -113,6 +115,7 @@ interface ApplyExtractOptions {
   periodSourceUrl?: string;
   periodSourceMoment?: string;
   rewardsApplicable?: boolean;
+  skipPeriod?: boolean;
 }
 
 interface LoadedLists {
@@ -161,12 +164,12 @@ function persistPendingDiscoveries(context: CycleContext): void {
 function rememberPendingDiscovery(context: CycleContext, entry: ListEntry): void {
   const normalizedEntry = { ...entry, url: normalizeLodestoneUrl(entry.url) };
   const previous = context.pendingDiscoveries.get(normalizedEntry.url);
+  const firstRunGuildIds = new Set(previous?.firstRunGuildIds ?? []);
+  for (const guild of context.guilds) if (guild.firstRun) firstRunGuildIds.add(guild.guildId);
   context.pendingDiscoveries.set(normalizedEntry.url, {
     entry: normalizedEntry,
-    firstRun: previous?.firstRun ?? context.firstRun,
-    firstRunGuildIds: previous?.firstRunGuildIds ?? (context.firstRun
-      ? context.guilds.filter((guild) => guild.firstRun).map((guild) => guild.guildId)
-      : []),
+    firstRun: firstRunGuildIds.size > 0,
+    firstRunGuildIds: [...firstRunGuildIds],
   });
   persistPendingDiscoveries(context);
 }
@@ -294,11 +297,23 @@ async function logWarning(context: CycleContext, key: string, message: string, t
   }
 }
 
+async function logWarningToEstablishedGuilds(context: CycleContext, key: string, message: string): Promise<void> {
+  for (const guild of context.guilds.filter((candidate) => !candidate.firstRun)) {
+    try {
+      await deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
+        (channelId, content) => context.discord.sendLog(channelId, content));
+    } catch (error) {
+      console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+    }
+  }
+}
+
 async function logSourceFailure(context: CycleContext, url: string, error: unknown): Promise<void> {
   void error;
-  if (context.firstRun) return;
+  if (context.guilds.every((guild) => guild.firstRun)) return;
   const normalizedUrl = normalizeLodestoneUrl(url);
-  if (context.pendingDiscoveries.get(normalizedUrl)?.firstRun) return;
+  const pending = context.pendingDiscoveries.get(normalizedUrl);
+  if (pending?.firstRun && context.guilds.every((guild) => pending.firstRunGuildIds?.includes(guild.guildId))) return;
   const eventId = findEventBySourceUrl(context.store, normalizedUrl);
   if (eventId !== undefined) {
     const suppressedIds = new Set<number>(JSON.parse(getMetaValue(context.store, 'first_run_suppressed_event_ids') ?? '[]') as number[]);
@@ -306,11 +321,7 @@ async function logSourceFailure(context: CycleContext, url: string, error: unkno
     if (suppressedIds.has(eventId) && (!event || event.endStatus !== 'ok' || !event.endUtc
       || Date.parse(event.endUtc) <= context.currentTime.getTime())) return;
   }
-  await logWarning(
-    context,
-    `source-failure:${url}`,
-    `Die Lodestone-Quelle ist nicht abrufbar: ${url}.`,
-  );
+  await logWarningToEstablishedGuilds(context, `source-failure:${url}`, `Die Lodestone-Quelle ist nicht abrufbar: ${url}.`);
 }
 
 async function getSpecialPage(context: CycleContext, url: string): Promise<string | undefined> {
@@ -361,12 +372,14 @@ function applyExtract(
   applyStatus(context, eventId, 'title', result.title, sourceUrl, sourceMoment);
   const periodSourceUrl = options.periodSourceUrl ?? sourceUrl;
   const periodSourceMoment = options.periodSourceMoment ?? sourceMoment;
-  if (result.period.status === 'ok') {
-    applyField(context.store, eventId, 'start', { status: 'ok', value: result.period.value.startUtc }, periodSourceUrl, periodSourceMoment);
-    applyField(context.store, eventId, 'end', { status: 'ok', value: result.period.value.endUtc }, periodSourceUrl, periodSourceMoment);
-  } else {
-    applyField(context.store, eventId, 'start', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
-    applyField(context.store, eventId, 'end', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
+  if (!options.skipPeriod) {
+    if (result.period.status === 'ok') {
+      applyField(context.store, eventId, 'start', { status: 'ok', value: result.period.value.startUtc }, periodSourceUrl, periodSourceMoment);
+      applyField(context.store, eventId, 'end', { status: 'ok', value: result.period.value.endUtc }, periodSourceUrl, periodSourceMoment);
+    } else {
+      applyField(context.store, eventId, 'start', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
+      applyField(context.store, eventId, 'end', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
+    }
   }
   if (options.rewardsApplicable !== false && result.rewards.status !== 'n/a') {
     applyStatus(context, eventId, 'rewards', result.rewards, sourceUrl, sourceMoment);
@@ -412,14 +425,22 @@ async function applySeasonalPage(
   let periodSourceUrl = normalizedSpecialUrl;
   let periodSourceMoment = sourceMoment;
   const specialHasPeriod = periodResult.periods.status === 'unsicher' || periodResult.periods.value.length > 0;
-  if (topicEntry && topicHtml !== undefined && !specialHasPeriod) {
+  const sourceEventId = preferredEventId ?? findEventBySourceUrl(context.store, normalizedSpecialUrl) ?? findEventByKey(context.store, key);
+  const originalPeriodSource = sourceEventId === undefined
+    ? undefined
+    : getFieldProvenanceSourceUrl(context.store, sourceEventId, 'end');
+  const topicOwnsPeriod = topicEntry !== undefined && originalPeriodSource === normalizeLodestoneUrl(topicEntry.url);
+  let skipPeriod = false;
+  if (topicEntry && !specialHasPeriod && topicHtml !== undefined) {
     const topicPeriodResult = extractSeasonalPeriod(topicHtml, context.currentTime);
     const topicHasPeriod = topicPeriodResult.periods.status === 'unsicher' || topicPeriodResult.periods.value.length > 0;
-    if (topicHasPeriod) {
+    if (topicHasPeriod || topicOwnsPeriod) {
       periodResult = topicPeriodResult;
       periodSourceUrl = normalizeLodestoneUrl(topicEntry.url);
       periodSourceMoment = publishedAt(topicEntry, context.currentTime);
     }
+  } else if (topicEntry && topicOwnsPeriod && !specialHasPeriod) {
+    skipPeriod = true;
   }
   const eventSourceId = findEventBySourceUrl(context.store, normalizedSpecialUrl);
   const keyedEventId = findEventByKey(context.store, key);
@@ -459,7 +480,7 @@ async function applySeasonalPage(
   const persistedResult = terminalPeriod
     ? { ...combinedResult, period: { status: 'ok' as const, value: { startUtc: terminalPeriod.startUtc, endUtc: terminalPeriod.endUtc! } } }
     : combinedResult;
-  applyExtract(context, eventId, normalizedSpecialUrl, sourceMoment, persistedResult, { periodSourceUrl, periodSourceMoment });
+  applyExtract(context, eventId, normalizedSpecialUrl, sourceMoment, persistedResult, { periodSourceUrl, periodSourceMoment, skipPeriod });
   rememberEvent(context, eventId);
   finishPendingDiscovery(context, normalizedSpecialUrl, eventId);
   return eventId;
@@ -476,18 +497,19 @@ async function classifyAndLog(
     ? false
     : markSeen(context.store, normalizeLodestoneUrl(entry.url), classification.status, context.currentTime.toISOString());
   const title = displayEntryTitle(entry);
+  const hasEstablishedGuild = context.guilds.some((guild) => !guild.firstRun);
   if (classification.status === 'unclassified') {
     context.unclassifiedUrls.add(normalizeLodestoneUrl(entry.url));
-    if (!context.firstRun && (unresolvedShortLink || newlySeen)) {
+    if (unresolvedShortLink || newlySeen || hasEstablishedGuild) {
       const message = unresolvedShortLink
         ? `Kurzlink konnte nicht aufgelöst werden: „${title}“ (${normalizeLodestoneUrl(entry.url)})`
         : `Nicht klassifiziert: ${title} (${normalizeLodestoneUrl(entry.url)})`;
-      await logWarning(context, `${unresolvedShortLink ? 'short-link-unresolved' : 'unclassified'}:${normalizeLodestoneUrl(entry.url)}`, message);
+      await logWarningToEstablishedGuilds(context, `${unresolvedShortLink ? 'short-link-unresolved' : 'unclassified'}:${normalizeLodestoneUrl(entry.url)}`, message);
     }
   } else if (classification.status === 'ignored') {
     context.ignoredUrls.add(normalizeLodestoneUrl(entry.url));
-    if (!context.firstRun && entry.source === 'banner' && newlySeen) {
-      await logWarning(
+    if (entry.source === 'banner' && (newlySeen || hasEstablishedGuild)) {
+      await logWarningToEstablishedGuilds(
         context,
         `ignored-banner:${normalizeLodestoneUrl(entry.url)}`,
         `Nicht berücksichtigt: ${title} (${normalizeLodestoneUrl(entry.url)}) — ${classification.reason}`,
@@ -793,7 +815,26 @@ async function refreshStoredSource(context: CycleContext, event: StoreEvent, sou
   if (event.eventType === 'seasonal-special' && (source.kind === 'special' || source.kind === 'banner')) {
     const html = await getSpecialPage(context, source.url);
     if (html === undefined) return;
-    await applySeasonalPage(context, source.url, html, event.title, undefined, eventId);
+    const periodSourceUrl = getFieldProvenanceSourceUrl(context.store, eventId, 'end');
+    const topicSource = periodSourceUrl === undefined ? undefined : getEventSources(context.store, eventId)
+      .find((candidate) => candidate.kind === 'topic' && normalizeLodestoneUrl(candidate.url) === periodSourceUrl);
+    if (topicSource) {
+      const topicEntry: ListEntry = {
+        title: event.title,
+        url: topicSource.url,
+        source: 'topic',
+        ...(topicSource.publishedAt ? { publishedAt: topicSource.publishedAt } : {}),
+      };
+      let topicHtml: string | undefined;
+      try {
+        topicHtml = await fetchDetailPage(topicSource.url, context.fetchText);
+      } catch (error) {
+        await logSourceFailure(context, topicSource.url, error);
+      }
+      await applySeasonalPage(context, source.url, html, event.title, topicEntry, eventId, topicHtml);
+    } else {
+      await applySeasonalPage(context, source.url, html, event.title, undefined, eventId);
+    }
     return;
   }
 
@@ -851,7 +892,7 @@ async function warnForUncertainFields(
 ): Promise<void> {
   const guildEvent = getGuildEventObject(context.store, guild.guildId, event.eventKey);
   const ended = event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) <= context.currentTime.getTime();
-  if (ended || guildEvent?.firstRunSuppressed
+  if (ended || (guildEvent?.firstRunSuppressed && !shouldPostToGuild(event, guild.guildId, context.currentTime, false, context.store))
     || (guild.firstRun && !shouldPostToGuild(event, guild.guildId, context.currentTime, true, context.store))) return;
 
   const fields: Array<[string, string | null]> = [
@@ -864,7 +905,7 @@ async function warnForUncertainFields(
   for (const [field, reason] of fields) {
     if (reason) {
       await logWarning(context, `event:${event.eventKey}:field:${field}`,
-        `Unsicheres Feld „${field}“ bei „${event.title}“: ${reason}`, guild.guildId);
+        `Unsicheres Feld „${field}“ bei „${event.titleStatus === 'ok' ? event.title : 'FFXIV-Event'}“: ${reason}`, guild.guildId);
     }
   }
 }
@@ -906,7 +947,7 @@ async function runWikiCrossCheck(context: CycleContext): Promise<void> {
 
 function shouldPostToGuild(event: StoreEvent, guildId: string, now: Date, firstRun: boolean, store: Store): boolean {
   const object = getGuildEventObject(store, guildId, event.eventKey);
-  if (object?.firstRunSuppressed) return false;
+  if (object?.firstRunSuppressed && !(event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime())) return false;
   if (firstRun) return event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime();
   if (object?.messageId) return true;
   if (event.endUtc !== null && Date.parse(event.endUtc) <= now.getTime()) return false;
@@ -953,8 +994,10 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
     if (errors.length > 0) {
       const details = errors.map((error) => error instanceof Error ? error.message : String(error)).join('; ');
       setGuildEventSyncStatus(context.store, guild.guildId, event.eventKey, 'failed', details);
+      console.error(`Der Discord-Abgleich für Ereignis ${event.eventKey} ist fehlgeschlagen.`, errors);
+      const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
       await logWarning(context, `guild-event-sync:${event.eventKey}`,
-        `Der Abgleich für „${event.title}“ ist fehlgeschlagen und wird erneut versucht: ${details}`, guild.guildId);
+        `Der Discord-Abgleich für „${title}“ konnte nicht abgeschlossen werden. Der Bot versucht es erneut.`, guild.guildId);
     } else {
       setGuildEventSyncStatus(context.store, guild.guildId, event.eventKey, 'synced');
       posted += 1;
@@ -964,6 +1007,7 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
 }
 
 async function syncGuildStatus(context: CycleContext, guild: CycleGuild, blind: boolean): Promise<void> {
+  if (!getGuild(context.store, guild.guildId)) return;
   if (blind) return;
   try {
     await syncLiveStatusPost({
@@ -977,9 +1021,9 @@ async function syncGuildStatus(context: CycleContext, guild: CycleGuild, blind: 
       suppressLogs: guild.firstRun,
     });
   } catch (error) {
-    const details = error instanceof Error ? error.message : String(error);
+    console.error(`Die Statusmeldung für Server ${guild.guildId} konnte nicht synchronisiert werden.`, error);
     await logWarning(context, 'status-post:sync-failed',
-      `Die Statusmeldung „Läuft gerade“ konnte nicht synchronisiert werden: ${details}`, guild.guildId);
+      'Die Statusmeldung „Läuft gerade“ konnte nicht synchronisiert werden. Der Bot versucht es erneut.', guild.guildId);
   }
 }
 
@@ -994,18 +1038,29 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   }));
   const guilds: CycleGuild[] = [];
   for (const guild of configured) {
-    let channelsAvailable = false;
+    let eventChannel = false;
+    let logChannel = false;
     try {
-      const [eventChannel, logChannel] = await Promise.all([
+      [eventChannel, logChannel] = await Promise.all([
         options.discord.isTextChannel(guild.eventChannelId),
         options.discord.isTextChannel(guild.logChannelId),
       ]);
-      channelsAvailable = eventChannel && logChannel;
-    } catch {
-      channelsAvailable = false;
+    } catch (error) {
+      console.warn(`Die Kanäle für Server ${guild.guildId} konnten vorübergehend nicht geprüft werden.`, error);
+      continue;
     }
-    if (!channelsAvailable) {
+    if (!getGuild(options.store, guild.guildId)) continue;
+    if (!eventChannel || !logChannel) {
       markGuildNeedsSetup(options.store, guild.guildId);
+      if (!eventChannel && logChannel) {
+        try {
+          await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'channel-deleted:event',
+            'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.',
+            (channelId, content) => options.discord.sendLog(channelId, content));
+        } catch (error) {
+          console.warn(`Die Setup-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+        }
+      }
       continue;
     }
     guilds.push(guild);
@@ -1063,19 +1118,6 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     const guildPosted = await syncGuildEvents(context, guild, health.isBlind);
     postedEvents += guildPosted;
     await syncGuildStatus(context, guild, health.isBlind);
-    try {
-      await syncEventReminders({
-        guildId: guild.guildId,
-        channelId: guild.eventChannelId,
-        events: getAllEvents(options.store),
-        store: options.store,
-        discord: options.discord,
-        now: context.currentTime,
-      });
-    } catch (error) {
-      const details = error instanceof Error ? error.message : String(error);
-      await logWarning(context, 'reminders:sync-failed', `Erinnerungen konnten nicht synchronisiert werden: ${details}`, guild.guildId);
-    }
     if (guild.firstRun && lists.succeeded && !health.isBlind) {
       try {
         await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'first-run:summary',
@@ -1089,10 +1131,65 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   }
 
   // Explicit guild overrides are used by dry-run and compatibility callers without guild rows.
-  if (options.guilds && guilds.some((guild) => guild.firstRun) && lists.succeeded && !health.isBlind) {
+  if (!options.skipGlobalFirstRunMark && options.guilds && guilds.some((guild) => guild.firstRun) && lists.succeeded && !health.isBlind) {
     markFirstRunDone(options.store);
   }
 
   await runWikiCrossCheck(context);
   return { firstRun, capturedEvents: context.capturedEventIds.size, postedEvents, blind: health.isBlind };
+}
+
+export async function runGuildSyncFromStoredData(options: CycleOptions, guildId: string): Promise<void> {
+  const storedGuild = getConfiguredGuilds(options.store).find((guild) => guild.guildId === guildId);
+  if (!storedGuild) return;
+  const guild: CycleGuild = {
+    guildId,
+    eventChannelId: storedGuild.eventChannelId!,
+    logChannelId: storedGuild.logChannelId!,
+    firstRun: !storedGuild.firstRunDone,
+  };
+  let eventChannel: boolean;
+  let logChannel: boolean;
+  try {
+    [eventChannel, logChannel] = await Promise.all([
+      options.discord.isTextChannel(guild.eventChannelId),
+      options.discord.isTextChannel(guild.logChannelId),
+    ]);
+  } catch (error) {
+    console.warn(`Die Kanäle für Server ${guildId} konnten vorübergehend nicht geprüft werden.`, error);
+    return;
+  }
+  if (!getGuild(options.store, guildId)) return;
+  if (!eventChannel || !logChannel) {
+    markGuildNeedsSetup(options.store, guildId);
+    if (!eventChannel && logChannel) {
+      await deliverWarning(options.store, guildId, guild.logChannelId, 'channel-deleted:event',
+        'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.',
+        (channelId, content) => options.discord.sendLog(channelId, content));
+    }
+    return;
+  }
+
+  const currentTime = (options.now ?? (() => new Date()))();
+  const context: CycleContext = {
+    ...options,
+    guilds: [guild],
+    health: options.health ?? new SourceHealthMonitor(options.store),
+    clock: options.now ?? (() => new Date()),
+    currentTime,
+    firstRun: guild.firstRun,
+    processedSources: new Set(),
+    capturedEventIds: new Set(),
+    unclassifiedUrls: new Set(),
+    ignoredUrls: new Set(),
+    processedMaintenanceOriginals: new Map(),
+    pendingFollowupWarnings: [],
+    specialPages: new Map(),
+    pendingDiscoveries: loadPendingDiscoveries(options.store),
+  };
+  await drainPendingWarnings(context);
+  for (const event of getAllEvents(options.store)) await warnForUncertainFields(context, guild, event);
+  const blind = context.health.isBlind();
+  await syncGuildEvents(context, guild, blind);
+  await syncGuildStatus(context, guild, blind);
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ChannelType, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
+import { ApplicationCommand, ChannelType, Client, InteractionContextType, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
 import test from 'node:test';
 import { commandDefinitionSignature, createFfEventsCommand, missingSetupPermissions, registerGlobalFfEventsCommand } from '../src/commands.ts';
 
@@ -10,6 +10,7 @@ test('/ffevents setup is a global-ready command with two required text-channel o
   } | undefined;
   assert.equal(command.name, 'ffevents');
   assert.equal(command.default_member_permissions, PermissionFlagsBits.ManageGuild.toString());
+  assert.deepEqual(command.contexts, [InteractionContextType.Guild]);
   assert.ok(setup);
   assert.deepEqual(setup.options?.map((option) => ({ name: option.name, required: 'required' in option ? option.required : false })), [
     { name: 'event-kanal', required: true },
@@ -17,6 +18,33 @@ test('/ffevents setup is a global-ready command with two required text-channel o
   ]);
   for (const option of setup.options ?? []) {
     if (option.type === 7) assert.deepEqual(option.channel_types, [ChannelType.GuildText, ChannelType.GuildAnnouncement]);
+  }
+});
+
+test('registration compares a real discord.js ApplicationCommand without crashing on serialized permissions', async () => {
+  const client = new Client({ intents: [] });
+  const raw = {
+    id: '123456789012345678',
+    application_id: '234567890123456789',
+    type: 1,
+    name: 'ffevents',
+    description: 'FFXIV-Events für diesen Server einrichten',
+    default_member_permissions: PermissionFlagsBits.ManageGuild.toString(),
+    contexts: [InteractionContextType.Guild],
+    options: createFfEventsCommand().toJSON().options,
+  };
+  const existing = Reflect.construct(ApplicationCommand as unknown as Function, [client, raw]) as ApplicationCommand;
+  let edits = 0;
+  const manager = {
+    fetch: async () => [existing],
+    create: async () => assert.fail('an unchanged command must not be created'),
+    edit: async () => { edits += 1; },
+  };
+  try {
+    assert.equal(await registerGlobalFfEventsCommand(manager as never), 'unchanged');
+    assert.equal(edits, 0);
+  } finally {
+    client.destroy();
   }
 });
 
@@ -52,8 +80,16 @@ test('global command registration creates once, leaves the same definition alone
   let creates = 0;
   let edits = 0;
   const manager = {
-    fetch: async () => saved ? [{ name: saved.name, toJSON: () => saved, edit: async (data: unknown) => { saved = data as Record<string, unknown>; } }] : [],
-    create: async (data: unknown) => { creates += 1; saved = data as Record<string, unknown>; },
+    fetch: async () => saved ? [{
+      ...saved,
+      equals: (data: unknown) => commandDefinitionSignature(data as never) === commandDefinitionSignature(saved as never),
+      toJSON: () => saved,
+      edit: async (data: unknown) => { saved = data as Record<string, unknown>; },
+    }] : [],
+    create: async (data: unknown) => {
+      creates += 1;
+      saved = (data as { toJSON?: () => Record<string, unknown> }).toJSON?.() ?? data as Record<string, unknown>;
+    },
     edit: async (_command: unknown, data: unknown) => { edits += 1; saved = data as Record<string, unknown>; },
   };
 
