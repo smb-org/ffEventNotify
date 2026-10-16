@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { load } from 'cheerio';
 import test from 'node:test';
 import { SourceHealthMonitor } from '../src/health.ts';
-import { applyField, attachSource, createEvent, getAllEvents, getEventSources, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, attachSource, createEvent, deleteGuild, getAllEvents, getEventSources, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
   DiscordEmbed,
   DiscordMessagePayload,
@@ -1103,6 +1103,39 @@ test('pending discovery adds every guild that joins while its first run is activ
     ] });
     const pending = JSON.parse(db.prepare("SELECT value FROM meta WHERE key = 'pending_discoveries'").get()?.value as string) as Array<{ firstRunGuildIds: string[] }>;
     assert.ok(pending[0]?.firstRunGuildIds.includes('guild-b'));
+  } finally {
+    db.close();
+  }
+});
+
+test('an in-flight first-run crawl cannot persist a guild removed before pending discovery is written', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const guildId = 'removed-during-crawl';
+  upsertGuildSetup(db, { guildId, eventChannelId: 'events', logChannelId: 'logs' });
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const topicUrl = '/lodestone/topics/detail/removed-during-crawl';
+  const baseFetcher = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Patch 8.0 details', url: topicUrl }]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => {
+      if (new URL(url).pathname !== topicUrl) return undefined;
+      deleteGuild(db, guildId);
+      return { status: 503, body: '', finalUrl: url };
+    },
+  });
+  const fetchText: FetchText = async (url, options) => new URL(url).pathname === '/lodestone/news/category/2'
+    ? { status: 503, body: '', finalUrl: url }
+    : baseFetcher(url, options);
+  try {
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW), guilds: [
+      { guildId, eventChannelId: 'events', logChannelId: 'logs', firstRun: true },
+    ] });
+
+    const pending = JSON.parse(getMetaValue(db, 'pending_discoveries') ?? '[]') as Array<{ firstRun: boolean; firstRunGuildIds: string[] }>;
+    assert.deepEqual(pending[0]?.firstRunGuildIds, []);
+    assert.equal(pending[0]?.firstRun, false);
   } finally {
     db.close();
   }

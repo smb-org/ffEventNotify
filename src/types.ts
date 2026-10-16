@@ -160,6 +160,7 @@ export interface DiscordMessagePayload {
 export interface DiscordMessageSnapshot extends DiscordMessagePayload {
   id: string;
   channelId: string;
+  createdAt?: string;
   authorIsBot: boolean;
   pinned: boolean;
   content: string;
@@ -170,6 +171,11 @@ export interface DiscordMessageSnapshot extends DiscordMessagePayload {
 export interface DiscordMessageHistory {
   messages: DiscordMessageSnapshot[];
   complete: boolean;
+}
+
+export interface DiscordMessageHistoryOptions {
+  olderThan?: string;
+  requireChannelStart?: boolean;
 }
 
 export type ScheduledEventStatus = 'SCHEDULED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED' | 'UNKNOWN';
@@ -191,7 +197,7 @@ export interface ScheduledEventSnapshot extends ScheduledEventPayload {
 export interface DiscordPort {
   createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
-  fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageHistory>;
+  fetchRecentBotMessages(channelId: string, limit: number, options?: DiscordMessageHistoryOptions): Promise<DiscordMessageHistory>;
   fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]>;
   fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null>;
   isTextChannel(channelId: string): Promise<boolean>;

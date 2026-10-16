@@ -58,3 +58,23 @@ test('history search confirms absence after exhausting a short channel', async (
   assert.equal(result.complete, true);
   assert.equal(result.pagesFetched, 1);
 });
+
+test('history cutoff stays inconclusive when 200 newer bot posts hide the target and precede the attempt boundary', async () => {
+  const firstAttemptAt = '2026-10-16T12:00:00.000Z';
+  const history = [
+    ...Array.from({ length: 201 }, (_, index) => ({
+      id: `newer-${index}`,
+      authorId: 'bot',
+      createdAt: '2026-10-16T12:01:00.000Z',
+    })),
+    { id: 'target', authorId: 'bot', createdAt: '2026-10-16T12:00:01.000Z' },
+    { id: 'before-attempt', authorId: 'bot', createdAt: '2026-10-16T11:59:00.000Z' },
+  ];
+  const result = await collectRecentBotMessages(async (size, before) => {
+    const start = before === undefined ? 0 : history.findIndex((message) => message.id === before) + 1;
+    return history.slice(start, start + size);
+  }, 'bot', 200, { pageSize: 100, maxPages: 20, olderThan: firstAttemptAt });
+
+  assert.equal(result.messages.some((message) => message.id === 'target'), false);
+  assert.equal(result.complete, false);
+});

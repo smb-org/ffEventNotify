@@ -1,16 +1,18 @@
 // Sends one persisted reminder slot to opted-in players who still have open rewards.
 
 import {
+  ensureReminderDeliveries,
   getChecklistReminderRecipients,
   getEventSources,
   getGuild,
-  hasReminderDelivery,
-  recordReminderDelivery,
+  markReminderDeliveriesAttempted,
+  markReminderDeliveriesSent,
   type ReminderDeliveryKey,
   type Store,
   type StoreEvent,
 } from '../store.ts';
 import { bestEventSourceUrl, stableEventIdentity } from '../event-identity.ts';
+import { withGuildDiscordLock } from '../guild-lock.ts';
 import type { DiscordPort, FieldStatus } from '../types.ts';
 
 export interface ScheduledReminder {
@@ -54,6 +56,7 @@ interface ReminderRecipient {
 
 const MAX_MESSAGE_LENGTH = 2_000;
 const REMINDER_RECOVERY_LIMIT = 200;
+const REMINDER_RECOVERY_CHANNEL_SCAN_LIMIT = 2_000;
 const REMINDER_MARKER_PLACEHOLDER = `ffe-r-${'0'.repeat(32)}`;
 
 function reminderLeadLabel(leadHours: 24 | 72): string {
@@ -115,7 +118,7 @@ function batchMarker(guildId: string, eventKey: string, leadHours: 24 | 72, user
   return `ffe-r-${reminderBatchKey(guildId, eventKey, leadHours, users)}`;
 }
 
-export async function syncEventReminders({
+async function syncEventRemindersUnlocked({
   guildId,
   channelId,
   events,
@@ -145,35 +148,69 @@ export async function syncEventReminders({
       const title = displayTitle.replace(/[\\[\]()*_~`|>]/g, '\\$&');
       const linkedTitle = placeholderLink ? `[${title}](${placeholderLink})` : title;
       const prefix = `${reminderLeadLabel(leadHours)}: ${linkedTitle} — offen bei euch:`;
-      const batches = splitReminderMessages(prefix, recipients);
-      let recentMessages: Awaited<ReturnType<DiscordPort['fetchRecentBotMessages']>> | undefined;
-      for (const message of batches) {
-        const batchKey = reminderBatchKey(guildId, event.eventKey, leadHours, message.userIds);
-        const delivery: ReminderDeliveryKey = { guildId, eventKey: event.eventKey, leadHours, batchKey };
-        if (hasReminderDelivery(store, delivery)) continue;
-        if (!recentMessages) {
-          recentMessages = await discord.fetchRecentBotMessages(channelId, REMINDER_RECOVERY_LIMIT);
-          if (!recentMessages.complete) {
-            console.warn(`Die Suche nach früheren Erinnerungen für „${displayTitle}“ ist unvollständig; der Versand wird wiederholt.`);
-            break;
-          }
-        }
+      const delivery: Omit<ReminderDeliveryKey, 'userId'> = { guildId, eventKey: event.eventKey, leadHours };
+      const states = ensureReminderDeliveries(store, delivery, recipients.map((recipient) => recipient.userId));
+      const stateByUser = new Map(states.map((state) => [state.userId, state]));
+      const unsentRecipients = recipients.filter((recipient) => stateByUser.get(recipient.userId)?.status !== 'sent');
+      if (unsentRecipients.length === 0) continue;
+
+      const unsentStates = unsentRecipients.map((recipient) => stateByUser.get(recipient.userId)).filter((state) => state !== undefined);
+      const requiresChannelStart = unsentStates.some((state) => state.firstAttemptAt === null
+        || !Number.isFinite(Date.parse(state.firstAttemptAt)));
+      const firstAttemptBoundary = requiresChannelStart ? undefined : unsentStates
+        .map((state) => state.firstAttemptAt!)
+        .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+      const recentMessages = await discord.fetchRecentBotMessages(
+        channelId,
+        requiresChannelStart ? REMINDER_RECOVERY_CHANNEL_SCAN_LIMIT : REMINDER_RECOVERY_LIMIT,
+        requiresChannelStart ? { requireChannelStart: true } : { olderThan: firstAttemptBoundary },
+      );
+      const recoveredUsers = new Set<string>();
+      for (const candidate of recentMessages.messages) {
+        const userIds = recoveredRecipients(candidate.content, guildId, event.eventKey, leadHours);
+        if (!userIds) continue;
+        markReminderDeliveriesSent(store, delivery, userIds, candidate.createdAt ?? now.toISOString());
+        for (const userId of userIds) recoveredUsers.add(userId);
+      }
+      const remainingRecipients = unsentRecipients.filter((recipient) => !recoveredUsers.has(recipient.userId));
+      if (remainingRecipients.length === 0) continue;
+      if (!recentMessages.complete) {
+        console.warn(`Die Suche nach früheren Erinnerungen für „${displayTitle}“ ist unvollständig; der Versand wird wiederholt.`);
+        continue;
+      }
+
+      for (const message of splitReminderMessages(prefix, remainingRecipients)) {
         const marker = batchMarker(guildId, event.eventKey, leadHours, message.userIds);
-        if (recentMessages.messages.some((candidate) => candidate.content.includes(`#${marker}`))) {
-          recordReminderDelivery(store, delivery);
-          continue;
-        }
         const content = message.content.replace(REMINDER_MARKER_PLACEHOLDER, marker);
+        markReminderDeliveriesAttempted(store, delivery, message.userIds, now.toISOString());
         try {
           await discord.createMessage(channelId, {
             content,
             allowedMentions: { parse: [], users: message.userIds },
           });
-          recordReminderDelivery(store, delivery);
+          markReminderDeliveriesSent(store, delivery, message.userIds, now.toISOString());
         } catch (error) {
           console.warn(`Erinnerung für „${displayTitle}“ konnte nicht gesendet werden.`, error);
         }
       }
     }
   }
+}
+
+function recoveredRecipients(
+  content: string,
+  guildId: string,
+  eventKey: string,
+  leadHours: 24 | 72,
+): string[] | undefined {
+  const userIds = [...content.matchAll(/<@!?([^>\s]+)>/g)]
+    .map((match) => match[1]!)
+    .filter((id, index, ids) => ids.indexOf(id) === index);
+  if (userIds.length === 0) return undefined;
+  const marker = `#${batchMarker(guildId, eventKey, leadHours, userIds)}`;
+  return content.includes(marker) ? userIds : undefined;
+}
+
+export function syncEventReminders(options: SyncEventRemindersOptions): Promise<void> {
+  return withGuildDiscordLock(options.guildId, () => syncEventRemindersUnlocked(options));
 }

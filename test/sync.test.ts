@@ -26,6 +26,7 @@ import { scheduleEventReminders } from '../src/sync/reminders.ts';
 import { syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { syncLiveStatusPost } from '../src/sync/status.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
+import { collectRecentBotMessages } from '../src/discord-history.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 
@@ -92,7 +93,7 @@ class FakeDiscordPort implements DiscordPort {
     return updated;
   }
 
-  async fetchRecentBotMessages(channelId: string, limit: number) {
+  async fetchRecentBotMessages(channelId: string, limit: number, _options?: { olderThan?: string; requireChannelStart?: boolean }) {
     return { messages: this.messages.filter((message) => message.channelId === channelId).slice().reverse()
       .filter((message) => message.authorIsBot).slice(0, limit), complete: true };
   }
@@ -547,6 +548,43 @@ test('event recovery finds its post after 51 newer bot messages', async () => {
 
     assert.equal(discord.createMessageCount, 1);
     assert.equal(discord.editMessageCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('event recovery behind 201 newer bot posts is found or stays inconclusive, never creates a second post', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'old-event-post-201', 'Ältere Meldung');
+    const sourceUrls = ['https://de.finalfantasyxiv.com/lodestone/special/old-event-post-201/'];
+    await syncEventEmbed({ event, sourceUrls, guildId: 'guild', channelId: 'events', discord, store: db, now: NOW });
+    const target = discord.messages[0]!;
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.firstPostAttemptAt, NOW.toISOString());
+    setGuildDiscordIds(db, 'guild', event.eventKey, { messageId: null, messageChannelId: null });
+    for (let index = 0; index < 201; index += 1) {
+      discord.messages.push({
+        id: `newer-201-${index}`, channelId: 'events', authorIsBot: true, pinned: false, content: '', embeds: [],
+      });
+    }
+    const history = [...discord.messages].reverse().map((snapshot) => ({
+      id: snapshot.id,
+      authorId: 'bot',
+      createdAt: snapshot.id === target.id ? '2026-10-16T12:00:01.000Z' : '2026-10-16T12:01:00.000Z',
+      snapshot,
+    }));
+    discord.fetchRecentBotMessages = async (_channelId, limit, options) => {
+      const result = await collectRecentBotMessages(async (pageSize, before) => {
+        const start = before === undefined ? 0 : history.findIndex((message) => message.id === before) + 1;
+        return history.slice(start, start + pageSize);
+      }, 'bot', limit, { pageSize: 100, maxPages: 20, ...options });
+      return { messages: result.messages.map((message) => message.snapshot), complete: result.complete };
+    };
+
+    await assert.rejects(syncEventEmbed({ event, sourceUrls, guildId: 'guild', channelId: 'events', discord, store: db, now: NOW }), /unvollständig/i);
+
+    assert.equal(discord.createMessageCount, 1);
   } finally {
     db.close();
   }

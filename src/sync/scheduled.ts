@@ -2,6 +2,7 @@
 
 import type { Store, StoreEvent } from '../store.ts';
 import { getGuildEventObject, setGuildDiscordIds } from '../store.ts';
+import { withGuildDiscordLock } from '../guild-lock.ts';
 import {
   bestEventSourceUrl,
   eventSourceLink,
@@ -166,7 +167,7 @@ async function createReplacement(
   return created.id;
 }
 
-export async function syncScheduledEvent({
+async function syncScheduledEventUnlocked({
   event,
   sourceUrls,
   guildId,
@@ -215,4 +216,8 @@ export async function syncScheduledEvent({
     }
     throw error;
   }
+}
+
+export function syncScheduledEvent(options: SyncScheduledEventOptions): Promise<string | undefined> {
+  return withGuildDiscordLock(options.guildId, () => syncScheduledEventUnlocked(options));
 }

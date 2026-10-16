@@ -2,6 +2,7 @@
 
 import type { StoreEvent } from '../store.ts';
 import { deliverWarning, getEventSources, getGuild, setGuildStatusMessage, type Store } from '../store.ts';
+import { withGuildDiscordLock } from '../guild-lock.ts';
 import { eventSourceLink } from '../event-identity.ts';
 import type { DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
 
@@ -44,7 +45,7 @@ function sameEmbed(left: DiscordEmbed, right: DiscordEmbed): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export async function syncLiveStatusPost({
+async function syncLiveStatusPostUnlocked({
   channelId,
   logChannelId = channelId,
   events,
@@ -67,7 +68,7 @@ export async function syncLiveStatusPost({
     existing = pinned.find((message) => message.authorIsBot && message.embeds.some((embed) => embed.title === 'Läuft gerade')) ?? null;
   }
   if (!existing) {
-    const history = await discord.fetchRecentBotMessages(channelId, 200);
+    const history = await discord.fetchRecentBotMessages(channelId, 2_000, { requireChannelStart: true });
     if (!history.complete) {
       await deliverWarning(store, guildId, logChannelId, 'status-post:recovery-incomplete',
         'Die vorhandene Statusmeldung konnte nicht vollständig gesucht werden. Es wurde keine neue erstellt; der Bot versucht es erneut.',
@@ -95,4 +96,8 @@ export async function syncLiveStatusPost({
   if (current && !sameEmbed(current, desired)) {
     await discord.editMessage(channelId, existing.id, payload);
   }
+}
+
+export function syncLiveStatusPost(options: SyncLiveStatusOptions): Promise<void> {
+  return withGuildDiscordLock(options.guildId, () => syncLiveStatusPostUnlocked(options));
 }

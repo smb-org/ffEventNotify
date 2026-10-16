@@ -42,12 +42,14 @@ import {
   upsertGuildSetup,
 } from './store.ts';
 import { syncEventReminders } from './sync/reminders.ts';
+import { withGuildDiscordLock } from './guild-lock.ts';
 import { handleChecklistInteraction } from './interactions/checklist.ts';
 import type {
   DiscordActionRow,
   DiscordEmbed,
   DiscordMessagePayload,
   DiscordMessageHistory,
+  DiscordMessageHistoryOptions,
   DiscordMessageSnapshot,
   DiscordPort,
   FetchText,
@@ -184,6 +186,7 @@ function messageSnapshot(message: Message, botId: string | undefined): DiscordMe
   return {
     id: message.id,
     channelId: message.channelId,
+    createdAt: message.createdAt.toISOString(),
     authorIsBot: botId !== undefined && message.author.id === botId,
     pinned: message.pinned,
     content: message.content,
@@ -284,7 +287,7 @@ export class DiscordJsPort implements DiscordPort {
     return messageSnapshot(edited, this.client.user?.id);
   }
 
-  async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageHistory> {
+  async fetchRecentBotMessages(channelId: string, limit: number, options: DiscordMessageHistoryOptions = {}): Promise<DiscordMessageHistory> {
     const channel = await this.textChannel(channelId);
     const botId = this.client.user?.id;
     if (!botId) return { messages: [], complete: false };
@@ -293,9 +296,10 @@ export class DiscordJsPort implements DiscordPort {
       return [...messages.values()].map((message) => ({
         id: message.id,
         authorId: message.author.id,
+        createdAt: message.createdAt.toISOString(),
         snapshot: messageSnapshot(message, botId),
       }));
-    }, botId, limit, { pageSize: 100, maxPages: 20 }).then(({ messages, complete }) => ({
+    }, botId, limit, { pageSize: 100, maxPages: 20, ...options }).then(({ messages, complete }) => ({
       messages: messages.map(({ snapshot }) => snapshot), complete,
     }));
   }
@@ -654,13 +658,15 @@ export async function handleFfEventsSetup(
     return;
   }
 
-  upsertGuildSetup(store, {
-    guildId: interaction.guildId,
-    eventChannelId: eventChannel.id,
-    logChannelId: logChannel.id,
-  });
   try {
-    await runGuildSync(interaction.guildId);
+    await withGuildDiscordLock(interaction.guildId, async () => {
+      upsertGuildSetup(store, {
+        guildId: interaction.guildId,
+        eventChannelId: eventChannel.id,
+        logChannelId: logChannel.id,
+      });
+      await runGuildSync(interaction.guildId);
+    });
   } catch (error) {
     console.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);
   }
@@ -681,13 +687,15 @@ export async function handleChannelDelete(
   store: ReturnType<typeof openDb>,
   discord: Pick<DiscordPort, 'sendLog'>,
 ): Promise<void> {
-  const guild = getGuild(store, guildId);
-  if (!guild || (guild.eventChannelId !== channelId && guild.logChannelId !== channelId)) return;
-  markGuildNeedsSetup(store, guildId);
-  if (guild.eventChannelId === channelId && guild.logChannelId && guild.logChannelId !== channelId) {
-    await discord.sendLog(guild.logChannelId,
-      'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.');
-  }
+  await withGuildDiscordLock(guildId, async () => {
+    const guild = getGuild(store, guildId);
+    if (!guild || (guild.eventChannelId !== channelId && guild.logChannelId !== channelId)) return;
+    markGuildNeedsSetup(store, guildId);
+    if (guild.eventChannelId === channelId && guild.logChannelId && guild.logChannelId !== channelId) {
+      await discord.sendLog(guild.logChannelId,
+        'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.');
+    }
+  });
 }
 
 export async function main(cycleBody?: CycleBody, options: HourlySchedulerOptions = {}): Promise<void> {

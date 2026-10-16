@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createEvent, getAllEvents, getChecklistReminderRecipients, openDb, saveChecklistSelection, setChecklistReminderPreference, upsertGuildSetup } from '../src/store.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
+import { collectRecentBotMessages } from '../src/discord-history.ts';
 import type { DiscordEmbed, DiscordMessagePayload, DiscordMessageSnapshot, DiscordPort, ScheduledEventPayload, ScheduledEventSnapshot } from '../src/types.ts';
 
 class ReminderDiscord implements DiscordPort {
@@ -25,7 +26,7 @@ class ReminderDiscord implements DiscordPort {
     return created;
   }
   async editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> { return { id: messageId, channelId, authorIsBot: true, pinned: false, content: payload.content ?? '', embeds: payload.embeds ?? [] }; }
-  async fetchRecentBotMessages(channelId: string, _limit: number) {
+  async fetchRecentBotMessages(channelId: string, _limit: number, _options?: { olderThan?: string; requireChannelStart?: boolean }) {
     return { messages: this.sent.filter(({ channelId: sentChannel }) => sentChannel === channelId).map(({ payload }, index) => ({
       id: `message-${index + 1}`, channelId, authorIsBot: true, pinned: false, content: payload.content ?? '', embeds: payload.embeds ?? [],
     })), complete: true };
@@ -164,6 +165,87 @@ test('failed reminder batches retry and accepted messages recover from their sta
 
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     assert.equal(discord.sent.length, 1, 'the accepted batch marker prevents duplicate pings after an ambiguous response');
+  } finally {
+    db.close();
+  }
+});
+
+test('sent users are not pinged again when the open recipient list changes', async () => {
+  const db = openDb(':memory:');
+  const { eventKey, eventId } = setup(db, 3);
+  const discord = new ReminderDiscord();
+  const now = new Date('2026-10-17T12:31:00.000Z');
+  try {
+    const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
+    saveChecklistSelection(db, {
+      guildId: 'guild-1', userId: 'user-02', eventKey,
+      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
+    });
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
+    assert.deepEqual(discord.sent[0]?.payload.allowedMentions?.users, ['user-01', 'user-02']);
+
+    saveChecklistSelection(db, {
+      guildId: 'guild-1', userId: 'user-01', eventKey,
+      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: ['item-a', 'item-b', 'item-c', 'item-d'],
+    });
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
+    assert.equal(discord.sent.length, 1, 'the remaining previously sent user must not be pinged again');
+
+    saveChecklistSelection(db, {
+      guildId: 'guild-1', userId: 'user-03', eventKey,
+      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
+    });
+    setChecklistReminderPreference(db, 'guild-1', 'user-03', eventKey, true);
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
+
+    assert.equal(discord.sent.length, 2);
+    assert.deepEqual(discord.sent[1]?.payload.allowedMentions?.users, ['user-03']);
+    assert.doesNotMatch(discord.sent[1]?.payload.content ?? '', /<@user-0[12]>/);
+    const deliveries = db.prepare(`SELECT user_id AS userId, status FROM reminder_deliveries
+      WHERE guild_id = 'guild-1' AND event_key = ? AND lead_hours = 72 ORDER BY user_id`)
+      .all(eventKey) as Array<{ userId: string; status: string }>;
+    assert.deepEqual(deliveries.map(({ userId, status }) => [userId, status]), [
+      ['user-01', 'sent'], ['user-02', 'sent'], ['user-03', 'sent'],
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('reminder recovery stays inconclusive after 200 newer bot posts hide the accepted message', async () => {
+  const db = openDb(':memory:');
+  const { eventId } = setup(db);
+  const discord = new ReminderDiscord();
+  const now = new Date('2026-10-17T12:31:00.000Z');
+  const history: Array<{ id: string; authorId: string; createdAt: string; snapshot: DiscordMessageSnapshot }> = [];
+  discord.fetchRecentBotMessages = async (_channelId, limit, options) => {
+    const result = await collectRecentBotMessages(async (pageSize, before) => {
+      const start = before === undefined ? 0 : history.findIndex((message) => message.id === before) + 1;
+      return history.slice(start, start + pageSize);
+    }, 'bot', limit, { pageSize: 100, maxPages: 20, ...options });
+    return { messages: result.messages.map((message) => message.snapshot), complete: result.complete };
+  };
+  try {
+    const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
+    discord.failAfterAccept = true;
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
+    const accepted = discord.sent[0]!;
+    const acceptedSnapshot: DiscordMessageSnapshot = {
+      id: 'accepted-reminder', channelId: 'events', authorIsBot: true, pinned: false,
+      content: accepted.payload.content ?? '', embeds: [],
+    };
+    history.push({ id: acceptedSnapshot.id, authorId: 'bot', createdAt: '2026-10-17T12:32:00.000Z', snapshot: acceptedSnapshot });
+    for (let index = 0; index < 201; index += 1) {
+      const snapshot: DiscordMessageSnapshot = {
+        id: `newer-${index}`, channelId: 'events', authorIsBot: true, pinned: false, content: '', embeds: [],
+      };
+      history.push({ id: snapshot.id, authorId: 'bot', createdAt: '2026-10-17T12:33:00.000Z', snapshot });
+    }
+    history.reverse();
+
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
+
+    assert.equal(discord.sent.length, 1, 'an unseen recovery marker must not be treated as proof that sending is safe');
   } finally {
     db.close();
   }

@@ -3,7 +3,8 @@ import { ButtonStyle, ChannelType, Client, GatewayIntentBits, Guild, Message, Me
 import test from 'node:test';
 import { readConfig } from '../src/config.ts';
 import { CYCLE_INTERVAL_MS, createCoalescedCycleRunner, createDiscordClient, DiscordJsPort, handleChannelDelete, handleFfEventsSetup, parseCliArgs, reconcileStoredGuilds, REMINDER_INTERVAL_MS, startHourlyScheduler, startReminderScheduler } from '../src/main.ts';
-import { getGuild, openDb, upsertGuildSetup } from '../src/store.ts';
+import { applyField, attachSource, createEvent, getGuild, openDb, upsertGuildSetup } from '../src/store.ts';
+import { runGuildSyncFromStoredData } from '../src/cycle.ts';
 
 class FakeClock {
   private time = 0;
@@ -245,6 +246,106 @@ test('DiscordJsPort disables implicit mention parsing while retaining explicit r
     const body = (postOptions as { body: { allowed_mentions: { parse: string[]; users: string[] } } }).body;
     assert.deepEqual(body.allowed_mentions, { parse: [], users: ['user-1'] });
   } finally {
+    client.destroy();
+  }
+});
+
+test('overlapping hourly and setup syncs create one card, one status post, and one scheduled event', async () => {
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const guildId = '123456789012345678';
+  const channelId = '323456789012345678';
+  const botId = '523456789012345678';
+  const guild = Reflect.construct(Guild as unknown as Function, [client, rawGuild(guildId)]) as Guild;
+  const channel = Reflect.construct(TextChannel as unknown as Function, [guild, rawTextChannel(guildId, channelId), client]) as TextChannel;
+  const db = openDb(':memory:');
+  upsertGuildSetup(db, { guildId, eventChannelId: channelId, logChannelId: channelId });
+  const eventId = createEvent(db, { eventKey: 'seasonal-special:/lodestone/special/concurrent/', eventType: 'seasonal-special', title: 'Gleichzeitiges Event' });
+  const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/special/concurrent/';
+  attachSource(db, { eventId, url: sourceUrl, kind: 'special' });
+  applyField(db, eventId, 'start', { status: 'ok', value: '2026-10-15T08:00:00.000Z' }, sourceUrl);
+  applyField(db, eventId, 'end', { status: 'ok', value: '2026-10-20T14:59:00.000Z' }, sourceUrl);
+
+  const messages = new Map<string, ReturnType<typeof rawMessage>>();
+  const schedules = new Map<string, Record<string, unknown>>();
+  let nextMessageId = 623456789012345678n;
+  let nextScheduleId = 723456789012345678n;
+  client.user = { id: botId } as never;
+  client.channels.cache.set(channelId, channel as never);
+  client.channels.fetch = async () => channel;
+  client.guilds.fetch = (async () => guild) as unknown as typeof client.guilds.fetch;
+  client.rest.get = async (route) => {
+    const path = String(route);
+    if (path.includes('/scheduled-events')) {
+      const snapshot = [...schedules.values()];
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      return snapshot;
+    }
+    if (path.includes('/messages/pins')) {
+      const snapshot = [...messages.values()].filter((message) => message.pinned);
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      return snapshot;
+    }
+    const messageMatch = path.match(/\/messages\/([^/]+)$/);
+    if (messageMatch) {
+      const found = messages.get(messageMatch[1]!);
+      if (found) return found;
+      throw Object.assign(new Error('Unknown Message'), { code: 10008 });
+    }
+    if (path.includes('/messages')) {
+      const snapshot = [...messages.values()].reverse();
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      return snapshot;
+    }
+    return [];
+  };
+  client.rest.post = async (route, request) => {
+    const path = String(route);
+    const body = (request as { body?: Record<string, unknown> } | undefined)?.body ?? {};
+    if (path.includes('/scheduled-events')) {
+      const id = String(nextScheduleId++);
+      const created = {
+        id, guild_id: guildId, name: body.name, description: body.description,
+        scheduled_start_time: body.scheduled_start_time, scheduled_end_time: body.scheduled_end_time,
+        privacy_level: body.privacy_level, entity_type: body.entity_type,
+        entity_metadata: body.entity_metadata, status: 1, creator_id: botId, user_count: 0, image: null,
+      };
+      schedules.set(id, created);
+      return created;
+    }
+    const id = String(nextMessageId++);
+    const created = {
+      ...rawMessage(guildId, channelId, id, String(body.content ?? '')),
+      embeds: Array.isArray(body.embeds) ? body.embeds : [],
+      components: Array.isArray(body.components) ? body.components : [],
+    };
+    messages.set(id, created as ReturnType<typeof rawMessage>);
+    return created;
+  };
+  client.rest.put = async (route) => {
+    const messageId = String(route).split('/').at(-1)!;
+    const message = messages.get(messageId);
+    if (message) message.pinned = true;
+    return {};
+  };
+  const discord = new DiscordJsPort(client);
+  const options = {
+    store: db,
+    discord,
+    fetchText: async () => { throw new Error('stored-data sync must not fetch Lodestone'); },
+    now: () => new Date('2026-10-16T12:00:00.000Z'),
+  };
+  try {
+    await Promise.all([
+      runGuildSyncFromStoredData(options, guildId),
+      runGuildSyncFromStoredData(options, guildId),
+    ]);
+
+    const posted = [...messages.values()];
+    assert.equal(posted.filter((message) => message.embeds.some((embed: { title?: string }) => embed.title === 'Gleichzeitiges Event')).length, 1);
+    assert.equal(posted.filter((message) => message.embeds.some((embed: { title?: string }) => embed.title === 'Läuft gerade')).length, 1);
+    assert.equal(schedules.size, 1);
+  } finally {
+    db.close();
     client.destroy();
   }
 });

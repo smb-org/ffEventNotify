@@ -52,6 +52,7 @@ import { runDailyWikiCrossCheck } from './sources/wiki.ts';
 import { syncEventEmbed } from './sync/embed.ts';
 import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
+import { withGuildDiscordLock } from './guild-lock.ts';
 import { SourceHealthMonitor } from './health.ts';
 import type {
   Classification,
@@ -289,8 +290,8 @@ async function logWarning(context: CycleContext, key: string, message: string, t
     : context.guilds.filter((guild) => guild.guildId === targetGuildId);
   for (const guild of recipients) {
     try {
-      await deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
-        (channelId, content) => context.discord.sendLog(channelId, content));
+      await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
+        (channelId, content) => context.discord.sendLog(channelId, content)));
     } catch (error) {
       console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
     }
@@ -958,8 +959,8 @@ async function drainPendingWarnings(context: CycleContext): Promise<void> {
   for (const guild of context.guilds) {
     for (const warning of getPendingWarnings(context.store, guild.guildId)) {
       try {
-        await deliverWarning(context.store, guild.guildId, guild.logChannelId, warning.key, warning.content,
-          (channelId, content) => context.discord.sendLog(channelId, content));
+        await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, warning.key, warning.content,
+          (channelId, content) => context.discord.sendLog(channelId, content)));
       } catch (error) {
         console.warn(`Ausstehende Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
       }
@@ -1038,32 +1039,38 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   }));
   const guilds: CycleGuild[] = [];
   for (const guild of configured) {
-    let eventChannel = false;
-    let logChannel = false;
-    try {
-      [eventChannel, logChannel] = await Promise.all([
-        options.discord.isTextChannel(guild.eventChannelId),
-        options.discord.isTextChannel(guild.logChannelId),
-      ]);
-    } catch (error) {
-      console.warn(`Die Kanäle für Server ${guild.guildId} konnten vorübergehend nicht geprüft werden.`, error);
-      continue;
-    }
-    if (!getGuild(options.store, guild.guildId)) continue;
-    if (!eventChannel || !logChannel) {
-      markGuildNeedsSetup(options.store, guild.guildId);
-      if (!eventChannel && logChannel) {
-        try {
-          await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'channel-deleted:event',
-            'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.',
-            (channelId, content) => options.discord.sendLog(channelId, content));
-        } catch (error) {
-          console.warn(`Die Setup-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
-        }
+    const validatedGuild = await withGuildDiscordLock(guild.guildId, async () => {
+      const storedGuild = getGuild(options.store, guild.guildId);
+      if (storedGuild && (storedGuild.needsSetup || storedGuild.eventChannelId !== guild.eventChannelId
+        || storedGuild.logChannelId !== guild.logChannelId)) return undefined;
+      let eventChannel = false;
+      let logChannel = false;
+      try {
+        [eventChannel, logChannel] = await Promise.all([
+          options.discord.isTextChannel(guild.eventChannelId),
+          options.discord.isTextChannel(guild.logChannelId),
+        ]);
+      } catch (error) {
+        console.warn(`Die Kanäle für Server ${guild.guildId} konnten vorübergehend nicht geprüft werden.`, error);
+        return undefined;
       }
-      continue;
-    }
-    guilds.push(guild);
+      if (!storedGuild) return undefined;
+      if (!eventChannel || !logChannel) {
+        markGuildNeedsSetup(options.store, guild.guildId);
+        if (!eventChannel && logChannel) {
+          try {
+            await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'channel-deleted:event',
+              'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.',
+              (channelId, content) => options.discord.sendLog(channelId, content));
+          } catch (error) {
+            console.warn(`Die Setup-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+          }
+        }
+        return undefined;
+      }
+      return guild;
+    });
+    if (validatedGuild) guilds.push(validatedGuild);
   }
   const firstRun = guilds.some((guild) => guild.firstRun);
   const context: CycleContext = {
@@ -1108,26 +1115,32 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
 
   let postedEvents = 0;
   for (const guild of guilds) {
-    if (guild.firstRun) {
-      for (const event of getAllEvents(options.store)) {
-        if (!shouldPostToGuild(event, guild.guildId, context.currentTime, true, options.store)) {
-          markGuildEventFirstRunSuppressed(options.store, guild.guildId, event.eventKey);
+    await withGuildDiscordLock(guild.guildId, async () => {
+      const currentGuild = getGuild(options.store, guild.guildId);
+      if (!currentGuild || currentGuild.needsSetup || currentGuild.eventChannelId !== guild.eventChannelId
+        || currentGuild.logChannelId !== guild.logChannelId) return;
+      const lockedGuild = { ...guild, firstRun: !currentGuild.firstRunDone };
+      if (lockedGuild.firstRun) {
+        for (const event of getAllEvents(options.store)) {
+          if (!shouldPostToGuild(event, lockedGuild.guildId, context.currentTime, true, options.store)) {
+            markGuildEventFirstRunSuppressed(options.store, lockedGuild.guildId, event.eventKey);
+          }
         }
       }
-    }
-    const guildPosted = await syncGuildEvents(context, guild, health.isBlind);
-    postedEvents += guildPosted;
-    await syncGuildStatus(context, guild, health.isBlind);
-    if (guild.firstRun && lists.succeeded && !health.isBlind) {
-      try {
-        await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'first-run:summary',
-          `Erststart: ${context.capturedEventIds.size} erfasst, ${guildPosted} gepostet, ${context.unclassifiedUrls.size} unklassifiziert, ${context.ignoredUrls.size} ignoriert`,
-          (channelId, content) => options.discord.sendLog(channelId, content));
-      } catch (error) {
-        console.warn(`Erststart-Bericht für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+      const guildPosted = await syncGuildEvents(context, lockedGuild, health.isBlind);
+      postedEvents += guildPosted;
+      await syncGuildStatus(context, lockedGuild, health.isBlind);
+      if (lockedGuild.firstRun && lists.succeeded && !health.isBlind) {
+        try {
+          await deliverWarning(options.store, lockedGuild.guildId, lockedGuild.logChannelId, 'first-run:summary',
+            `Erststart: ${context.capturedEventIds.size} erfasst, ${guildPosted} gepostet, ${context.unclassifiedUrls.size} unklassifiziert, ${context.ignoredUrls.size} ignoriert`,
+            (channelId, content) => options.discord.sendLog(channelId, content));
+        } catch (error) {
+          console.warn(`Erststart-Bericht für Server ${lockedGuild.guildId} konnte nicht gesendet werden.`, error);
+        }
+        markGuildFirstRunDone(options.store, lockedGuild.guildId);
       }
-      markGuildFirstRunDone(options.store, guild.guildId);
-    }
+    });
   }
 
   // Explicit guild overrides are used by dry-run and compatibility callers without guild rows.
@@ -1139,7 +1152,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   return { firstRun, capturedEvents: context.capturedEventIds.size, postedEvents, blind: health.isBlind };
 }
 
-export async function runGuildSyncFromStoredData(options: CycleOptions, guildId: string): Promise<void> {
+async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId: string): Promise<void> {
   const storedGuild = getConfiguredGuilds(options.store).find((guild) => guild.guildId === guildId);
   if (!storedGuild) return;
   const guild: CycleGuild = {
@@ -1192,4 +1205,8 @@ export async function runGuildSyncFromStoredData(options: CycleOptions, guildId:
   const blind = context.health.isBlind();
   await syncGuildEvents(context, guild, blind);
   await syncGuildStatus(context, guild, blind);
+}
+
+export function runGuildSyncFromStoredData(options: CycleOptions, guildId: string): Promise<void> {
+  return withGuildDiscordLock(guildId, () => runGuildSyncFromStoredDataUnlocked(options, guildId));
 }

@@ -62,7 +62,13 @@ export interface ReminderDeliveryKey {
   guildId: string;
   eventKey: string;
   leadHours: 24 | 72;
-  batchKey: string;
+  userId: string;
+}
+
+export interface ReminderDeliveryState {
+  userId: string;
+  status: 'pending' | 'sent';
+  firstAttemptAt: string | null;
 }
 
 export interface StoredGuild {
@@ -81,6 +87,7 @@ export interface GuildEventObject {
   messageId: string | null;
   messageChannelId: string | null;
   scheduledEventId: string | null;
+  firstPostAttemptAt: string | null;
   status: 'pending' | 'synced' | 'failed';
   lastError: string | null;
   firstRunSuppressed: boolean;
@@ -151,6 +158,7 @@ const SCHEMA = `
     message_id TEXT,
     message_channel_id TEXT,
     scheduled_event_id TEXT,
+    first_post_attempt_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'synced', 'failed')),
     last_error TEXT,
     first_run_suppressed INTEGER NOT NULL DEFAULT 0 CHECK (first_run_suppressed IN (0, 1)),
@@ -251,9 +259,11 @@ const SCHEMA = `
     guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
     event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
     lead_hours INTEGER NOT NULL CHECK (lead_hours IN (24, 72)),
-    batch_key TEXT NOT NULL,
-    sent_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    PRIMARY KEY (guild_id, event_key, lead_hours, batch_key)
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent')),
+    first_attempt_at TEXT,
+    sent_at TEXT,
+    PRIMARY KEY (guild_id, event_key, lead_hours, user_id)
   );
 
   CREATE TABLE IF NOT EXISTS legacy_discord_refs (
@@ -268,7 +278,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -298,6 +308,28 @@ function migrateV1ToV2(db: Store): void {
         ON CONFLICT(event_key) DO NOTHING`);
     }
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (2)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV2ToV3(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const objectColumns = tableColumns(db, 'guild_event_objects');
+    if (objectColumns.size > 0 && !objectColumns.has('first_post_attempt_at')) {
+      db.exec('ALTER TABLE guild_event_objects ADD COLUMN first_post_attempt_at TEXT');
+    }
+    const deliveryColumns = tableColumns(db, 'reminder_deliveries');
+    if (deliveryColumns.has('batch_key') && !deliveryColumns.has('user_id')
+      && !tableExists(db, 'legacy_reminder_deliveries_v2')) {
+      db.exec('ALTER TABLE reminder_deliveries RENAME TO legacy_reminder_deliveries_v2');
+    }
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -316,8 +348,11 @@ function initializeSchema(db: Store): void {
   if (version === 0) {
     db.exec(SCHEMA);
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
-  } else if (version < CURRENT_SCHEMA_VERSION) {
+  } else if (version === 1) {
     migrateV1ToV2(db);
+    migrateV2ToV3(db);
+  } else if (version === 2) {
+    migrateV2ToV3(db);
   } else {
     db.exec(SCHEMA);
   }
@@ -410,7 +445,8 @@ export function upsertGuildSetup(
     `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
     if (eventChannelChanged) {
       db.prepare(`UPDATE guild_event_objects
-        SET message_id = NULL, message_channel_id = NULL, status = 'pending', last_error = NULL
+        SET message_id = NULL, message_channel_id = NULL, first_post_attempt_at = NULL,
+            status = 'pending', last_error = NULL
         WHERE guild_id = ?`).run(input.guildId);
     }
     if (!existing && existingGuildCount === 0) {
@@ -454,7 +490,7 @@ export function deleteGuild(db: Store, guildId: string): void {
           : [];
         return { ...record, firstRunGuildIds: ids, firstRun: ids.length > 0 };
       });
-      setMetaValue(db, 'pending_discoveries', JSON.stringify(updated));
+      writeMetaValue(db, 'pending_discoveries', JSON.stringify(updated));
     } catch {
       // Malformed optional discovery metadata does not block guild removal.
     }
@@ -471,10 +507,28 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
   const row = db.prepare(`
     SELECT guild_id AS guildId, event_key AS eventKey, message_id AS messageId,
            message_channel_id AS messageChannelId, scheduled_event_id AS scheduledEventId,
+           first_post_attempt_at AS firstPostAttemptAt,
            status, last_error AS lastError, first_run_suppressed AS firstRunSuppressed
     FROM guild_event_objects WHERE guild_id = ? AND event_key = ?
   `).get(guildId, eventKey) as (Omit<GuildEventObject, 'firstRunSuppressed'> & { firstRunSuppressed: number }) | undefined;
   return row ? { ...row, firstRunSuppressed: row.firstRunSuppressed === 1 } : undefined;
+}
+
+export function ensureGuildEventFirstPostAttemptAt(
+  db: Store,
+  guildId: string,
+  eventKey: string,
+  attemptAt: string,
+): string | undefined {
+  return runTransaction(db, () => {
+    if (!getGuild(db, guildId)) return undefined;
+    ensureGuildObject(db, guildId, eventKey);
+    db.prepare(`UPDATE guild_event_objects SET first_post_attempt_at = COALESCE(first_post_attempt_at, ?)
+      WHERE guild_id = ? AND event_key = ?`).run(attemptAt, guildId, eventKey);
+    const row = db.prepare(`SELECT first_post_attempt_at AS firstPostAttemptAt
+      FROM guild_event_objects WHERE guild_id = ? AND event_key = ?`).get(guildId, eventKey) as { firstPostAttemptAt: string | null } | undefined;
+    return row?.firstPostAttemptAt ?? undefined;
+  });
 }
 
 export function markGuildEventFirstRunSuppressed(db: Store, guildId: string, eventKey: string): void {
@@ -837,12 +891,34 @@ export function getMetaValue(db: Store, key: string): string | undefined {
   return row?.value;
 }
 
-export function setMetaValue(db: Store, key: string, value: string): boolean {
+function writeMetaValue(db: Store, key: string, value: string): boolean {
   return db.prepare(`
     INSERT INTO meta (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
     WHERE meta.value IS NOT excluded.value
   `).run(key, value).changes > 0;
+}
+
+export function setMetaValue(db: Store, key: string, value: string): boolean {
+  if (key !== 'pending_discoveries') return writeMetaValue(db, key, value);
+  return runTransaction(db, () => {
+    let filteredValue = value;
+    try {
+      const records = JSON.parse(value) as Array<Record<string, unknown>>;
+      if (Array.isArray(records)) {
+        const guildIds = new Set(getStoredGuildIds(db));
+        filteredValue = JSON.stringify(records.map((record) => {
+          const firstRunGuildIds = Array.isArray(record.firstRunGuildIds)
+            ? record.firstRunGuildIds.filter((guildId): guildId is string => typeof guildId === 'string' && guildIds.has(guildId))
+            : [];
+          return { ...record, firstRunGuildIds, firstRun: firstRunGuildIds.length > 0 };
+        }));
+      }
+    } catch {
+      // Preserve malformed optional metadata rather than blocking the cycle.
+    }
+    return writeMetaValue(db, key, filteredValue);
+  });
 }
 
 export function markSeen(db: Store, url: string, classification: string, firstSeenAt?: string): boolean {
@@ -1001,15 +1077,65 @@ export function claimReminderSlot(db: Store, guildId: string, eventKey: string, 
     .run(guildId, eventKey, leadHours).changes > 0;
 }
 
-export function hasReminderDelivery(db: Store, delivery: ReminderDeliveryKey): boolean {
-  return db.prepare(`SELECT 1 FROM reminder_deliveries
-    WHERE guild_id = ? AND event_key = ? AND lead_hours = ? AND batch_key = ?`)
-    .get(delivery.guildId, delivery.eventKey, delivery.leadHours, delivery.batchKey) !== undefined;
+export function ensureReminderDeliveries(
+  db: Store,
+  delivery: Omit<ReminderDeliveryKey, 'userId'>,
+  userIds: readonly string[],
+): ReminderDeliveryState[] {
+  const uniqueUserIds = [...new Set(userIds)];
+  if (uniqueUserIds.length === 0) return [];
+  return runTransaction(db, () => {
+    if (!getGuild(db, delivery.guildId)) return [];
+    const insert = db.prepare(`INSERT INTO reminder_deliveries (guild_id, event_key, lead_hours, user_id, status)
+      VALUES (?, ?, ?, ?, 'pending') ON CONFLICT(guild_id, event_key, lead_hours, user_id) DO NOTHING`);
+    for (const userId of uniqueUserIds) {
+      insert.run(delivery.guildId, delivery.eventKey, delivery.leadHours, userId);
+    }
+    const placeholders = uniqueUserIds.map(() => '?').join(', ');
+    return db.prepare(`SELECT user_id AS userId, status, first_attempt_at AS firstAttemptAt
+      FROM reminder_deliveries WHERE guild_id = ? AND event_key = ? AND lead_hours = ?
+        AND user_id IN (${placeholders}) ORDER BY rowid`)
+      .all(delivery.guildId, delivery.eventKey, delivery.leadHours, ...uniqueUserIds) as unknown as ReminderDeliveryState[];
+  });
 }
 
-export function recordReminderDelivery(db: Store, delivery: ReminderDeliveryKey): boolean {
-  return db.prepare(`INSERT INTO reminder_deliveries (guild_id, event_key, lead_hours, batch_key)
-    SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM guilds WHERE guild_id = ?)
-    ON CONFLICT(guild_id, event_key, lead_hours, batch_key) DO NOTHING`)
-    .run(delivery.guildId, delivery.eventKey, delivery.leadHours, delivery.batchKey, delivery.guildId).changes > 0;
+export function markReminderDeliveriesAttempted(
+  db: Store,
+  delivery: Omit<ReminderDeliveryKey, 'userId'>,
+  userIds: readonly string[],
+  attemptAt: string,
+): void {
+  const uniqueUserIds = [...new Set(userIds)];
+  if (uniqueUserIds.length === 0) return;
+  const placeholders = uniqueUserIds.map(() => '?').join(', ');
+  runTransaction(db, () => {
+    if (!getGuild(db, delivery.guildId)) return;
+    db.prepare(`UPDATE reminder_deliveries SET first_attempt_at = COALESCE(first_attempt_at, ?)
+      WHERE guild_id = ? AND event_key = ? AND lead_hours = ? AND user_id IN (${placeholders})`)
+      .run(attemptAt, delivery.guildId, delivery.eventKey, delivery.leadHours, ...uniqueUserIds);
+  });
+}
+
+export function markReminderDeliveriesSent(
+  db: Store,
+  delivery: Omit<ReminderDeliveryKey, 'userId'>,
+  userIds: readonly string[],
+  attemptAt: string,
+  sentAt = attemptAt,
+): void {
+  const uniqueUserIds = [...new Set(userIds)];
+  if (uniqueUserIds.length === 0) return;
+  runTransaction(db, () => {
+    if (!getGuild(db, delivery.guildId)) return;
+    const upsert = db.prepare(`INSERT INTO reminder_deliveries
+        (guild_id, event_key, lead_hours, user_id, status, first_attempt_at, sent_at)
+      VALUES (?, ?, ?, ?, 'sent', ?, ?)
+      ON CONFLICT(guild_id, event_key, lead_hours, user_id) DO UPDATE SET
+        status = 'sent',
+        first_attempt_at = COALESCE(reminder_deliveries.first_attempt_at, excluded.first_attempt_at),
+        sent_at = excluded.sent_at`);
+    for (const userId of uniqueUserIds) {
+      upsert.run(delivery.guildId, delivery.eventKey, delivery.leadHours, userId, attemptAt, sentAt);
+    }
+  });
 }

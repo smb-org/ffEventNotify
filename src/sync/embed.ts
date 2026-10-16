@@ -1,7 +1,8 @@
 // Renders player-facing German event embeds and synchronizes one message per event.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { getGuildEventObject, isAllowedSpecialImageUrl, setGuildDiscordIds } from '../store.ts';
+import { ensureGuildEventFirstPostAttemptAt, getGuildEventObject, isAllowedSpecialImageUrl, setGuildDiscordIds } from '../store.ts';
+import { withGuildDiscordLock } from '../guild-lock.ts';
 import {
   bestEventSourceUrl,
   eventSourceLink,
@@ -250,7 +251,7 @@ function embedHasMarker(embed: DiscordEmbed, event: StoreEvent): boolean {
   return embed.url !== undefined && hasEventMarkerUrl(embed.url, event.eventKey);
 }
 
-export async function syncEventEmbed({
+async function syncEventEmbedUnlocked({
   event,
   sourceUrls,
   guildId = 'guild',
@@ -259,7 +260,7 @@ export async function syncEventEmbed({
   store,
   now,
 }: SyncEventEmbedOptions): Promise<string> {
-  void now;
+  const syncNow = now ?? new Date();
   const embed = buildEventEmbed(event, sourceUrls);
   const components = buildEventComponents(event, sourceUrls);
   const payload = { embeds: [embed], components };
@@ -273,10 +274,16 @@ export async function syncEventEmbed({
   }
 
   let recent: DiscordMessageSnapshot[] = [];
+  let recoveryComplete = true;
   if (!stored) {
-    const search = await discord.fetchRecentBotMessages(channelId, 200);
-    if (!search.complete) throw new Error('Die Suche nach vorhandenen Meldungen ist unvollständig.');
+    const firstPostAttemptAt = object?.firstPostAttemptAt;
+    const hasAttemptBoundary = firstPostAttemptAt !== null && firstPostAttemptAt !== undefined
+      && Number.isFinite(Date.parse(firstPostAttemptAt));
+    const search = hasAttemptBoundary
+      ? await discord.fetchRecentBotMessages(channelId, 200, { olderThan: firstPostAttemptAt })
+      : await discord.fetchRecentBotMessages(channelId, 2_000, { requireChannelStart: true });
     recent = search.messages;
+    recoveryComplete = search.complete;
   }
   const stableMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => embedHasMarker(candidate, event)));
   if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Meldungen tragen dieselbe Quellenmarkierung für ${event.title}.`);
@@ -285,6 +292,8 @@ export async function syncEventEmbed({
   if (legacyMatches.length > 1) throw new Error(`Mehrere ältere Discord-Meldungen passen zu ${event.title}.`);
   const legacyMatch = legacyMatches[0];
   const existing = stored ?? stableMatch ?? legacyMatch;
+
+  if (!existing && !recoveryComplete) throw new Error('Die Suche nach vorhandenen Meldungen ist unvollständig.');
 
   if (existing) {
     setGuildDiscordIds(store, guildId, event.eventKey, { messageId: existing.id, messageChannelId: channelId });
@@ -295,7 +304,13 @@ export async function syncEventEmbed({
     return existing.id;
   }
 
+  const firstPostAttemptAt = ensureGuildEventFirstPostAttemptAt(store, guildId, event.eventKey, syncNow.toISOString());
+  if (!firstPostAttemptAt) throw new Error('Der erste Post-Versuch konnte nicht gespeichert werden.');
   const created = await discord.createMessage(channelId, payload);
   setGuildDiscordIds(store, guildId, event.eventKey, { messageId: created.id, messageChannelId: channelId });
   return created.id;
+}
+
+export function syncEventEmbed(options: SyncEventEmbedOptions): Promise<string> {
+  return withGuildDiscordLock(options.guildId ?? 'guild', () => syncEventEmbedUnlocked(options));
 }

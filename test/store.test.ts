@@ -12,6 +12,7 @@ import {
   findEventBySourceUrl,
   getCachedItem,
   getConfiguredGuilds,
+  ensureGuildEventFirstPostAttemptAt,
   getGuildEventObject,
   getGuild,
   getOpenEvents,
@@ -373,6 +374,7 @@ test('removing a guild prunes its id from pending discovery first-run metadata',
   const db = openDb(':memory:');
   try {
     upsertGuildSetup(db, { guildId: 'departed', eventChannelId: 'events', logChannelId: 'logs' });
+    upsertGuildSetup(db, { guildId: 'remaining', eventChannelId: 'events-remaining', logChannelId: 'logs-remaining' });
     setMetaValue(db, 'pending_discoveries', JSON.stringify([{
       entry: { title: 'pending', url: 'https://example.test/pending', source: 'topic' },
       firstRun: true,
@@ -397,6 +399,7 @@ test('setup channel changes clear only that guild message and status references 
     setGuildDiscordIds(db, 'guild-a', 'channel-change', {
       messageId: 'old-message', messageChannelId: 'old-events', scheduledEventId: 'existing-schedule',
     });
+    ensureGuildEventFirstPostAttemptAt(db, 'guild-a', 'channel-change', '2026-10-16T12:00:00.000Z');
     setGuildStatusMessage(db, 'guild-a', 'old-status');
     markGuildNeedsSetup(db, 'guild-a');
 
@@ -414,6 +417,7 @@ test('setup channel changes clear only that guild message and status references 
     });
     assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.messageId, null);
     assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.scheduledEventId, 'existing-schedule');
+    assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.firstPostAttemptAt, null);
     assert.equal(getConfiguredGuilds(db).some((guild) => guild.guildId === 'guild-a'), true);
     assert.equal(getOpenEvents(db).some((event) => event.id === eventId), true);
   } finally {
