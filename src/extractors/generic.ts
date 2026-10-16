@@ -35,13 +35,13 @@ function pageTitle($: ReturnType<typeof load>): string {
 }
 
 function eventDate(bodyText: string): FieldStatus<string> {
-  if (!bodyText) return { status: 'unsicher', reason: 'Generic article body is missing.' };
+  if (!bodyText) return { status: 'unsicher', reason: 'Der Beitragstext fehlt.' };
   const label = /Datum\s+und\s+Uhrzeit/i.exec(bodyText);
-  if (!label) return { status: 'unsicher', reason: 'No labeled event date and time was found in the article body.' };
+  if (!label) return { status: 'unsicher', reason: 'Im Beitrag steht kein Datum mit Uhrzeit.' };
   const scope = bodyText.slice(label.index + label[0].length);
   const matches = [...scope.matchAll(scheduleDatePattern)];
   if (matches.length !== 1 || !matches[0]?.groups) {
-    return { status: 'unsicher', reason: 'No unique, reliable event date and time was found in the article body.' };
+    return { status: 'unsicher', reason: 'Im Beitrag steht kein eindeutiges, verlässliches Datum mit Uhrzeit.' };
   }
 
   const { date, time, label: timezoneLabel } = matches[0].groups as {
@@ -50,10 +50,10 @@ function eventDate(bodyText: string): FieldStatus<string> {
   const parsed = parseGermanDateTime(date, time, timezoneLabel as BerlinTimezoneLabel | undefined);
   if (parsed.status === 'ok') return { status: 'ok', value: parsed.utc.replace('.000Z', 'Z') };
   if (parsed.status === 'label-mismatch') {
-    return { status: 'unsicher', reason: `Timezone label ${parsed.label} does not match Europe/Berlin.` };
+    return { status: 'unsicher', reason: `Die Zeitzonenangabe ${parsed.label} passt nicht zur Zeitzone Europe/Berlin.` };
   }
   return { status: 'unsicher', reason: parsed.status === 'ambiguous'
-    ? 'Event local time is ambiguous without a timezone label.'
+    ? 'Die Ortszeit ist ohne Zeitzonenangabe mehrdeutig.'
     : parsed.reason };
 }
 
@@ -63,16 +63,16 @@ export function extractGeneric(detailHtml: string): GenericExtractResult {
   const bodyText = articleBodyText($);
   const title: FieldStatus<string> = titleText
     ? { status: 'ok', value: titleText }
-    : { status: 'unsicher', reason: 'Generic article title is missing from the header.' };
+    : { status: 'unsicher', reason: 'Im Kopfbereich des Beitrags fehlt der Titel.' };
 
   return {
     title,
     date: eventDate(bodyText),
-    period: { status: 'unsicher', reason: 'A generic topic date does not provide a start and end period.' },
-    rewards: { status: 'unsicher', reason: 'Rewards are not extracted from generic topics.' },
+    period: { status: 'unsicher', reason: 'Ein einzelnes Datum im Beitrag enthält keinen Anfangs- und Endzeitpunkt.' },
+    rewards: { status: 'n/a' },
     description: bodyText
       ? { status: 'ok', value: bodyText }
-      : { status: 'unsicher', reason: 'Generic article body is missing.' },
+      : { status: 'unsicher', reason: 'Der Beitragstext fehlt.' },
   };
 }
 

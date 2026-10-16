@@ -232,6 +232,21 @@ test('uncertain rewards link to the special page without guessing names', () => 
   }
 });
 
+test('maintenance and generic embeds omit the not-applicable rewards field', () => {
+  const db = openDb(':memory:');
+  try {
+    for (const eventType of ['maintenance', 'topic-generic'] as const) {
+      const id = createEvent(db, { eventKey: eventType, eventType, title: 'Ereignis ohne Belohnungsfeld' });
+      const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
+
+      assert.equal(event.rewardsStatus, 'n/a');
+      assert.equal(buildEventEmbed(event, [], NOW).fields, undefined);
+    }
+  } finally {
+    db.close();
+  }
+});
+
 test('Discord embed snapshots with normalized field order do not cause repeat edits', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();

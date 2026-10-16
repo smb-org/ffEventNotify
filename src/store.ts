@@ -36,7 +36,7 @@ export interface StoreEvent {
   endStatus: 'ok' | 'unsicher';
   endReason: string | null;
   rewards: Reward[];
-  rewardsStatus: 'ok' | 'unsicher';
+  rewardsStatus: 'ok' | 'unsicher' | 'n/a';
   rewardsReason: string | null;
   description: string | null;
   descriptionStatus: 'ok' | 'unsicher';
@@ -71,16 +71,16 @@ const SCHEMA = `
     title_reason TEXT,
     start_utc TEXT,
     start_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (start_status IN ('ok', 'unsicher')),
-    start_reason TEXT DEFAULT 'not extracted',
+    start_reason TEXT DEFAULT 'Nicht extrahiert',
     end_utc TEXT,
     end_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (end_status IN ('ok', 'unsicher')),
-    end_reason TEXT DEFAULT 'not extracted',
+    end_reason TEXT DEFAULT 'Nicht extrahiert',
     rewards_json TEXT NOT NULL DEFAULT '[]',
     rewards_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (rewards_status IN ('ok', 'unsicher')),
-    rewards_reason TEXT DEFAULT 'not extracted',
+    rewards_reason TEXT DEFAULT 'Nicht extrahiert',
     description TEXT,
     description_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (description_status IN ('ok', 'unsicher')),
-    description_reason TEXT DEFAULT 'not extracted',
+    description_reason TEXT DEFAULT 'Nicht extrahiert',
     discord_message_id TEXT,
     scheduled_event_id TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -163,6 +163,9 @@ export function openDb(path: string): Store {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
+  for (const field of ['start', 'end', 'rewards', 'description'] as const) {
+    db.prepare(`UPDATE events SET ${field}_reason = 'Nicht extrahiert' WHERE ${field}_reason = 'not extracted'`).run();
+  }
   return db;
 }
 
@@ -240,6 +243,8 @@ interface ProvenanceRecord {
 }
 
 function sourcePriority(field: StoreField, kind: EventSourceKind): number {
+  if (field === 'title' && kind === 'maintenance') return 2;
+  if (field === 'title' && kind === 'followup') return 1;
   if ((field === 'start' || field === 'end') && kind === 'followup') return 2;
   if ((field === 'start' || field === 'end') && kind === 'special') return 1;
   return 0;
@@ -268,7 +273,7 @@ function candidateWins(
   if (candidate.sourceUrl === current.sourceUrl) return true;
   const key = ['source-time-tie', eventId, field, candidate.sourceTime].join(':');
   if (warnOnce(db, key)) {
-    console.warn(`Equal source time for event ${eventId} field ${field}; keeping first source ${current.sourceUrl}.`);
+    console.warn(`Für Ereignis ${eventId} und Feld „${field}“ gilt dieselbe Quellenzeit; die erste Quelle ${current.sourceUrl} bleibt erhalten.`);
   }
   return false;
 }
@@ -348,6 +353,16 @@ interface RawStoreEvent extends Omit<StoreEvent, 'rewards'> {
   rewardsJson: string;
 }
 
+function mapStoreEvent({ rewardsJson, ...event }: RawStoreEvent): StoreEvent {
+  const rewardsApplicable = event.eventType === 'seasonal-special';
+  return {
+    ...event,
+    rewards: rewardsApplicable ? JSON.parse(rewardsJson) as Reward[] : [],
+    rewardsStatus: rewardsApplicable ? event.rewardsStatus : 'n/a',
+    rewardsReason: rewardsApplicable ? event.rewardsReason : null,
+  };
+}
+
 export function getOpenEvents(db: Store, now: Date | string = new Date()): StoreEvent[] {
   const nowValue = now instanceof Date ? now.toISOString() : now;
   const rows = db.prepare(`
@@ -378,7 +393,7 @@ export function getOpenEvents(db: Store, now: Date | string = new Date()): Store
     ORDER BY created_at, id
   `).all(nowValue) as unknown as RawStoreEvent[];
 
-  return rows.map(({ rewardsJson, ...event }) => ({ ...event, rewards: JSON.parse(rewardsJson) as Reward[] }));
+  return rows.map(mapStoreEvent);
 }
 
 export function getAllEvents(db: Store): StoreEvent[] {
@@ -408,7 +423,7 @@ export function getAllEvents(db: Store): StoreEvent[] {
     ORDER BY created_at, id
   `).all() as unknown as RawStoreEvent[];
 
-  return rows.map(({ rewardsJson, ...event }) => ({ ...event, rewards: JSON.parse(rewardsJson) as Reward[] }));
+  return rows.map(mapStoreEvent);
 }
 
 export function getEventSources(db: Store, eventId: number): StoreEventSource[] {

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   applyField,
@@ -47,12 +50,53 @@ test('creates the storage tables and enforces one event per source URL', () => {
 
     const first = newEvent(db, 'first');
     const second = newEvent(db, 'second');
+    const initialReasons = db.prepare(`
+      SELECT start_reason AS start, end_reason AS end, rewards_reason AS rewards, description_reason AS description
+      FROM events WHERE id = ?
+    `).get(first) as { start: string; end: string; rewards: string; description: string };
+    assert.deepEqual({ ...initialReasons }, {
+      start: 'Nicht extrahiert',
+      end: 'Nicht extrahiert',
+      rewards: 'Nicht extrahiert',
+      description: 'Nicht extrahiert',
+    });
     const url = 'https://example.test/event';
     assert.equal(attachSource(db, { eventId: first, url, kind: 'topic' }), true);
     assert.equal(attachSource(db, { eventId: second, url, kind: 'topic' }), false);
     assert.equal(findEventBySourceUrl(db, url), first);
   } finally {
     db.close();
+  }
+});
+
+test('translates legacy field reasons before they can appear in admin logs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-store-'));
+  const path = join(directory, 'events.sqlite');
+  let db = openDb(path);
+  try {
+    const eventId = newEvent(db, 'legacy-reasons');
+    db.prepare(`
+      UPDATE events
+      SET start_reason = 'not extracted', end_reason = 'not extracted',
+          rewards_reason = 'not extracted', description_reason = 'not extracted'
+      WHERE id = ?
+    `).run(eventId);
+    db.close();
+
+    db = openDb(path);
+    const reasons = db.prepare(`
+      SELECT start_reason AS start, end_reason AS end, rewards_reason AS rewards, description_reason AS description
+      FROM events WHERE id = ?
+    `).get(eventId) as { start: string; end: string; rewards: string; description: string };
+    assert.deepEqual({ ...reasons }, {
+      start: 'Nicht extrahiert',
+      end: 'Nicht extrahiert',
+      rewards: 'Nicht extrahiert',
+      description: 'Nicht extrahiert',
+    });
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

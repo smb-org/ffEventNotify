@@ -121,10 +121,10 @@ export function parseGermanDateTime(
 ): GermanDateTimeResult {
   const date = parseDate(dateText);
   const time = parseTime(timeText);
-  if (!date || !time) return { status: 'invalid', reason: 'Date or time is not valid German date/time text.' };
+  if (!date || !time) return { status: 'invalid', reason: 'Datum oder Uhrzeit ist ungültig.' };
 
   const pieces = { ...date, ...time };
-  if (!validPieces(pieces)) return { status: 'invalid', reason: 'Date or time is outside the valid calendar range.' };
+  if (!validPieces(pieces)) return { status: 'invalid', reason: 'Datum oder Uhrzeit liegt außerhalb des gültigen Kalenderbereichs.' };
 
   const localAsUtc = Date.UTC(pieces.year, pieces.month - 1, pieces.day, pieces.hour, pieces.minute);
   const possibleOffsets = new Set<number>();
@@ -138,7 +138,7 @@ export function parseGermanDateTime(
     .sort((left, right) => left.instant - right.instant);
 
   if (candidates.length === 0) {
-    return { status: 'invalid', reason: 'Local time does not exist in Europe/Berlin.' };
+    return { status: 'invalid', reason: 'Diese Ortszeit gibt es in Europe/Berlin nicht.' };
   }
 
   const actualLabels = [...new Set(candidates.map(({ offset }) => labelForOffset(offset)))]

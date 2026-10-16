@@ -11,6 +11,7 @@ import {
 export interface ClassificationOptions {
   fetchText?: FetchText;
   hasPeriod: (specialPath: string) => PeriodEvidence;
+  topicPeriod?: PeriodEvidence;
   resolvedLinks?: ShortLinkResolution;
 }
 
@@ -67,18 +68,18 @@ export async function classifyEntry(
     if (containsWorldOrDataCenter(entry.title)) {
       return { status: 'classified', eventType: 'maintenance' };
     }
-    return { status: 'ignored', reason: 'Maintenance is not for all worlds or a listed world/data center' };
+    return { status: 'ignored', reason: 'Die Wartung betrifft weder alle Welten noch einen bekannten Datenzentren- oder Weltnamen.' };
   }
 
   if (entry.source === 'banner') {
     const path = normalizeSpecialPath(entry.url);
     if (path === undefined) {
-      return { status: 'unclassified', reason: 'Banner URL is not a Lodestone special page: ' + entry.url };
+      return { status: 'unclassified', reason: 'Der Banner-Link führt nicht zu einer Lodestone-Sonderseite: ' + entry.url };
     }
     if (options.hasPeriod(path) !== 'no') {
       return { status: 'classified', eventType: 'seasonal-special' };
     }
-    return { status: 'ignored', reason: 'special without period' };
+    return { status: 'ignored', reason: 'Auf der Sonderseite steht kein Zeitraum.' };
   }
 
   if (entry.source === 'topic' && detailHtml !== undefined) {
@@ -88,12 +89,12 @@ export async function classifyEntry(
       options.fetchText ?? (async () => { throw new Error('No short-link resolver was provided'); }),
     );
     if (resolution.unresolvedUrls.length > 0) {
-      return { status: 'unclassified', reason: 'short link unresolved' };
+      return { status: 'unclassified', reason: 'Ein Kurzlink konnte nicht aufgelöst werden.' };
     }
     for (const link of resolution.links) {
       if (link === undefined) continue;
       const path = normalizeSpecialPath(link);
-      if (path !== undefined && options.hasPeriod(path) !== 'no') {
+      if (path !== undefined && (options.hasPeriod(path) !== 'no' || options.topicPeriod !== undefined && options.topicPeriod !== 'no')) {
         return { status: 'classified', eventType: 'seasonal-special' };
       }
     }
@@ -103,7 +104,7 @@ export async function classifyEntry(
     return { status: 'classified', eventType: 'topic-generic' };
   }
 
-  return { status: 'unclassified', reason: `No classification rule matched: ${entry.title}` };
+  return { status: 'unclassified', reason: `Keine Klassifikationsregel passt auf „${entry.title}“.` };
 }
 
 export function maintenanceStem(title: string): string {

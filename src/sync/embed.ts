@@ -148,6 +148,8 @@ export function buildEventEmbed(event: StoreEvent, sourceUrls: readonly string[]
   };
   if (event.title.length > 0 && !isUnverifiedPathFragment(event)) embed.title = event.title.slice(0, 256);
 
+  if (event.rewardsStatus === 'n/a') return embed;
+
   if (event.rewardsStatus === 'unsicher') {
     const value = link
       ? `Belohnungen: siehe Sonderseite\n[Zur Sonderseite](${link})`
@@ -208,7 +210,7 @@ export async function syncEventEmbed({
         await discord.editMessage(channelId, existing.id, payload);
       } catch (error) {
         if (warnOnce(store, `event-message:edit-failed:${event.id}`)) {
-          await discord.sendLog(logChannelId, `Die Meldung zu „${event.title}“ konnte nicht bearbeitet werden: ${error instanceof Error ? error.message : String(error)}`);
+          await discord.sendLog(logChannelId, `Die Meldung zu „${event.title}“ konnte nicht bearbeitet werden.`);
         }
       }
     }
@@ -220,7 +222,7 @@ export async function syncEventEmbed({
       await discord.editMessage(channelId, event.discordMessageId, payload);
     } catch (error) {
       if (warnOnce(store, `event-message:edit-failed:${event.id}`)) {
-        await discord.sendLog(logChannelId, `Die Meldung zu „${event.title}“ konnte nicht bearbeitet werden: ${error instanceof Error ? error.message : String(error)}`);
+        await discord.sendLog(logChannelId, `Die Meldung zu „${event.title}“ konnte nicht bearbeitet werden.`);
       }
     }
     return event.discordMessageId;

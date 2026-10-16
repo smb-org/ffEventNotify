@@ -19,7 +19,7 @@ test('wiki parsers extract the running Moogle event and mark date-free seasonal 
     events: [],
     unparsed: [{
       name: "All Saints' Wake",
-      unparsedReason: 'Seasonal event page has no reliable event date range',
+      unparsedReason: 'Auf der Saison-Event-Seite steht kein verlässlicher Zeitraum.',
     }],
   });
   assert.deepEqual(moogle, {
@@ -36,7 +36,7 @@ test('wiki parsers extract the running Moogle event and mark date-free seasonal 
 test('wiki parser reports an unexpected page structure without throwing', () => {
   assert.deepEqual(parseWikiEvents('<html><body>changed</body></html>', now), {
     ok: false,
-    reason: 'No supported wiki event structure found',
+    reason: 'Auf der Wiki-Seite wurde keine unterstützte Ereignisstruktur gefunden.',
   });
 });
 
@@ -80,7 +80,7 @@ test('daily wiki cross-check compares dated events and returns unparsed candidat
   assert.deepEqual(result, {
     ok: true,
     unmatched: [],
-    unparsed: [{ name: "All Saints' Wake", unparsedReason: 'Seasonal event page has no reliable event date range' }],
+    unparsed: [{ name: "All Saints' Wake", unparsedReason: 'Auf der Saison-Event-Seite steht kein verlässlicher Zeitraum.' }],
     missingEventTitles: [],
     checkedAtUtc: '2026-10-16T12:00:00.000Z',
   });

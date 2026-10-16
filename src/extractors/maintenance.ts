@@ -46,14 +46,14 @@ function normalizeTime(value: string): string | undefined {
 function toUtc(dateText: string, timeText: string, label?: string): FieldStatus<string> {
   const date = normalizeDate(dateText);
   const time = normalizeTime(timeText);
-  if (!date || !time) return { status: 'unsicher', reason: 'Maintenance date or time could not be parsed.' };
+  if (!date || !time) return { status: 'unsicher', reason: 'Wartungsdatum oder Uhrzeit konnte nicht gelesen werden.' };
   const result = parseGermanDateTime(date, time, label as BerlinTimezoneLabel | undefined);
   if (result.status === 'ok') return { status: 'ok', value: result.utc.replace('.000Z', 'Z') };
   if (result.status === 'label-mismatch') {
-    return { status: 'unsicher', reason: `Timezone label ${result.label} does not match Europe/Berlin.` };
+    return { status: 'unsicher', reason: `Die Zeitzonenangabe ${result.label} passt nicht zur Zeitzone Europe/Berlin.` };
   }
   return { status: 'unsicher', reason: result.status === 'ambiguous'
-    ? 'Maintenance local time is ambiguous without a timezone label.'
+    ? 'Die Wartungszeit ist ohne Zeitzonenangabe mehrdeutig.'
     : result.reason };
 }
 
@@ -79,7 +79,7 @@ function parseMaintenanceWindow(text: string): FieldStatus<Period> {
       `Am\\s+(?<date>${datePart})\\s+von\\s+(?<startTime>${timePart})\\s*(?:Uhr)?\\s*(?:\\((?<startLabel>MESZ|MEZ)\\))?\\s*bis\\s+(?<endTime>${timePart})\\s*(?:Uhr)?\\s*(?:\\((?<endLabel>MESZ|MEZ)\\))?`,
       'iu',
     ).exec(text);
-    if (!singleDay?.groups) return { status: 'unsicher', reason: 'No complete maintenance window follows the [Datum & Uhrzeit] label.' };
+    if (!singleDay?.groups) return { status: 'unsicher', reason: 'Auf die Angabe [Datum & Uhrzeit] folgt kein vollständiger Wartungszeitraum.' };
     startDate = singleDay.groups.date!;
     endDate = startDate;
     startTime = singleDay.groups.startTime!;
@@ -97,23 +97,25 @@ function parseMaintenanceWindow(text: string): FieldStatus<Period> {
 
 export function extractMaintenance(html: string, fallbackTitle?: string): ExtractResult {
   const $ = load(html);
-  const titleText = normalizedText($('article.news__detail > header.news__header h1').first().text()) || fallbackTitle || '';
+  const titleText = (normalizedText($('article.news__detail > header.news__header h1').first().text()) || fallbackTitle || '')
+    .replace(/^\[(?:Wartung|Folge-News)\]\s*/i, '')
+    .trim();
   const bodyText = articleBodyText($);
   const title: FieldStatus<string> = titleText
     ? { status: 'ok', value: titleText }
-    : { status: 'unsicher', reason: 'Maintenance title is missing from the article header.' };
+    : { status: 'unsicher', reason: 'Im Kopfbereich des Wartungsbeitrags fehlt der Titel.' };
 
   const labeledBlock = /\[Datum\s*&\s*Uhrzeit\]\s*(.*?)(?=\[[^\]]+\]|$)/i.exec(bodyText)?.[1];
   const period = labeledBlock === undefined
-    ? { status: 'unsicher' as const, reason: 'The article has no [Datum & Uhrzeit] block.' }
+    ? { status: 'unsicher' as const, reason: 'Im Beitrag fehlt der Abschnitt [Datum & Uhrzeit].' }
     : parseMaintenanceWindow(labeledBlock);
 
   return {
     title,
     period,
-    rewards: { status: 'unsicher', reason: 'Rewards are not extracted from maintenance notices.' },
+    rewards: { status: 'n/a' },
     description: bodyText
       ? { status: 'ok', value: bodyText }
-      : { status: 'unsicher', reason: 'Maintenance article body is missing.' },
+      : { status: 'unsicher', reason: 'Der Wartungsbeitrag enthält keinen lesbaren Text.' },
   };
 }

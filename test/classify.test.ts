@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { classifyEntry, maintenanceStem } from '../src/classify.ts';
-import { hasPeriod } from '../src/extractors/seasonal.ts';
+import { hasDeclaredPeriod, hasPeriod } from '../src/extractors/seasonal.ts';
 import { parseMaintenanceList, parseTopicList } from '../src/sources/lodestone.ts';
 
 const classifyFixture = JSON.parse(readFileSync(new URL('./fixtures/expected/classify.json', import.meta.url), 'utf8')) as {
@@ -31,7 +31,7 @@ const specialFixtures: Array<[string, string]> = [
   ['/lodestone/special/fallguys/', 'special/fallguys.html'],
   ['/lodestone/special/mogmog-collection/202609/', 'special/mogmog-202609.html'],
   ['/lodestone/special/friend_recruit/', 'special/friend-recruit.html'],
-  ['/lodestone/special/ffxiv/8ghatq7szp/', 'special/fankit.html'],
+  ['/lodestone/special/ffxv/8ghatq7szp/', 'special/ffxv-2026.html'],
   ['/lodestone/special/tales_under_the_golden_sun/', 'special/update-log.html'],
 ];
 
@@ -73,6 +73,7 @@ async function classify(
         finalUrl: shortTargets[url] ?? (new URL(url).hostname === 'sqex.to' ? 'https://example.test/resolved/' : url),
       }),
       hasPeriod: periodEvidence,
+      topicPeriod: body === undefined ? 'no' : hasDeclaredPeriod(body, NOW),
     });
   } catch (error) {
     assert.fail(`classifyEntry should return a classification: ${String(error)}`);
@@ -145,7 +146,7 @@ test('a special link without a parsed period falls through keyword classificatio
   const result = await classify({ title: entry.title, url: entry.url, source: 'topic' }, detailHtml(entry.fixture));
   assert.deepEqual(result, {
     status: 'unclassified',
-    reason: `No classification rule matched: ${entry.title}`,
+    reason: `Keine Klassifikationsregel passt auf „${entry.title}“.`,
   });
 });
 
@@ -182,7 +183,7 @@ test('banner special pages use their real period evidence', async () => {
       hasPeriod: periodEvidence,
     });
     assert.equal(result.status === 'classified' ? result.eventType : result.status, expected, path);
-    if (expected === 'ignored') assert.deepEqual(result, { status: 'ignored', reason: 'special without period' });
+    if (expected === 'ignored') assert.deepEqual(result, { status: 'ignored', reason: 'Auf der Sonderseite steht kein Zeitraum.' });
   }
 });
 
@@ -193,7 +194,7 @@ test('a rejected sqex.to resolution is explicitly unclassified', async () => {
     fetchText: async () => { throw new Error('offline'); },
     hasPeriod: periodEvidence,
   });
-  assert.deepEqual(result, { status: 'unclassified', reason: 'short link unresolved' });
+  assert.deepEqual(result, { status: 'unclassified', reason: 'Ein Kurzlink konnte nicht aufgelöst werden.' });
 });
 
 test('a bad historical Fall Guys timezone label keeps the topic seasonal', async () => {
@@ -206,5 +207,13 @@ test('a bad historical Fall Guys timezone label keeps the topic seasonal', async
   }, '<article class="news__detail"><div class="news__detail__wrapper"><a href="/lodestone/special/fallguys/">Fall Guys</a></div></article>', {
     hasPeriod: () => hasPeriod(html, NOW) as unknown as 'yes' | 'no' | 'unsicher',
   });
+  assert.deepEqual(result, { status: 'classified', eventType: 'seasonal-special' });
+});
+
+test('FFXV topic period classifies its linked special page even when the special page has no period', async () => {
+  const expected = classifyFixture.topicsP1.find(({ title }) => title.includes('FINAL FANTASY XV'))!;
+  const entry = topicEntries.find((candidate) => listPath(candidate.url) === expected.url)!;
+  const result = await classify(entry, detailHtml(expected.fixture));
+
   assert.deepEqual(result, { status: 'classified', eventType: 'seasonal-special' });
 });

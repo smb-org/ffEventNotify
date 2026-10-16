@@ -223,14 +223,14 @@ export async function startHourlyScheduler(
     nextTickAt += CYCLE_INTERVAL_MS;
     if (activeCycle !== undefined) {
       (options.onSkipped ?? ((at) => console.warn(
-        `Hourly cycle skipped at ${new Date(at).toISOString()}: previous cycle is still running.`,
+        `Stundenzyklus vom ${new Date(at).toISOString()} übersprungen, weil der vorherige Zyklus noch läuft.`,
       )))(tickAt);
       continue;
     }
 
     activeCycle = cycleBody()
       .catch((error: unknown) => {
-        (options.onCycleError ?? ((failure) => console.error('Hourly cycle failed:', failure)))(error);
+        (options.onCycleError ?? (() => console.error('Der Stundenzyklus ist fehlgeschlagen.')))(error);
       })
       .finally(() => {
         activeCycle = undefined;
@@ -375,7 +375,7 @@ export async function main(cycleBody?: CycleBody, options: HourlySchedulerOption
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   void main().catch((error: unknown) => {
-    console.error('Bot stopped:', error);
+    console.error('Der Bot wurde beendet.');
     process.exitCode = 1;
   });
 }

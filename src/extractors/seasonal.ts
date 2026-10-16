@@ -30,6 +30,8 @@ interface RewardGroup {
   section: string;
 }
 
+export type SeasonalPeriodExtraction = Pick<SeasonalExtractResult, 'period' | 'periods' | 'eventState'>;
+
 const dateTimePrefix = /^(?:(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag),?\s*)?(?:den\s+)?(\d{1,2})\.\s*([\p{L}]+)\.?\s+(\d{4})\s+um\s+(\d{1,2})(?::(\d{2}))?\s*(?:Uhr)?\s*(?:\((MESZ|MEZ)\))?/iu;
 const itemHref = /\/lodestone\/playguide\/db\/item\/([A-Za-z0-9_-]+)\/?(?:[?#].*)?$/i;
 
@@ -56,7 +58,7 @@ function periodTexts(html: string): string[] {
     const content = $(element).attr('content');
     if (content) texts.push(normalizedText(content));
   });
-  $('.content__span__period, .content__span, .content__section, .fgs__contents, .fgs__history').each((_, element) => {
+  $('.content__span__period, .content__span, .content__section, .fgs__contents, .fgs__history, .news__detail__wrapper').each((_, element) => {
     const markup = ($(element).html() ?? '').replace(/<br\s*\/?>/gi, ' ');
     const text = nodeText(markup);
     if (/\bVon\b/i.test(text)) texts.push(text);
@@ -85,10 +87,10 @@ function toUtc(value: DateTimePrefix): FieldStatus<string> {
   const result = parseGermanDateTime(value.date, value.time, value.label);
   if (result.status === 'ok') return { status: 'ok', value: result.utc.replace('.000Z', 'Z') };
   if (result.status === 'label-mismatch') {
-    return { status: 'unsicher', reason: `Timezone label ${result.label} does not match Europe/Berlin.` };
+    return { status: 'unsicher', reason: `Die Zeitzonenangabe ${result.label} passt nicht zur Zeitzone Europe/Berlin.` };
   }
   if (result.status === 'ambiguous') {
-    return { status: 'unsicher', reason: 'Local time is ambiguous in Europe/Berlin without a matching timezone label.' };
+    return { status: 'unsicher', reason: 'Die Ortszeit ist in Europe/Berlin ohne passende Zeitzonenangabe mehrdeutig.' };
   }
   return { status: 'unsicher', reason: result.reason };
 }
@@ -109,14 +111,14 @@ function parsePeriods(html: string): ParsedPeriods {
       const afterStartIndex = startIndex + start.length;
       const separator = /\bbis\b/i.exec(text.slice(afterStartIndex, afterStartIndex + 180));
       if (!separator) {
-        errors.push('Period end separator is missing.');
+        errors.push('Die Trennung vor dem Zeitraumende fehlt.');
         continue;
       }
       const endIndex = afterStartIndex + separator.index + separator[0].length;
       const endText = text.slice(endIndex).trim();
       const startUtc = toUtc(start);
       if (startUtc.status === 'unsicher') {
-        errors.push(`Period start: ${startUtc.reason}`);
+        errors.push(`Zeitraumanfang: ${startUtc.reason}`);
         continue;
       }
 
@@ -125,12 +127,12 @@ function parsePeriods(html: string): ParsedPeriods {
       if (end) {
         const parsedEnd = toUtc(end);
         if (parsedEnd.status === 'unsicher') {
-          errors.push(`Period end: ${parsedEnd.reason}`);
+          errors.push(`Zeitraumende: ${parsedEnd.reason}`);
           continue;
         }
         endUtc = parsedEnd.value;
       } else if (!/^(?:zu|zum|zur)\s+/i.test(endText)) {
-        errors.push('Period end is present but could not be parsed.');
+        errors.push('Das angegebene Zeitraumende konnte nicht gelesen werden.');
       }
 
       const key = `${startUtc.value}|${endUtc ?? '<open>'}`;
@@ -150,7 +152,7 @@ function titleStatus(html: string): FieldStatus<string> {
   const title = raw.replace(/\s*\|\s*FINAL FANTASY XIV(?:,\s*|\s*-\s*)Der Lodestone\s*$/i, '').trim();
   return title
     ? { status: 'ok', value: title }
-    : { status: 'unsicher', reason: 'Seasonal page title is missing.' };
+    : { status: 'unsicher', reason: 'Auf der Sonderseite fehlt der Titel.' };
 }
 
 function contentRoot($: ReturnType<typeof load>): any {
@@ -180,6 +182,11 @@ function rewardGroups($: ReturnType<typeof load>, root: any): RewardGroup[] {
     const section = normalizedText(node.find('th.item__list__head_text').first().text());
     groups.push({ node, section });
   });
+  root.find('.rewards__other').each((_: number, element: any) => {
+    const node = $(element);
+    const section = normalizedText(node.find('.rewards__other__title img[alt]').first().attr('alt') ?? '');
+    groups.push({ node, section });
+  });
   root.find('.fgs__contents').each((_: number, element: any) => {
     const node = $(element);
     if (node.find('a[href*="/lodestone/playguide/db/item/"]').length === 0) return;
@@ -192,16 +199,16 @@ function rewardGroups($: ReturnType<typeof load>, root: any): RewardGroup[] {
 function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: string }>> {
   const $ = load(html);
   const root = contentRoot($);
-  if (!root.length) return { status: 'unsicher', reason: 'No seasonal content area was found.' };
+  if (!root.length) return { status: 'unsicher', reason: 'Der Inhaltsbereich der Sonderseite wurde nicht gefunden.' };
 
   const groups = rewardGroups($, root);
-  if (groups.length === 0) return { status: 'unsicher', reason: 'No recognized reward section headings were found.' };
+  if (groups.length === 0) return { status: 'unsicher', reason: 'Es wurden keine erkennbaren Überschriften für Belohnungsabschnitte gefunden.' };
   const rewards: Array<{ itemId: string; section: string }> = [];
   const representedLinks = new Set<any>();
   const ids = new Set<string>();
 
   for (const group of groups) {
-    if (!group.section) return { status: 'unsicher', reason: 'A reward section has no readable heading.' };
+    if (!group.section) return { status: 'unsicher', reason: 'Ein Belohnungsabschnitt hat keine lesbare Überschrift.' };
     const links: any[] = [];
     group.node.find('a[href]').each((_: number, element: any) => {
       const href = $(element).attr('href') ?? '';
@@ -211,16 +218,16 @@ function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: s
       }
     });
     const iconCount = group.node.find('img[src*="/itemicon/"]').length;
-    if (links.length === 0) return { status: 'unsicher', reason: `Reward section "${group.section}" has no items.` };
+    if (links.length === 0) return { status: 'unsicher', reason: `Der Belohnungsabschnitt „${group.section}“ enthält keine Gegenstände.` };
     if (links.length !== iconCount) {
-      return { status: 'unsicher', reason: `Reward section "${group.section}" has ${links.length} item links but ${iconCount} item icons.` };
+      return { status: 'unsicher', reason: `Im Belohnungsabschnitt „${group.section}“ gibt es ${links.length} Gegenstandslinks, aber ${iconCount} Gegenstands-Icons.` };
     }
 
     for (const link of links) {
       const href = $(link).attr('href') ?? '';
       const itemId = itemHref.exec(href)?.[1];
-      if (!itemId) return { status: 'unsicher', reason: 'A reward item link has no item ID.' };
-      if (ids.has(itemId)) return { status: 'unsicher', reason: `Reward item ID ${itemId} appears more than once.` };
+      if (!itemId) return { status: 'unsicher', reason: 'Einem Gegenstandslink fehlt die Gegenstands-ID.' };
+      if (ids.has(itemId)) return { status: 'unsicher', reason: `Die Gegenstands-ID ${itemId} kommt mehrfach vor.` };
       ids.add(itemId);
       rewards.push({ itemId, section: group.section });
     }
@@ -232,7 +239,7 @@ function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: s
     const href = $(element).attr('href') ?? '';
     if (itemHref.test(href) && !representedLinks.has(element)) outsideLink = true;
   });
-  if (outsideLink) return { status: 'unsicher', reason: 'An item link appears outside a recognized reward section.' };
+  if (outsideLink) return { status: 'unsicher', reason: 'Ein Gegenstandslink steht außerhalb eines erkannten Belohnungsabschnitts.' };
   return { status: 'ok', value: rewards };
 }
 
@@ -243,8 +250,8 @@ function selectPeriod(
   const timestamp = now.getTime();
   if (!Number.isFinite(timestamp)) {
     return {
-      period: { status: 'unsicher', reason: 'Reference time is invalid.' },
-      eventState: { status: 'unsicher', reason: 'Reference time is invalid.' },
+      period: { status: 'unsicher', reason: 'Der Bezugszeitpunkt ist ungültig.' },
+      eventState: { status: 'unsicher', reason: 'Der Bezugszeitpunkt ist ungültig.' },
     };
   }
 
@@ -252,7 +259,7 @@ function selectPeriod(
   const running = complete.filter((period) => Date.parse(period.startUtc) <= timestamp && timestamp < Date.parse(period.endUtc));
   if (running.length > 1) {
     return {
-      period: { status: 'unsicher', reason: 'More than one seasonal period is running at the reference time.' },
+      period: { status: 'unsicher', reason: 'Zum Bezugszeitpunkt laufen mehrere Zeiträume gleichzeitig.' },
       eventState: { status: 'ok', value: 'ambiguous' },
     };
   }
@@ -272,7 +279,7 @@ function selectPeriod(
       period.endUtc === null && Date.parse(period.startUtc) < Date.parse(earliest.startUtc),
     );
     if (openBeforeNext) {
-      const reason = 'The next period has an open or unknown end.';
+      const reason = 'Der nächste Zeitraum hat kein bekanntes Ende.';
       return { period: { status: 'unsicher', reason }, eventState: { status: 'unsicher', reason } };
     }
     return {
@@ -283,16 +290,16 @@ function selectPeriod(
 
   const openCouldBeCurrent = periods.some((period) => period.endUtc === null && Date.parse(period.startUtc) <= timestamp);
   if (openCouldBeCurrent) {
-    const reason = 'A period that may still be running has an open or unknown end.';
+    const reason = 'Ein möglicherweise noch laufender Zeitraum hat kein bekanntes Ende.';
     return { period: { status: 'unsicher', reason }, eventState: { status: 'unsicher', reason } };
   }
   if (complete.length > 0) {
     return {
-      period: { status: 'unsicher', reason: 'All known seasonal periods have ended; do not post this event.' },
+      period: { status: 'unsicher', reason: 'Alle bekannten Zeiträume sind beendet; dieses Ereignis wird nicht veröffentlicht.' },
       eventState: { status: 'ok', value: 'ended' },
     };
   }
-  const reason = 'No complete seasonal period was found.';
+  const reason = 'Es wurde kein vollständiger Zeitraum gefunden.';
   return { period: { status: 'unsicher', reason }, eventState: { status: 'unsicher', reason } };
 }
 
@@ -300,12 +307,12 @@ async function resolveRewards(
   ids: readonly { itemId: string; section: string }[],
   options?: ResolveItemOptions,
 ): Promise<FieldStatus<Reward[]>> {
-  if (!options) return { status: 'unsicher', reason: 'Item resolver dependencies were not provided.' };
+  if (!options) return { status: 'unsicher', reason: 'Die Abhängigkeiten zum Auflösen der Gegenstände fehlen.' };
   const rewards: Reward[] = [];
   for (const entry of ids) {
     const item = await resolveItem(entry.itemId, options);
     if (item.status === 'unsicher') {
-      return { status: 'unsicher', reason: `Item ${entry.itemId}: ${item.reason}` };
+      return { status: 'unsicher', reason: `Gegenstand ${entry.itemId}: ${item.reason}` };
     }
     rewards.push({ itemId: item.value.itemId, name: item.value.name, section: entry.section });
   }
@@ -348,17 +355,19 @@ export function hasPeriod(html: string, now: Date = new Date()): PeriodEvidence 
   return datedStart ? 'unsicher' : 'no';
 }
 
-export async function extractSeasonal(
-  html: string,
-  now: Date,
-  options?: ResolveItemOptions,
-): Promise<SeasonalExtractResult> {
+export function hasDeclaredPeriod(html: string, now: Date): PeriodEvidence {
+  const extracted = extractSeasonalPeriod(html, now);
+  if (extracted.periods.status === 'unsicher') return 'unsicher';
+  return extracted.periods.value.length > 0 ? 'yes' : 'no';
+}
+
+export function extractSeasonalPeriod(html: string, now: Date): SeasonalPeriodExtraction {
   const parsedPeriods = parsePeriods(html);
   const periods: FieldStatus<SeasonalPeriod[]> = parsedPeriods.problem === undefined
     ? { status: 'ok', value: parsedPeriods.periods }
     : { status: 'unsicher', reason: parsedPeriods.problem };
   const selection = selectPeriod(parsedPeriods.periods, now);
-  const selectedPeriod = parsedPeriods.problem === undefined
+  const period = parsedPeriods.problem === undefined
     ? selection.period
     : { status: 'unsicher' as const, reason: parsedPeriods.problem };
 
@@ -371,19 +380,26 @@ export async function extractSeasonal(
     eventState = selection.eventState;
   }
 
+  return { period, periods, eventState };
+}
+
+export async function extractSeasonal(
+  html: string,
+  now: Date,
+  options?: ResolveItemOptions,
+): Promise<SeasonalExtractResult> {
+  const periodResult = extractSeasonalPeriod(html, now);
   const ids = rewardIds(html);
   const rewards = ids.status === 'unsicher' ? ids : await resolveRewards(ids.value, options);
   const $ = load(html);
   const descriptionText = $('meta[name="description"]').first().attr('content')?.trim();
   const description: FieldStatus<string> = descriptionText
     ? { status: 'ok', value: descriptionText }
-    : { status: 'unsicher', reason: 'Seasonal page has no description metadata.' };
+    : { status: 'unsicher', reason: 'Auf der Sonderseite fehlt eine Beschreibungsangabe.' };
 
   return {
     title: titleStatus(html),
-    period: selectedPeriod,
-    periods,
-    eventState,
+    ...periodResult,
     rewards,
     description,
   };

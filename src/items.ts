@@ -19,7 +19,7 @@ export async function resolveItem(
 ): Promise<FieldStatus<ResolvedItem>> {
   const cached = getCachedItem(store, itemId);
   if (cached) {
-    if (!cached.iconUrl) return { status: 'unsicher', reason: 'Cached item has no icon URL.' };
+    if (!cached.iconUrl) return { status: 'unsicher', reason: 'Beim gespeicherten Gegenstand fehlt die Icon-Adresse.' };
     return { status: 'ok', value: resolvedItem(itemId, cached.name, cached.iconUrl) };
   }
 
@@ -27,23 +27,23 @@ export async function resolveItem(
   try {
     const response = await fetchText(url, { priority: 'item' });
     if (response.status < 200 || response.status >= 300) {
-      return { status: 'unsicher', reason: `Item page request failed with status ${response.status}.` };
+      return { status: 'unsicher', reason: `Die Gegenstandsseite antwortete mit Status ${response.status}.` };
     }
 
     const $ = load(response.body);
     const rawTitle = $('title').first().text().trim();
     const titleMatch = /^Eorzea-Datenbank\s+(.+?)\s*\|\s*FINAL FANTASY XIV(?:,\s*|\s*-\s*)Der Lodestone$/.exec(rawTitle);
     const name = titleMatch?.[1]?.trim();
-    if (!name) return { status: 'unsicher', reason: 'Item page title does not match the Eorzea database title format.' };
+    if (!name) return { status: 'unsicher', reason: 'Der Seitentitel entspricht nicht dem erwarteten Format der Eorzea-Datenbank.' };
 
     const iconUrl = $('meta[property="og:image"]').first().attr('content')?.trim() ||
       $('img[src*="/itemicon/"]').first().attr('src')?.trim();
-    if (!iconUrl) return { status: 'unsicher', reason: 'Item page has no item icon URL.' };
+    if (!iconUrl) return { status: 'unsicher', reason: 'Auf der Gegenstandsseite fehlt die Icon-Adresse.' };
 
     cacheItem(store, { itemId, name, iconUrl });
     return { status: 'ok', value: resolvedItem(itemId, name, iconUrl) };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return { status: 'unsicher', reason: `Item page fetch failed: ${reason}` };
+    void error;
+    return { status: 'unsicher', reason: 'Die Gegenstandsseite konnte nicht abgerufen werden.' };
   }
 }

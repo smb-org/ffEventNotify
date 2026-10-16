@@ -70,6 +70,40 @@ test('Mog Mog inherits the end timezone label and keeps its featured and exchang
   }
 });
 
+test('FFXV special page groups all seven linked rewards under its visible section heading', async () => {
+  const html = fixture('./fixtures/special/ffxv-2026.html');
+  const itemIds = [
+    '23c5e795c9f', '80a2e103120', '7834dff98e9', 'c95105661d3',
+    'f682e0e98be', '2f4fdab22da', '645c9102074',
+  ];
+  const store = openDb(':memory:');
+  try {
+    const result = await extractSeasonal(html, NOW, {
+      store,
+      fetchText: async (url) => {
+        const id = new URL(url).pathname.match(/\/item\/([^/]+)\//)?.[1];
+        assert.ok(id && itemIds.includes(id));
+        return {
+          status: 200,
+          body: `<html><head><title>Eorzea-Datenbank Belohnung ${id} | FINAL FANTASY XIV - Der Lodestone</title><meta property="og:image" content="https://example.test/itemicon/${id}.png"></head></html>`,
+          finalUrl: url,
+        };
+      },
+    });
+
+    assert.equal(result.rewards.status, 'ok');
+    if (result.rewards.status === 'ok') {
+      assert.deepEqual(result.rewards.value, itemIds.map((itemId) => ({
+        itemId,
+        name: `Belohnung ${itemId}`,
+        section: 'Gegenstände',
+      })));
+    }
+  } finally {
+    store.close();
+  }
+});
+
 test('Fall Guys parses every historical period and selects the period running at NOW', async () => {
   const html = fixture('./fixtures/special/fallguys.html');
   const expectedPage = expected('fallguys.json');
@@ -135,7 +169,7 @@ test('overlapping running periods make the selected period uncertain', async () 
   const result = await extract(html);
 
   assert.equal(result.period.status, 'unsicher');
-  if (result.period.status === 'unsicher') assert.match(result.period.reason, /more than one|multiple/i);
+  if (result.period.status === 'unsicher') assert.match(result.period.reason, /mehrere Zeiträume gleichzeitig/i);
 });
 
 test('an open end is retained as unknown and cannot be selected as a complete period', async () => {
@@ -147,7 +181,7 @@ test('an open end is retained as unknown and cannot be selected as a complete pe
     assert.deepEqual(result.periods.value, [{ startUtc: '2024-10-23T08:00:00Z', endUtc: null }]);
   }
   assert.equal(result.period.status, 'unsicher');
-  if (result.period.status === 'unsicher') assert.match(result.period.reason, /open|end/i);
+  if (result.period.status === 'unsicher') assert.match(result.period.reason, /kein bekanntes Ende/i);
 });
 
 test('a running open period before the next dated period makes the selected end uncertain', async () => {
@@ -190,7 +224,7 @@ test('timezone label disagreement makes the period uncertain', async () => {
   const result = await extract(html);
 
   assert.equal(result.period.status, 'unsicher');
-  if (result.period.status === 'unsicher') assert.match(result.period.reason, /label|timezone/i);
+  if (result.period.status === 'unsicher') assert.match(result.period.reason, /Zeitzonenangabe|Zeitzone/i);
 });
 
 test('evergreen Fankit and friend recruit pages have no period', async () => {

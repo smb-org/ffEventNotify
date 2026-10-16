@@ -77,7 +77,7 @@ function parseSeasonalPage(html: string, now: Date): WikiParseResult | undefined
     foundMonth = true;
     const name = match[1]!.trim();
     if (!name || /^no regularly scheduled special events\.?$/i.test(name)) return;
-    unparsed.push({ name, unparsedReason: 'Seasonal event page has no reliable event date range' });
+    unparsed.push({ name, unparsedReason: 'Auf der Saison-Event-Seite steht kein verlässlicher Zeitraum.' });
   });
   return foundMonth ? { ok: true, events: [], unparsed } : undefined;
 }
@@ -107,7 +107,7 @@ function parseMooglePage(html: string, now: Date): WikiParseResult | undefined {
     const range = parseDateRange(periodText);
     if (range === undefined) {
       if (periodText.includes(String(now.getUTCFullYear()))) {
-        unparsed.push({ name, unparsedReason: 'Moogle event period could not be parsed' });
+        unparsed.push({ name, unparsedReason: 'Der Zeitraum des Mogry-Events konnte nicht gelesen werden.' });
       }
       return;
     }
@@ -120,10 +120,10 @@ export function parseWikiEvents(html: string, now: Date): WikiParseResult {
   try {
     return parseMooglePage(html, now) ?? parseSeasonalPage(html, now) ?? {
       ok: false,
-      reason: 'No supported wiki event structure found',
+      reason: 'Auf der Wiki-Seite wurde keine unterstützte Ereignisstruktur gefunden.',
     };
   } catch {
-    return { ok: false, reason: 'Wiki event structure could not be parsed' };
+    return { ok: false, reason: 'Die Ereignisstruktur der Wiki-Seite konnte nicht gelesen werden.' };
   }
 }
 
@@ -160,7 +160,7 @@ export async function runDailyWikiCrossCheck(
     for (const url of WIKI_EVENT_URLS) {
       const response = await fetchText(url, { priority: 'wiki' });
       if (response.status < 200 || response.status >= 300) {
-        return { ok: false, reason: `Wiki request failed with status ${response.status}`, checkedAtUtc };
+        return { ok: false, reason: `Die Wiki-Anfrage antwortete mit Status ${response.status}.`, checkedAtUtc };
       }
       const result = parseWikiEvents(response.body, now);
       if (!result.ok) return { ok: false, reason: result.reason, checkedAtUtc };
@@ -179,7 +179,7 @@ export async function runDailyWikiCrossCheck(
   } catch (error) {
     return {
       ok: false,
-      reason: error instanceof Error ? error.message : 'Wiki request failed',
+      reason: 'Die Wiki-Anfrage konnte nicht abgeschlossen werden.',
       checkedAtUtc,
     };
   }

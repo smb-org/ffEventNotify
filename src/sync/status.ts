@@ -12,6 +12,7 @@ export interface SyncLiveStatusOptions {
   discord: DiscordPort;
   store: Store;
   now?: Date;
+  suppressLogs?: boolean;
 }
 
 function statusEmbed(events: readonly StoreEvent[], now: Date): DiscordEmbed {
@@ -35,6 +36,7 @@ export async function syncLiveStatusPost({
   discord,
   store,
   now = new Date(),
+  suppressLogs = false,
 }: SyncLiveStatusOptions): Promise<void> {
   const desired = statusEmbed(events, now);
   const payload = { embeds: [desired] };
@@ -44,7 +46,7 @@ export async function syncLiveStatusPost({
   if (!existing) {
     const created = await discord.createMessage(channelId, payload);
     await discord.pinMessage(channelId, created.id);
-    if (warnOnce(store, 'status-post:recreated')) {
+    if (!suppressLogs && warnOnce(store, 'status-post:recreated')) {
       await discord.sendLog(logChannelId, 'Die Statusmeldung „Läuft gerade“ wurde neu erstellt und angeheftet.');
     }
     return;
@@ -56,8 +58,8 @@ export async function syncLiveStatusPost({
     try {
       await discord.editMessage(channelId, existing.id, payload);
     } catch (error) {
-      if (warnOnce(store, 'status-post:edit-failed')) {
-        await discord.sendLog(logChannelId, `Die Statusmeldung „Läuft gerade“ konnte nicht bearbeitet werden: ${error instanceof Error ? error.message : String(error)}`);
+      if (!suppressLogs && warnOnce(store, 'status-post:edit-failed')) {
+        await discord.sendLog(logChannelId, 'Die Statusmeldung „Läuft gerade“ konnte nicht bearbeitet werden.');
       }
     }
   }

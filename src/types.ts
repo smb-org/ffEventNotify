@@ -4,6 +4,10 @@ export type FieldStatus<T> =
   | { status: 'ok'; value: T }
   | { status: 'unsicher'; reason: string };
 
+export interface NotApplicable {
+  status: 'n/a';
+}
+
 export type PeriodEvidence = 'yes' | 'no' | 'unsicher';
 
 export type EventType = 'seasonal-special' | 'maintenance' | 'topic-generic';
@@ -35,7 +39,7 @@ export type SeasonalEventState = 'active' | 'upcoming' | 'ended' | 'not-an-event
 export interface ExtractResult {
   title: FieldStatus<string>;
   period: FieldStatus<Period>;
-  rewards: FieldStatus<Reward[]>;
+  rewards: FieldStatus<Reward[]> | NotApplicable;
   description: FieldStatus<string>;
 }
 

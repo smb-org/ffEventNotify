@@ -263,7 +263,7 @@ function berlinDateTime(utc: string | null): string {
   return dateTimeFormatter.format(new Date(utc));
 }
 
-function fieldStatus(name: string, status: 'ok' | 'unsicher', reason: string | null): string {
+function fieldStatus(name: string, status: 'ok' | 'unsicher' | 'n/a', reason: string | null): string {
   return `  ${name}: ${status}${status === 'unsicher' ? ` — ${reason ?? 'kein Grund hinterlegt'}` : ''}`;
 }
 
@@ -304,6 +304,7 @@ function eventPeriod(event: StoreEvent): string {
 }
 
 function rewardSections(event: StoreEvent): string[] {
+  if (event.rewardsStatus === 'n/a') return [];
   if (event.rewardsStatus === 'unsicher') return [`  unsicher — ${event.rewardsReason ?? 'kein Grund hinterlegt'}`];
   if (event.rewards.length === 0) return ['  Keine Belohnungen erkannt.'];
   const groups = new Map<string, string[]>();
@@ -383,8 +384,7 @@ function buildReport(
       fieldStatus('Ende', event.endStatus, event.endReason),
       fieldStatus('Belohnungen', event.rewardsStatus, event.rewardsReason),
       fieldStatus('Beschreibung', event.descriptionStatus, event.descriptionReason),
-      'Belohnungen nach Abschnitt:',
-      ...rewardSections(event),
+      ...(event.rewardsStatus === 'n/a' ? [] : ['Belohnungen nach Abschnitt:', ...rewardSections(event)]),
       'Quellen:',
       ...(sources.length > 0 ? sources.map((url) => `  ${url}`) : ['  Keine Quellen hinterlegt.']),
       `Discord-Event: ${scheduledDecision(event, sources, now, scheduledAction)}`,

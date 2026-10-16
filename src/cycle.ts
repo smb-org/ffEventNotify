@@ -1,5 +1,6 @@
 // Orchestrates source discovery, extraction, storage, health, and Discord synchronization.
 
+import { load } from 'cheerio';
 import {
   applyField,
   attachSource,
@@ -22,7 +23,7 @@ import {
 import { classifyEntry, maintenanceStem, maintenanceTarget } from './classify.ts';
 import { extractGenericTopic, deriveGenericEventKey } from './extractors/generic.ts';
 import { extractMaintenance } from './extractors/maintenance.ts';
-import { extractSeasonal, hasPeriod } from './extractors/seasonal.ts';
+import { extractSeasonal, extractSeasonalPeriod, hasDeclaredPeriod, hasPeriod } from './extractors/seasonal.ts';
 import { fetchNewsFeed, parseNewsFeed } from './sources/feed.ts';
 import {
   articleBodyLinks,
@@ -79,6 +80,10 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
   firstRun: boolean;
   processedSources: Set<string>;
   capturedEventIds: Set<number>;
+  unclassifiedUrls: Set<string>;
+  ignoredUrls: Set<string>;
+  processedMaintenanceOriginals: Map<string, number>;
+  pendingFollowupWarnings: Array<{ eventId: number; entry: ListEntry; ambiguity: 'missing' | 'multiple' }>;
   specialPages: Map<string, Promise<string | undefined>>;
   pendingDiscoveries: Map<string, PendingDiscovery>;
 }
@@ -86,6 +91,12 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
 interface PendingDiscovery {
   entry: ListEntry;
   firstRun: boolean;
+}
+
+interface ApplyExtractOptions {
+  periodSourceUrl?: string;
+  periodSourceMoment?: string;
+  rewardsApplicable?: boolean;
 }
 
 interface LoadedLists {
@@ -152,6 +163,7 @@ function finishPendingDiscovery(context: CycleContext, url: string, eventId?: nu
 
 function sourceKind(entry: ListEntry): StoreEventSource['kind'] {
   if (/^\[Folge-News\]/i.test(entry.title)) return 'followup';
+  if (entry.source === 'feed' && /^\[Wartung\]/i.test(entry.title)) return 'maintenance';
   if (entry.source === 'maintenance' || entry.source === 'topic') return entry.source;
   return 'feed';
 }
@@ -170,6 +182,25 @@ function isSpecialUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function titleFromPage(html: string): string {
+  const raw = load(html)('title').first().text().trim();
+  return raw.replace(/\s*\|\s*FINAL FANTASY XIV(?:,\s*|\s*-\s*)Der Lodestone\s*$/i, '').trim();
+}
+
+function titleFromUrl(value: string): string {
+  const path = new URL(normalizeLodestoneUrl(value)).pathname;
+  const segment = path.split('/').filter(Boolean).at(-1) ?? path;
+  try {
+    return decodeURIComponent(segment).replace(/[_-]+/g, ' ').trim() || path;
+  } catch {
+    return segment.replace(/[_-]+/g, ' ').trim() || path;
+  }
+}
+
+function displayEntryTitle(entry: ListEntry, html?: string): string {
+  return entry.title.trim() || (html === undefined ? '' : titleFromPage(html)) || titleFromUrl(entry.url);
 }
 
 function asEntry(parsed: ParsedListEntry, source: ListEntry['source'], feedPublishedAt?: string): ListEntry {
@@ -228,10 +259,21 @@ async function logWarning(context: CycleContext, key: string, message: string): 
 }
 
 async function logSourceFailure(context: CycleContext, url: string, error: unknown): Promise<void> {
+  void error;
+  if (context.firstRun) return;
+  const normalizedUrl = normalizeLodestoneUrl(url);
+  if (context.pendingDiscoveries.get(normalizedUrl)?.firstRun) return;
+  const eventId = findEventBySourceUrl(context.store, normalizedUrl);
+  if (eventId !== undefined) {
+    const suppressedIds = new Set<number>(JSON.parse(getMetaValue(context.store, 'first_run_suppressed_event_ids') ?? '[]') as number[]);
+    const event = getAllEvents(context.store).find((candidate) => candidate.id === eventId);
+    if (suppressedIds.has(eventId) && (!event || event.endStatus !== 'ok' || !event.endUtc
+      || Date.parse(event.endUtc) <= context.currentTime.getTime())) return;
+  }
   await logWarning(
     context,
     `source-failure:${url}`,
-    `Die Lodestone-Quelle ist nicht abrufbar: ${url} (${error instanceof Error ? error.message : String(error)})`,
+    `Die Lodestone-Quelle ist nicht abrufbar: ${url}.`,
   );
 }
 
@@ -278,16 +320,21 @@ function applyExtract(
   sourceUrl: string,
   sourceMoment: string,
   result: ExtractResult,
+  options: ApplyExtractOptions = {},
 ): void {
   applyStatus(context, eventId, 'title', result.title, sourceUrl, sourceMoment);
+  const periodSourceUrl = options.periodSourceUrl ?? sourceUrl;
+  const periodSourceMoment = options.periodSourceMoment ?? sourceMoment;
   if (result.period.status === 'ok') {
-    applyField(context.store, eventId, 'start', { status: 'ok', value: result.period.value.startUtc }, sourceUrl, sourceMoment);
-    applyField(context.store, eventId, 'end', { status: 'ok', value: result.period.value.endUtc }, sourceUrl, sourceMoment);
+    applyField(context.store, eventId, 'start', { status: 'ok', value: result.period.value.startUtc }, periodSourceUrl, periodSourceMoment);
+    applyField(context.store, eventId, 'end', { status: 'ok', value: result.period.value.endUtc }, periodSourceUrl, periodSourceMoment);
   } else {
-    applyField(context.store, eventId, 'start', { status: 'unsicher', reason: result.period.reason }, sourceUrl, sourceMoment);
-    applyField(context.store, eventId, 'end', { status: 'unsicher', reason: result.period.reason }, sourceUrl, sourceMoment);
+    applyField(context.store, eventId, 'start', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
+    applyField(context.store, eventId, 'end', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
   }
-  applyStatus(context, eventId, 'rewards', result.rewards, sourceUrl, sourceMoment);
+  if (options.rewardsApplicable !== false && result.rewards.status !== 'n/a') {
+    applyStatus(context, eventId, 'rewards', result.rewards, sourceUrl, sourceMoment);
+  }
   applyStatus(context, eventId, 'description', result.description, sourceUrl, sourceMoment);
 }
 
@@ -304,7 +351,6 @@ function applyGeneric(
     status: 'unsicher',
     reason: 'Der Beitrag nennt keinen verlässlichen Endzeitpunkt.',
   }, sourceUrl, sourceMoment);
-  applyStatus(context, eventId, 'rewards', result.rewards, sourceUrl, sourceMoment);
   applyStatus(context, eventId, 'description', result.description, sourceUrl, sourceMoment);
 }
 
@@ -319,12 +365,26 @@ async function applySeasonalPage(
   fallbackTitle: string,
   topicEntry?: ListEntry,
   preferredEventId?: number,
+  topicHtml?: string,
 ): Promise<number> {
   const normalizedSpecialUrl = normalizeLodestoneUrl(sourceUrl);
   const specialPath = new URL(normalizedSpecialUrl).pathname;
   const key = `seasonal-special:${specialPath}`;
   const sourceMoment = topicEntry ? publishedAt(topicEntry, context.currentTime) : context.currentTime.toISOString();
   const result = await extractSeasonal(html, context.currentTime, { fetchText: context.fetchText, store: context.store });
+  let periodResult = extractSeasonalPeriod(html, context.currentTime);
+  let periodSourceUrl = normalizedSpecialUrl;
+  let periodSourceMoment = sourceMoment;
+  const specialHasPeriod = periodResult.periods.status === 'unsicher' || periodResult.periods.value.length > 0;
+  if (topicEntry && topicHtml !== undefined && !specialHasPeriod) {
+    const topicPeriodResult = extractSeasonalPeriod(topicHtml, context.currentTime);
+    const topicHasPeriod = topicPeriodResult.periods.status === 'unsicher' || topicPeriodResult.periods.value.length > 0;
+    if (topicHasPeriod) {
+      periodResult = topicPeriodResult;
+      periodSourceUrl = normalizeLodestoneUrl(topicEntry.url);
+      periodSourceMoment = publishedAt(topicEntry, context.currentTime);
+    }
+  }
   const eventSourceId = findEventBySourceUrl(context.store, normalizedSpecialUrl);
   const keyedEventId = findEventByKey(context.store, key);
   const existingEvent = getAllEvents(context.store).find((event) =>
@@ -332,7 +392,7 @@ async function applySeasonalPage(
   );
   const suggestedTitle = result.title.status === 'ok'
     ? result.title.value
-    : fallbackTitle || existingEvent?.title || '';
+    : fallbackTitle.trim() || existingEvent?.title || titleFromUrl(normalizedSpecialUrl);
   const eventId = eventForType(context, key, 'seasonal-special', suggestedTitle, normalizedSpecialUrl, preferredEventId);
 
   if (topicEntry) {
@@ -352,16 +412,17 @@ async function applySeasonalPage(
     firstSeenAt: context.currentTime.toISOString(),
   });
   context.processedSources.add(normalizedSpecialUrl);
-  const terminalPeriod = result.eventState.status === 'ok' && result.eventState.value === 'ended'
-    && result.periods.status === 'ok'
-    ? [...result.periods.value]
+  const combinedResult = { ...result, ...periodResult };
+  const terminalPeriod = combinedResult.eventState.status === 'ok' && combinedResult.eventState.value === 'ended'
+    && combinedResult.periods.status === 'ok'
+    ? [...combinedResult.periods.value]
       .filter((period) => period.endUtc !== null && Date.parse(period.endUtc) <= context.currentTime.getTime())
       .sort((left, right) => Date.parse(right.endUtc!) - Date.parse(left.endUtc!))[0]
     : undefined;
   const persistedResult = terminalPeriod
-    ? { ...result, period: { status: 'ok' as const, value: { startUtc: terminalPeriod.startUtc, endUtc: terminalPeriod.endUtc! } } }
-    : result;
-  applyExtract(context, eventId, normalizedSpecialUrl, sourceMoment, persistedResult);
+    ? { ...combinedResult, period: { status: 'ok' as const, value: { startUtc: terminalPeriod.startUtc, endUtc: terminalPeriod.endUtc! } } }
+    : combinedResult;
+  applyExtract(context, eventId, normalizedSpecialUrl, sourceMoment, persistedResult, { periodSourceUrl, periodSourceMoment });
   rememberEvent(context, eventId);
   finishPendingDiscovery(context, normalizedSpecialUrl, eventId);
   return eventId;
@@ -373,24 +434,36 @@ async function classifyAndLog(
   classification: Classification,
 ): Promise<void> {
   const unresolvedShortLink = classification.status === 'unclassified'
-    && classification.reason === 'short link unresolved';
-  if (!unresolvedShortLink) {
-    markSeen(context.store, entry.url, classification.status, context.currentTime.toISOString());
-  }
+    && classification.reason === 'Ein Kurzlink konnte nicht aufgelöst werden.';
+  const newlySeen = unresolvedShortLink
+    ? false
+    : markSeen(context.store, normalizeLodestoneUrl(entry.url), classification.status, context.currentTime.toISOString());
+  const title = displayEntryTitle(entry);
   if (classification.status === 'unclassified') {
-    if (unresolvedShortLink) {
-      await logWarning(context, 'short-link-unresolved:' + entry.url, 'Kurzlink nicht aufgelöst (short link unresolved): ' + entry.title + ' (' + entry.url + ')');
-    } else {
-      await logWarning(context, `unclassified:${entry.url}`, `Nicht klassifiziert: ${entry.title} (${entry.url})`);
+    context.unclassifiedUrls.add(normalizeLodestoneUrl(entry.url));
+    if (!context.firstRun && (unresolvedShortLink || newlySeen)) {
+      const message = unresolvedShortLink
+        ? `Kurzlink konnte nicht aufgelöst werden: „${title}“ (${normalizeLodestoneUrl(entry.url)})`
+        : `Nicht klassifiziert: ${title} (${normalizeLodestoneUrl(entry.url)})`;
+      await logWarning(context, `${unresolvedShortLink ? 'short-link-unresolved' : 'unclassified'}:${normalizeLodestoneUrl(entry.url)}`, message);
     }
   } else if (classification.status === 'ignored') {
-    await logWarning(context, `ignored:${entry.url}`, `Nicht berücksichtigt: ${entry.title} (${entry.url})`);
+    context.ignoredUrls.add(normalizeLodestoneUrl(entry.url));
+    if (!context.firstRun && entry.source === 'banner' && newlySeen) {
+      await logWarning(
+        context,
+        `ignored-banner:${normalizeLodestoneUrl(entry.url)}`,
+        `Nicht berücksichtigt: ${title} (${normalizeLodestoneUrl(entry.url)}) — ${classification.reason}`,
+      );
+    }
   }
 }
 
 function findMaintenanceMatch(context: CycleContext, entry: ListEntry): { eventId?: number; ambiguity?: 'missing' | 'multiple' } {
   const stem = maintenanceStem(entry.title);
   const target = maintenanceTarget(entry.title) ?? 'unknown';
+  const sameCycleOriginal = context.processedMaintenanceOriginals.get(`${target}\u0000${stem}`);
+  if (sameCycleOriginal !== undefined) return { eventId: sameCycleOriginal };
   const matches = getOpenEvents(context.store, context.currentTime)
     .filter((event) => {
       if (event.eventType !== 'maintenance' || maintenanceStem(event.title) !== stem) return false;
@@ -432,26 +505,19 @@ async function processMaintenance(
   }
 
   let detailHtml: string | undefined;
-  let detailError: unknown;
   try {
     detailHtml = await fetchDetailPage(sourceUrl, context.fetchText);
   } catch (error) {
-    detailError = error;
     await logSourceFailure(context, sourceUrl, error);
   }
   const isFollowup = /^\[Folge-News\]/i.test(entry.title);
   const linkedTargetId = detailHtml === undefined ? undefined : await explicitMaintenanceTarget(context, detailHtml);
   const match = findMaintenanceMatch(context, entry);
   let targetId = preferredEventId ?? findEventBySourceUrl(context.store, sourceUrl) ?? linkedTargetId ?? match.eventId;
+  let followupWarning: 'missing' | 'multiple' | undefined;
   if (isFollowup && targetId === undefined && match.ambiguity) {
+    followupWarning = match.ambiguity;
     const key = match.ambiguity === 'multiple' ? `maintenance:followup:ambiguous:${entry.url}` : `maintenance:followup:${entry.url}`;
-    await logWarning(
-      context,
-      `maintenance-followup:${entry.url}`,
-      match.ambiguity === 'multiple'
-        ? `Folge-News mehrdeutig: ${entry.title} (${entry.url})`
-        : `Folge-News ohne Original: ${entry.title} (${entry.url})`,
-    );
     targetId = eventForType(context, key, 'maintenance', entry.title, entry.url);
   }
 
@@ -461,6 +527,14 @@ async function processMaintenance(
   const alreadyKnown = findEventBySourceUrl(context.store, sourceUrl) !== undefined ||
     targetId !== undefined || findEventByKey(context.store, eventKey) !== undefined;
   const eventId = eventForType(context, eventKey, 'maintenance', entry.title, sourceUrl, targetId);
+  if (!isFollowup) context.processedMaintenanceOriginals.set(`${target}\u0000${stem}`, eventId);
+  if (isFollowup && followupWarning === undefined) {
+    const attachedOriginal = getEventSources(context.store, eventId)
+      .some((source) => source.kind === 'maintenance' || source.kind === 'feed');
+    const processedOriginal = [...context.processedMaintenanceOriginals.values()].includes(eventId);
+    if (!attachedOriginal && !processedOriginal) followupWarning = 'missing';
+  }
+  if (followupWarning) context.pendingFollowupWarnings.push({ eventId, entry, ambiguity: followupWarning });
   const kind = sourceKind(entry);
   attachSource(context.store, {
     eventId,
@@ -472,11 +546,11 @@ async function processMaintenance(
 
   if (detailHtml !== undefined) {
     const result = extractMaintenance(detailHtml, entry.title);
-    applyExtract(context, eventId, sourceUrl, publishedAt(entry, context.currentTime), result);
+    applyExtract(context, eventId, sourceUrl, publishedAt(entry, context.currentTime), result, { rewardsApplicable: false });
     finishPendingDiscovery(context, sourceUrl, eventId);
   } else {
     if (!alreadyKnown) {
-      const reason = `Detailseite nicht lesbar: ${detailError instanceof Error ? detailError.message : String(detailError)}`;
+      const reason = 'Die Detailseite konnte nicht gelesen werden.';
       applyField(context.store, eventId, 'start', { status: 'unsicher', reason }, sourceUrl, publishedAt(entry, context.currentTime));
       applyField(context.store, eventId, 'end', { status: 'unsicher', reason }, sourceUrl, publishedAt(entry, context.currentTime));
     }
@@ -522,6 +596,7 @@ async function processTopic(
 
   const classification = await classifyEntry(entry, detailHtml, {
     resolvedLinks: linkResolution,
+    topicPeriod: hasDeclaredPeriod(detailHtml, context.currentTime),
     hasPeriod: (path) => {
       const html = specialHtmlByPath.get(path);
       return html === undefined ? 'no' : hasPeriod(html, context.currentTime);
@@ -530,7 +605,7 @@ async function processTopic(
   await classifyAndLog(context, entry, classification);
   context.processedSources.add(entry.url);
   if (classification.status !== 'classified') {
-    if (classification.status === 'unclassified' && classification.reason === 'short link unresolved') {
+    if (classification.status === 'unclassified' && classification.reason === 'Ein Kurzlink konnte nicht aufgelöst werden.') {
       rememberPendingDiscovery(context, entry);
     } else {
       finishPendingDiscovery(context, sourceUrl);
@@ -542,7 +617,7 @@ async function processTopic(
     const specialUrl = specialUrls.find((url) => {
       const html = specialHtmlByPath.get(new URL(url).pathname);
       return html !== undefined && hasPeriod(html, context.currentTime) !== 'no';
-    });
+    }) ?? (hasPeriod(detailHtml, context.currentTime) !== 'no' ? specialUrls[0] : undefined);
     if (specialUrl === undefined) {
       rememberPendingDiscovery(context, entry);
       return undefined;
@@ -554,6 +629,7 @@ async function processTopic(
       entry.title,
       entry,
       preferredEventId ?? findEventBySourceUrl(context.store, entry.url),
+      detailHtml,
     );
     finishPendingDiscovery(context, sourceUrl, eventId);
     return eventId;
@@ -615,7 +691,25 @@ function combinedEntries(lists: LoadedLists): ListEntry[] {
       publishedAt: item.published,
     });
   }
-  return [...candidates.values()];
+  return [...candidates.values()].map((entry, index) => ({ entry, index })).sort((left, right) => {
+    const moment = (entry: ListEntry): number | undefined => {
+      if (entry.publishedEpoch !== undefined && Number.isFinite(entry.publishedEpoch)) return entry.publishedEpoch;
+      if (entry.publishedAt) {
+        const parsed = Date.parse(entry.publishedAt);
+        if (Number.isFinite(parsed)) return parsed / 1_000;
+      }
+      return undefined;
+    };
+    const leftMoment = moment(left.entry);
+    const rightMoment = moment(right.entry);
+    if (leftMoment !== undefined && rightMoment !== undefined && leftMoment !== rightMoment) return leftMoment - rightMoment;
+
+    const leftFollowup = /^\[Folge-News\]/i.test(left.entry.title);
+    const rightFollowup = /^\[Folge-News\]/i.test(right.entry.title);
+    if (leftFollowup !== rightFollowup) return leftFollowup ? 1 : -1;
+    if (leftMoment !== undefined && rightMoment !== undefined) return left.index - right.index;
+    return right.index - left.index;
+  }).map(({ entry }) => entry);
 }
 
 async function processBannerRail(context: CycleContext, html: string | undefined): Promise<void> {
@@ -639,12 +733,13 @@ async function processBannerRail(context: CycleContext, html: string | undefined
       continue;
     }
     context.processedSources.add(specialUrl);
-    const classification = await classifyEntry(entry, undefined, {
+    const displayEntry = { ...entry, title: displayEntryTitle(entry, page) };
+    const classification = await classifyEntry(displayEntry, undefined, {
       hasPeriod: () => hasPeriod(page, context.currentTime),
     });
-    await classifyAndLog(context, entry, classification);
+    await classifyAndLog(context, displayEntry, classification);
     if (classification.status === 'classified' && classification.eventType === 'seasonal-special') {
-      const eventId = await applySeasonalPage(context, specialUrl, page, entry.title);
+      const eventId = await applySeasonalPage(context, specialUrl, page, displayEntry.title);
       finishPendingDiscovery(context, specialUrl, eventId);
     } else {
       finishPendingDiscovery(context, specialUrl);
@@ -668,7 +763,7 @@ async function refreshStoredSource(context: CycleContext, event: StoreEvent, sou
   if (event.eventType === 'maintenance' || source.kind === 'maintenance' || source.kind === 'followup' || source.kind === 'feed') {
     try {
       const html = await fetchDetailPage(source.url, context.fetchText);
-      applyExtract(context, eventId, source.url, sourceMoment, extractMaintenance(html, event.title));
+      applyExtract(context, eventId, source.url, sourceMoment, extractMaintenance(html, event.title), { rewardsApplicable: false });
     } catch (error) {
       await logSourceFailure(context, source.url, error);
     }
@@ -694,7 +789,34 @@ async function refreshOpenEvents(context: CycleContext): Promise<void> {
   }
 }
 
-async function warnForUncertainFields(context: CycleContext, event: StoreEvent): Promise<void> {
+async function warnForUnmatchedFollowups(context: CycleContext): Promise<void> {
+  for (const pending of context.pendingFollowupWarnings) {
+    const event = getAllEvents(context.store).find((candidate) => candidate.id === pending.eventId);
+    if (context.firstRun && (!event || event.endStatus !== 'ok' || !event.endUtc || Date.parse(event.endUtc) <= context.currentTime.getTime())) {
+      continue;
+    }
+    const sources = getEventSources(context.store, pending.eventId);
+    const originalWasProcessed = [...context.processedMaintenanceOriginals.values()].includes(pending.eventId);
+    const originalIsAttached = sources.some((source) => source.kind === 'maintenance' || source.kind === 'feed');
+    if (originalWasProcessed || originalIsAttached) continue;
+
+    const message = pending.ambiguity === 'multiple'
+      ? `Folge-News mehrdeutig: ${displayEntryTitle(pending.entry)} (${normalizeLodestoneUrl(pending.entry.url)})`
+      : `Folge-News ohne Original: ${displayEntryTitle(pending.entry)} (${normalizeLodestoneUrl(pending.entry.url)})`;
+    await logWarning(context, `maintenance-followup:${normalizeLodestoneUrl(pending.entry.url)}`, message);
+  }
+}
+
+async function warnForUncertainFields(
+  context: CycleContext,
+  event: StoreEvent,
+  firstRunSuppressed: ReadonlySet<number>,
+): Promise<void> {
+  const ended = event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) <= context.currentTime.getTime();
+  const suppressedAndNotPostable = firstRunSuppressed.has(event.id)
+    && (event.endStatus !== 'ok' || !event.endUtc || Date.parse(event.endUtc) <= context.currentTime.getTime());
+  if (ended || suppressedAndNotPostable) return;
+
   const fields: Array<[string, string | null]> = [
     ['Titel', event.titleStatus === 'unsicher' ? event.titleReason : null],
     ['Start', event.startStatus === 'unsicher' ? event.startReason : null],
@@ -798,6 +920,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     firstRun,
     processedSources: new Set(),
     capturedEventIds: new Set(),
+    unclassifiedUrls: new Set(),
+    ignoredUrls: new Set(),
+    processedMaintenanceOriginals: new Map(),
+    pendingFollowupWarnings: [],
     specialPages: new Map(),
     pendingDiscoveries: loadPendingDiscoveries(options.store),
   };
@@ -815,6 +941,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     for (const entry of entries.values()) await processEntry(context, entry);
     await processBannerRail(context, lists.bannerHtml);
     await refreshOpenEvents(context);
+    await warnForUnmatchedFollowups(context);
   }
 
   const firstRunSuppressed = new Set<number>(JSON.parse(getMetaValue(context.store, 'first_run_suppressed_event_ids') ?? '[]') as number[]);
@@ -829,7 +956,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   }
 
   const postedEvents = await syncEvents(context, firstRun, health.isBlind, firstRunSuppressed);
-  for (const event of getAllEvents(context.store)) await warnForUncertainFields(context, event);
+  for (const event of getAllEvents(context.store)) {
+    await warnForUncertainFields(context, event, firstRunSuppressed);
+  }
   const liveEvents = getOpenEvents(context.store, currentTime);
   await syncLiveStatusPost({
     guildId: context.guildId,
@@ -839,12 +968,16 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     discord: context.discord,
     store: context.store,
     now: currentTime,
+    suppressLogs: firstRun,
   });
 
   await runWikiCrossCheck(context);
   if (firstRun && lists.succeeded && !health.isBlind) {
     if (warnOnce(context.store, 'first-run:summary')) {
-      await context.discord.sendLog(context.logChannelId, `Erststart: ${context.capturedEventIds.size} erfasst, ${postedEvents} gepostet`);
+      await context.discord.sendLog(
+        context.logChannelId,
+        `Erststart: ${context.capturedEventIds.size} erfasst, ${postedEvents} gepostet, ${context.unclassifiedUrls.size} unklassifiziert, ${context.ignoredUrls.size} ignoriert`,
+      );
     }
     markFirstRunDone(context.store);
   }
