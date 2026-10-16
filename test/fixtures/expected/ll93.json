@@ -1,0 +1,21 @@
+{
+  "Brief des Produzenten LIVE Teil 93": {
+    "startUtc": "2026-07-25T14:30:00Z",
+    "note": "Samstag 25. Juli 2026 16:30 Uhr (MESZ). Both topics carry the same time; only titles differ (ausgestrahlt/uebertragen).",
+    "topics": [
+      {
+        "url": "/lodestone/topics/detail/c026fd2ed62da67c1c329e3b3cf0b56e8778fe6e",
+        "fixture": "topics/ll93-topic-a.html",
+        "title": "Der Brief des Produzenten LIVE Teil 93 wird am Samstag, den 25. Juli vom Fan Festival in Berlin ausgestrahlt!",
+        "publishedUtc": "2026-07-10T10:45:00Z",
+        "note": "body has extra line 'Aktualisiert am 23.07.2026 um 10:00 Uhr (MESZ)'"
+      },
+      {
+        "url": "/lodestone/topics/detail/033b8797fd77a4f114a5ae3e0b9b3e1dab43ab53",
+        "fixture": "topics/ll93-topic-b.html",
+        "title": "Der Brief des Produzenten LIVE Teil 93 wird am Samstag, den 25. Juli vom Fan Festival in Berlin übertragen!",
+        "publishedUtc": "2026-07-23T09:00:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "now": "2026-10-16T12:00:00Z",
+  "periods": [
+    {"source": "current (h3 Zeitraum, p.fgs__overview__text; also meta description/og:description)", "startUtc": "2026-10-07T08:00:00Z", "endUtc": "2026-10-27T14:59:00Z"},
+    {"source": "history", "startUtc": "2025-11-06T08:00:00Z", "endUtc": "2025-11-27T14:59:00Z", "note": "start has no tz label; end says MEZ"},
+    {"source": "history", "startUtc": "2024-10-23T08:00:00Z", "endUtc": null, "note": "end is 'bis zu den Wartungsarbeiten von Patch 7.1' (no timestamp)"},
+    {"source": "history", "startUtc": "2024-05-23T08:00:00Z", "endUtc": "2024-06-10T14:59:00Z", "note": "start has no tz label; end says MESZ"},
+    {"source": "history", "startUtc": "2023-10-31T10:00:00Z", "endUtc": "2023-12-31T14:59:00Z", "note": "start 11:00 MEZ (DST ended 2023-10-29); end says MEZ"}
+  ],
+  "selected": {"startUtc": "2026-10-07T08:00:00Z", "endUtc": "2026-10-27T14:59:00Z"}
+}

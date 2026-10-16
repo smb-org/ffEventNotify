@@ -5,3 +5,4 @@ data/
 *.db-shm
 *.db-wal
 .gstack/
+.DS_Store

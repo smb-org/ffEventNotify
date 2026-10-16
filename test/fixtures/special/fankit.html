@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="de" class="de" xmlns:og="http://ogp.me/ns#" xmlns:fb="http://www.facebook.com/2008/fbml">
+<head><meta charset="utf-8">
+
+<script>
+	window.dataLayer = window.dataLayer || [];
+	function gtag(){dataLayer.push(arguments);}
+	(function() {
+		var cookie_suffix = '';
+		var get_cookie = function(name) {
+			var cookies = document.cookie ? document.cookie.split('; ') : [];
+			for ( var i = 0; i < cookies.length; i++ ) {
+				var cookie = cookies[i].split('=');
+				if ( cookie.shift() === name ) {
+					return decodeURIComponent(cookie.join('='));
+				}
+			}
+			return null;
+		};
+		var theme = get_cookie('ldst_theme' + cookie_suffix) || 'white';
+		if ( theme !== 'black' ) {
+			theme = 'white';
+		}
+		window.ldst_theme = theme;
+		window.ldst_apply_theme_switcher = function(root) {
+			if ( !root ) {
+				return;
+			}
+			var nodes = root.querySelectorAll('.sys_theme');
+			var active_theme = window.ldst_theme || 'white';
+			var has_active_theme = false;
+			for ( var i = 0; i < nodes.length; i++ ) {
+				if ( nodes[i].getAttribute('data-theme') === active_theme ) {
+					has_active_theme = true;
+					break;
+				}
+			}
+			if ( !has_active_theme ) {
+				active_theme = 'white';
+			}
+			for ( var i = 0; i < nodes.length; i++ ) {
+				nodes[i].classList.toggle('active', nodes[i].getAttribute('data-theme') === active_theme);
+			}
+		};
+		window.ldst_write_theme_link = function(options) {
+			var links = options.links || {};
+			var active_theme = window.ldst_theme || 'white';
+			if ( !links[active_theme] ) {
+				active_theme = 'white';
+			}
+			var html = '<link href="' + links[active_theme] + '" rel="stylesheet" class="sys_theme_css"';
+			if ( options.media ) {
+				html += ' media="' + options.media + '"';
+			}
+			for ( var key in links ) {
+				if ( Object.prototype.hasOwnProperty.call(links, key) ) {
+					html += ' data-theme_' + key + '="' + links[key] + '"';
+				}
+			}
+			html += '>';
+			document.write(html);
+		};
+		window.ldst_gtm_variable = {
+			'login': 'notloginuser',
+			'theme':  theme
+		};
+		
+		
+	})();
+</script>
+
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','digitalData','GTM-P37XSWJ');</script>
+<!-- End Google Tag Manager -->
+
+
+
+<title>FINAL FANTASY XIV Fan-Kit</title>
+<meta name="description" content="Das FINAL FANTASY XIV Fan-Kit enthält grandiose Goodies wie auf Konzeptzeichnungen basierende Bildschirmhintergründe für PCs und Smartphones, drollige X-Icons von Spielcharakteren oder Original-Soundeffekte in Form von Klingeltönen. Eorzäisiert euren Alltag!">
+
+<meta name="keywords" content="FF14,FFXIV,Final Fantasy XIV,Final Fantasy 14,Lodestone,Spieler,Seiten,Community,Player,A Realm Reborn,Heavensward,Stormblood,Shadowbringers,Endwalker,Dawntrail">
+
+<meta name="author" content="SQUARE ENIX Ltd.">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="format-detection" content="telephone=no">
+
+<link rel="alternate" type="application/atom+xml" href="/lodestone/news/news.xml" title="Neuigkeiten | FINAL FANTASY XIV - Der Lodestone">
+<link rel="alternate" type="application/atom+xml" href="/lodestone/news/topics.xml" title="Artikel | FINAL FANTASY XIV - Der Lodestone">
+
+<link rel="shortcut icon" type="image/vnd.microsoft.icon" href="https://lds-img.finalfantasyxiv.com/pc/global/images/favicon.ico?1720069015">
+<link rel="apple-touch-icon-precomposed" href="https://lds-img.finalfantasyxiv.com/h/0/U2uGfVX4GdZgU1jASO0m9h_xLg.png">
+<meta name="msapplication-TileImage" content="https://lds-img.finalfantasyxiv.com/h/0/U2uGfVX4GdZgU1jASO0m9h_xLg.png">
+
+<meta name="msapplication-TileColor" content="#000000">
+<link rel="alternate" hreflang="en-gb" href="https://eu.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">
+<link rel="alternate" hreflang="en-us" href="https://na.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">
+<link rel="alternate" hreflang="fr" href="https://fr.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">
+<link rel="alternate" hreflang="ja" href="https://jp.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">
+
+
+
+
+
+<!--[if lt IE 9]>
+	<script src="https://lds-img.finalfantasyxiv.com/h/I/SMlNRnAvuilc1lYKBpzKWpmADs.js"></script>
+
+<![endif]-->
+<!-- ** CSS ** -->
+
+<link href="https://lds-img.finalfantasyxiv.com/h/M/gnHIH2j_-_0VBfgUjGhRVd9Jzg.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/q/JBwrsXAApGdTnITZ66OtFX75to.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/b/WXbHgaAp7JzOhVFP91E3giX79s.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/j/JgAulXN0McN_xRNcKLLbnNh4fs.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/o/knBdqVmVK_tDDdOo21wZe0hdw8.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/g/_FT5sBjTZcBxViNIEXYN03sthA.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/w/3KI7E02bylUIk1dGwOPFfJ2vOQ.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/W/6HwIxzuTy2X5uTf7zVXU40VS1c.css" rel="stylesheet">
+
+<link href="https://lds-img.finalfantasyxiv.com/h/h/QgQikFet-NquVs6tJ91-T7JcUo.css" rel="stylesheet">
+	
+	<script>
+		window.ldst_write_theme_link({
+			links: {
+			
+				'white': 'https://lds\u002dimg.finalfantasyxiv.com/h/w/\u002dm4wRVIxU3C0AXl82\u002d5gsaNQb4.css',
+			
+				'black': 'https://lds\u002dimg.finalfantasyxiv.com/h/p/vUhe5KXqjyh\u002d9cucxyapYMxW4U.css'
+			
+			}
+		});
+	</script>
+	
+
+
+
+<link href="https://lds-img.finalfantasyxiv.com/h/M/JsbwAHo6-8jyfdxh6Yw1bdtbUA.css" rel="stylesheet">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- ogp -->
+<meta property="fb:app_id" content="">
+<meta property="og:type" content="website">
+<meta property="og:description" content="Das FINAL FANTASY XIV Fan-Kit enthält grandiose Goodies wie auf Konzeptzeichnungen basierende Bildschirmhintergründe für PCs und Smartphones, drollige X-Icons von Spielcharakteren oder Original-Soundeffekte in Form von Klingeltönen. Eorzäisiert euren Alltag!">
+<meta property="og:title" content="FINAL FANTASY XIV Fan-Kit">
+<meta property="og:url" content="https://de.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">
+<meta property="og:site_name" content="FINAL FANTASY XIV - Der Lodestone">
+<meta property="og:locale" content="de_DE">
+
+	<meta property="og:image" content="https://lds-img.finalfantasyxiv.com/h/6/Lh4u5405egOFLIxWrOgVS7coXI.png">
+
+
+
+	<meta property="fb:pages" content="116214575870">
+
+
+<meta name="twitter:card" content="summary_large_image">
+
+	<meta name="twitter:site" content="@ff_xiv_de">
+
+
+
+
+<script>
+	var base_domain = 'finalfantasyxiv.com';
+	var ldst_subdomain = 'de';
+	var ldst_subdomain_suffix = '';
+	var strftime_fmt = {
+		'dateHHMM_now': 'Heute %H:%M',
+		'dateYMDHMS': '%d.%m.%Y, %H.%M.%S',
+		'dateYMDHM': '%d.%m.%Y, %H:%M',
+		'dateYMDHM_jp': '%Y/%m/%d %H:%M',
+		'dateHM': '%H:%M',
+		'dateYMDH': '%d.%m.%Y, %H',
+		'dateYMD': '%d.%m.%Y',
+		'dateEternal': '%d.%m.%Y',
+		'dateYMDW': '%d.%m.%Y (%a)',
+		'dateHM': '%H:%M',
+		'week.0': 'So',
+		'week.1': 'Mo',
+		'week.2': 'Di',
+		'week.3': 'Mi',
+		'week.4': 'Do',
+		'week.5': 'Fr',
+		'week.6': 'Sa',
+		'ampm.0': 'a.m.',
+		'ampm.1': 'p.m.'
+	};
+	var base_uri   = '/lodestone/';
+	var api_uri    = '/lodestone/api/';
+	var static_uri = 'https://lds\u002dimg.finalfantasyxiv.com/';
+	var subdomain  = 'de';
+	var csrf_token = 'b8d720833767077fbf73b2f4bade26363e620262';
+	var cis_origin = 'https://secure.square\u002denix.com';
+	var ldst_max_image_size = 31457280;
+	var eorzeadb = {
+		cdn_prefix: 'https://lds\u002dimg.finalfantasyxiv.com/',
+		version: '1791873949',
+		version_js_uri:  'https://lds-img.finalfantasyxiv.com/pc/global/js/eorzeadb/version.js',
+		dynamic_tooltip: false
+	};
+	var cookie_suffix = '';
+	var ldst_is_loggedin = false;
+	var show_achievement = false;
+</script>
+<script src="https://lds-img.finalfantasyxiv.com/h/A/PknAmzDJUZCNhTGtSGGMIGi5k4.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/A/ak0dIM6d4V4mN-y_odkmGzm4fY.js"></script>
+
+
+
+
+	
+
+
+</head>
+<body id="special" class="base_top">
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-P37XSWJ"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+
+
+
+
+<div class="brand"><div class="brand__section">
+	<div class="brand__logo">
+		<a href="
+				https://square-enix-games.com/de_DE
+			" target="_blank"><img src="https://lds-img.finalfantasyxiv.com/h/a/1LbK-2Cqoku3zorQFR0VQ6jP0Y.png" width="130" height="14" alt="SQUARE ENIX">
+		</a>
+	</div>
+
+	
+		<div class="brand__search">
+			<form action="/lodestone/community/search/" class="brand__search__form">
+				<div class="brand__search__focus_bg"></div>
+				<div class="brand__search__base_bg"></div>
+				<input type="text" id="txt_search" class="brand__search--text" name="q" placeholder="Stichwort">
+				<input type="submit" id="bt_search" class="brand__search--btn" value="">
+			</form>
+		</div>
+	
+
+	
+		<div class="brand__theme sys_theme_switcher">
+			<a href="javascript:void(0);"><i class="brand__theme--white sys_theme js__tooltip" data-tooltip="Design (schwarz)" data-theme="white"></i></a>
+			<a href="javascript:void(0);"><i class="brand__theme--black sys_theme js__tooltip" data-tooltip="Design (weiß)" data-theme="black"></i></a>
+		</div>
+		<script>
+			(function() {
+				if ( window.ldst_apply_theme_switcher ) {
+					window.ldst_apply_theme_switcher(document.currentScript.previousElementSibling);
+				}
+			})();
+		</script>
+	
+
+	<div class="brand__lang dropdown_trigger_box">
+		<a href="javascript:void(0);" class="brand__lang__btn dropdown_trigger">Deutsch</a>
+		<ul class="brand__lang__select dropdown">
+		
+			<li><a href="https://de.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">Deutsch</a></li>
+		
+			<li><a href="https://eu.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">English (UK)</a></li>
+		
+			<li><a href="https://na.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">English (US)</a></li>
+		
+			<li><a href="https://fr.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">Français</a></li>
+		
+			<li><a href="https://jp.finalfantasyxiv.com/lodestone/special/fankit/desktop_wallpaper/7_0/">日本語</a></li>
+		
+		</ul>
+	</div>
+
+
+	
+		<div class="l__cross_menu de">
+			<a href="javascript:void(null)" class="ffxiv_pr_cross_menu_button_de"></a>
+			<script>
+				var ffxiv_pr_cross_menu = {
+					uri_js: '/cross_menu/uri.js'
+				};
+			</script>
+			<script src="https://lds-img.finalfantasyxiv.com/promo/pc/global/menu/loader.js"></script>
+		</div>
+	
+</div></div>
+
+
+
+<div class="l__base base_bottom">
+
+
+
+<!-- contents -->
+<div id="contents" class="clearfix">
+
+<link href="https://lds-img.finalfantasyxiv.com/h/Y/LjXCs46ML2DPHllAr2Ek39h8qM.css" rel="stylesheet">
+
+
+
+<div class="clearfix">
+	<div class="to_lodestone left">
+		<a href="/lodestone/"><img src="https://lds-img.finalfantasyxiv.com/h/a/jslEcvff0hmi8KEhjxLgAXEtko.png" width="360" height="52" alt="Der Lodestone"></a>
+	</div>
+	
+<ul class="social__btn"><li><a href="http://www.facebook.com/share.php?u=https://de.finalfantasyxiv.com/lodestone/special/fankit/" target="_blank"><i class="xiv-lds xiv-lds-facebook js__tooltip" data-tooltip="Jetzt teilen"></i></a></li><li><a href="https://x.com/intent/tweet?url=https://de.finalfantasyxiv.com/lodestone/special/fankit/&text=FINAL%20FANTASY%20XIV%20Fan-Kit" target="_blank"><i class="xiv-lds xiv-lds-x js__tooltip" data-tooltip="Posten"></i></a></li><li><a href="https://bsky.app/intent/compose?text=FINAL%20FANTASY%20XIV%20Fan-Kit%20https://de.finalfantasyxiv.com/lodestone/special/fankit/" target="_blank"><i class="xiv-lds xiv-lds-bluesky js__tooltip" data-tooltip="Posten"></i></a></li></ul>
+
+</div>
+
+
+<div class="main">
+		<div class="tc">
+		<img src="https://lds-img.finalfantasyxiv.com/h/y/yrlNd2ov31m_vwe66ouHpwSseM.png" width="600" height="52" alt="FINAL FANTASY XIV Fan-Kit">
+			<img src="https://lds-img.finalfantasyxiv.com/h/n/WhqzG-d9wzPJHY47YRLI0jxIqM.png" width="490" height="160" alt="">
+	</div>
+	<div class="notes_top">
+		<div class="notes_btm">
+			<div class="notes_inner">
+				<p class="mb20">Das FINAL FANTASY XIV Fan-Kit enthält grandiose Goodies wie auf Konzeptzeichnungen basierende Bildschirmhintergründe für PCs und Smartphones, drollige X-Icons von Spielcharakteren oder Original-Soundeffekte in Form von Klingeltönen. Eorzäisiert euren Alltag!</p>
+				<p>
+					
+						Lest euch bitte die <a href="http://support.eu.square-enix.com/rule.php?id=5385&la=4&tag=authc" target="_blank">FINAL FANTASY XIV: Bestimmungen für die Verwendung von Unterlagen</a> gut durch, bevor ihr Inhalte aus dem Fan-Kit herunterladet.
+					
+				</p>
+			</div>
+		</div>
+	</div>
+	<a href="javascript:void(0);" class="bt_using_the_fan_kit sys_popup_box_toggle"><img src="https://lds-img.finalfantasyxiv.com/h/Y/0fgMYokYpUjUSi2fa_PUN4TMiw.png" width="300" height="60" alt=""></a>
+	<div class="sys_popup_box">
+		<div class="bg_blue_box_top">
+			<div class="bg_blue_box_btm">
+				<div class="bg_blue_box_inner">
+					<h2 class="ttl_fankit"><span>Anwendung</span></h2>
+					<h3>So geht das Herunterladen</h3>
+					<p class="mb25"><span class="light_blue">PC-Bildschirmhintergründe</span><br>
+					Lade die Version herunter, die der Auflösung deines Bildschirms entspricht.<br><br>
+					<span class="light_blue">Bildschirmhintergründe für Smartphones</span><br>
+					Wähle zum Herunterladen den gewünschten Bildschirmhintergrund und die bevorzugte Auflösung aus.<br>
+					Solltet ihr ein iPhone benutzen, legt die Größe, in der ihr den Hintergrund benutzen möchtet, bitte über „Einstellungen“ -&gt; „Wallpaper“ fest.<br><br>
+					<span class="light_blue">Icons</span><br>
+					Bitte wähle zum Herunterladen das gewünschte Icon aus.<br><br>
+					<span class="light_blue">Iconrahmen</span><br>
+					Bitte wähle zum Herunterladen den gewünschten Rahmen aus.<br><br>
+					<span class="light_blue">Header</span><br>
+					Bitte wähle zum Herunterladen das gewünschte Icon aus.<br></p>
+					<h3>Anwendungshinweis für Iconrahmen</h3>
+					<p class="mb25">Die Iconrahmen liegen als durchscheinende PNG-Dateien vor. Du kannst sie mit einem Bildbearbeitungsprogramm, das dieses Format unterstützt, über dein Charakterportrait legen oder einen webbasierten Icon-Dekorationsdienst in Anspruch nehmen.</p>
+					<h3>Anwendungshinweis für Smartphone-Klingeltöne</h3>
+					<p class="mb25"><span class="light_blue">Android</span><br>
+					Einfach die mp3-Datei herunterladen und auf die SD-Karte eures Smartphones übertragen. Lest euch bitte die Bedienungsanleitung eures Smartphones durch, falls ihr Probleme beim Einrichten der Klingeltöne habt.</p>
+					<p class="mb25"><span class="light_blue">iPhone</span><br>
+					Einfach die m4r-Datei herunterladen und mithilfe von iTunes auf euer iPhone übertragen. Lest euch bitte die Bedienungsanleitung eures iPhones durch, falls ihr Probleme beim Einrichten der Klingeltöne habt.</p>
+					<h3>Alle Icons</h3>
+					<p>Die Icon-Sammlung ist im ZIP-Format komprimiert und muss nach dem Herunterladen mit einem Kompressionsprogramm entpackt werden.</p>
+					<div class="box_close_btn">
+						<a href="javascript:void(0);" class="button bt_close popup_box_close sys_popup_box_close"></a>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div id="nav_fankit">
+		<ul class="bt_anchorlink clearfix">
+			<li>
+				<a href="/lodestone/special/fankit/desktop_wallpaper/7_0/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/x/4egw7sBn8bP9asJjQUrkBnfGx4.png" width="144" height="200" alt="">
+					<img src="https://lds-img.finalfantasyxiv.com/h/V/NKwwFA6wfCJyhQtteEpSn8JVrQ.png" width="64" height="28" alt="" class="ic_updated">
+				</a>
+			</li>
+			<li>
+				<a href="/lodestone/special/fankit/smartphone_wallpaper/7_0/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/M/F2KX2uMDFauG7J9a-G-UGx8yW4.png" width="144" height="200" alt="">
+					<img src="https://lds-img.finalfantasyxiv.com/h/V/NKwwFA6wfCJyhQtteEpSn8JVrQ.png" width="64" height="28" alt="" class="ic_updated">
+				</a>
+			</li>
+			<li>
+				<a href="/lodestone/special/fankit/smartphone_ringtone/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/b/ZEvFpQBWVz_LRa63OZIbInEIWM.png" width="144" height="200" alt="">
+					
+				</a>
+			</li>
+			<li>
+				<a href="/lodestone/special/fankit/tooltip/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/e/wASeAAOvC-ozq_9d20Jdidk9Nk.png" width="144" height="200" alt="">
+					
+				</a>
+			</li>
+			<li>
+				<a href="/lodestone/special/fankit/icon/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/n/AmuX1T-8gI_nEkQAXM4d3iNvjk.png" width="144" height="200" alt="">
+					
+				</a>
+			</li>
+			<li>
+				<a href="/lodestone/special/fankit/twitter_kit/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/T/jeMuDAuZv988V-0bN-D_UGXp18.png" width="144" height="200" alt="">
+					<img src="https://lds-img.finalfantasyxiv.com/h/V/NKwwFA6wfCJyhQtteEpSn8JVrQ.png" width="64" height="28" alt="" class="ic_updated">
+				</a>
+			</li>
+			<li>
+				<a href="/lodestone/special/fankit/xbox/">
+					<img src="https://lds-img.finalfantasyxiv.com/h/U/EbQfmnVgmcO_gwSanZipURhffE.png" width="144" height="200" alt="">
+					
+					
+				</a>
+			</li>
+		</ul>
+	</div>
+
+
+	<div id="pc_wallpaper" class="bg_white_box_top">
+		<div class="bg_white_box_btm">
+			<div class="bg_white_box_inner">
+				<h2 class="ttl_fankit mb10"><span class="ic_pcw">PC-Bildschirmhintergründe</span></h2>
+				<ul class="nav_select clearfix">
+					<li><span>Dawntrail</span></li>
+					<li><a href="/lodestone/special/fankit/desktop_wallpaper/6_0/#nav_fankit">Endwalker</a></li>
+					<li><a href="/lodestone/special/fankit/desktop_wallpaper/5_0/#nav_fankit">Shadowbringers</a></li>
+					<li><a href="/lodestone/special/fankit/desktop_wallpaper/4_0/#nav_fankit">Stormblood</a></li>
+					<li><a href="/lodestone/special/fankit/desktop_wallpaper/3_0/#nav_fankit">Heavensward</a></li>
+					<li><a href="/lodestone/special/fankit/desktop_wallpaper/2_0/#nav_fankit">A Realm Reborn</a></li>
+				</ul>
+				<ul class="list_pc_wallpaper clearfix">
+					
+					
+					
+
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/d/21o86AWjxYVYBEZy5khW7dAKW4.jpg" width="300" height="169" alt="">
+								<img src="https://lds-img.finalfantasyxiv.com/h/S/gGc6HLTRO3SOR267nRwJrN8uq4.png" width="54" height="24" alt="NEU" class="ic_new">
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/M/MbCMdo74l0WBPCGgNIII8hQcvo.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/f/2BZxDC7qlUaE7Y6SN6s4QhT5Ug.jpg" width="300" height="169" alt="">
+								<img src="https://lds-img.finalfantasyxiv.com/h/S/gGc6HLTRO3SOR267nRwJrN8uq4.png" width="54" height="24" alt="NEU" class="ic_new">
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/5/wRwevRCQnc6X8qELXpzt6aHESs.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/8/gowVXbmIg3Dh2S6o6SJGnHmh74.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/i/RKr31ZDGjF8j9E4h5JOXkE-Wh4.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/9/EOnMfbolpc_1R_KiHBdy_bsglM.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/F/GVNMv-CK7KITkHJl3WIhge958A.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/q/krGW88rtifyxr1qWjyJYcp9gcE.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/n/Gf3TT_r1bm-Lxp1P2inhP1Sj4E.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/A/M0cTkafchASZ_M_l89ZW22Jdsg.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/I/gpd7UgnrwIvp7RJK9eeaK7Niz8.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/f/NfTWnzcc8Czp7nltPj4LzRMc4g.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/F/QAim605TH1YRvUi9cFGReikYoI.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/A/oAoQCgFvWyhEWApdJ3PijkDDh0.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/L/XPhrtK5S0XhR_GP7NgraOpCWuw.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/b/EJ3t5o1cHGmION38u8aGukN9Bg.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/Y/d7DqmLQ5zAcOKaUpO9tV6yEh8I.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/X/PtxF3ziytjs9Tv2L37JjOwXBTE.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/Y/kCfs5p0EsqMSbK2kQyg4HCYOZA.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/Z/1Li39bwJmXi701FfGzRL_7LAZg.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/Z/IBS1C7OqNPInLcnOkAEHDh0KNY.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/E/ibSO-nQMw7HgbDWcPWbLBE3UZk.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/K/HWBQpC7acIZwwCyUb9UFjA6Sxs.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/g/RO_2D7AOimDYd9uTz8Ve8FJABg.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/A/Iv3Y0GfT0Lh1_l1pWM9pf61X3g.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/j/OCDvU0HRgZrVgL0pCq06PU5jiE.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/u/s8LvX7-u4NzkKcsHzD9vIozjLk.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/r/TL9PpXE8utreZ3SQam8OxOpVPY.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/m/ZZDkUStDi_BcMnH9O_7Mq-xtnY.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/J/-c3EUAgma54qty3bFFcoGhr6v0.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/9/98IwZaZ1_QowT0ACfm9k0bYETI.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/7/K6Cqey4IufatsxzAyVKN7PLom0.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/o/bzKyH9uM6E9-y75RYVjeMw34F0.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/Y/NdUaImQNdiCiTpU6fC9TfsdzoM.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/d/zf2-XfLgaHfwhih8QjfrYfuunc.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/W/JIqT5TGATdsn4bU_sHvuDPH9VI.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/z/TheIawYN6SySA15SYPrhiYonco.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/m/3joMiddDsS5cbrxASnQ2nbfo8Y.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/q/jn5cochyUXEaDCUBdYHuH6g9wU.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/o/QytUvIm4_bzRoH8JAVQ_g0CPAc.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/H/yLeljE2wlSbAKEGs5QuXW4XHFs.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/r/k1gxmkpFRGXuFTJTps0vnUajso.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/-/-fFJLYucvtN_j2cHbPRm79kR3s.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/S/neom9aphPFES-7IElF2PlUy8GI.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/b/tnlEZONetHTOHx28G3BS79pcr0.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/M/8bdzN_6VQNh_WLUMQqr3J9-AEY.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/B/TrNsmhRUqUW3VvbDXvM9z5fdpo.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/P/XGWBeixgMKAj002nxwc4JxhswM.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/5/JdYLVGxAqFYyaCaIrYp2L8p78k.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/v/tlbbNxyD0TMruxXaa3GOKzCxaQ.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/M/Bq4XkIfxsVHdkeDIl8f2cofo_o.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/X/tYHvMQxaACYhUEivflXWIskB4c.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/1/wExgD71Oylofm9xHD8SKQz_xC0.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/m/XNvyRXba0aKP9olTvFATz3t23Y.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/X/G8Xl2pz78LZoBmTzMeXZXERDiU.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/s/eT1mRuq1oPtkwbWobx_T-yreNw.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/k/rV8CbFWXbvKXqOUW9kA442sETs.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/F/urcphr41HYRJh67w2Ql7oKFQAM.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/e/dPxGH6NOmsCqCPYS1N5ooPCS90.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/7/Daxu7GpcIeBD5cFl0ymJENS2xE.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/-/Rl-2MVFfAtaPFwrecRHJuJyME4.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/c/czfVnjXgY1K8xrjPW8S5W2NwuI.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/P/sFa67Z4bPMQG-Kx33twUP08LuY.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+					
+						<li>
+							<div class="box_pc_wallpaper">
+								<img src="https://lds-img.finalfantasyxiv.com/h/2/BOmt-xkUJv_UDHChO560yQkJkA.jpg" width="300" height="169" alt="">
+								
+							</div>
+							<p>
+								<a href="https://lds-img.finalfantasyxiv.com/h/D/5T8fdfNuwj2eMUSeCiVl09Qd-0.jpg" target="_blank">Download</a> (2560x1440)
+								</p>
+						</li>
+					
+
+				</ul>
+			</div>
+		</div>
+	</div>
+
+</div>
+
+
+</div>
+<!-- //#contetnts-->
+
+</div><!-- //#base_bottom -->
+
+<!-- footer -->
+
+	<div id="link_spsite" class="link_sp-site"><a href="javascript:void(0)">Version für Mobilgeräte</a><br></div><footer class="l__footer l__footer__de "><div class="page-top"><span class="page-top__btn"></span></div><div class="l__footer__inner"><div class="l__footer__logo"><a href="/lodestone/"><img src="https://lds-img.finalfantasyxiv.com/h/L/9yR2E7dDBigPW9CUZbILKJfBys.png" width="320" height="32" alt=""></a></div><div class="l__footer__shop"><a href="/lodestone/playguide/#returner" class="l__footer__shop__btn">Spiel herunterladen</a></div><p class="l__footer__officiel">Offizielle Informationen</p><ul class="l__footer__sns"><li><a href="https://www.facebook.com/FinalFantasyXIV.DE" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-facebook xiv-lds-3x"></i><span>Facebook</span></a></li><li class="l__footer__sns--twitter"><a href="https://x.com/ff_xiv_de" target="_blank"><i class="xiv-lds xiv-lds-x xiv-lds-3x"></i>X</a> / <a href="https://x.com/FFXIV_NEWS_DE" target="_blank">News</a></li><li><a href="http://www.youtube.com/finalfantasyxiv" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-youtube xiv-lds-3x"></i><span>YouTube</span></a></li><li><a href="https://www.instagram.com/ffxiv/" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-instagram xiv-lds-3x"></i><span>Instagram</span></a></li><li><a href="https://www.twitch.tv/finalfantasyxiv" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-twitch xiv-lds-3x"></i><span>Twitch</span></a></li><li><a href="https://bsky.app/profile/de.finalfantasyxiv.com" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-bluesky xiv-lds-3x"></i><span>Bluesky</span></a></li></ul><ul class="l__footer__link-list"><li class="link_license" id="link_license"><a href="/license/" target="_blank">Lizenz</a></li><li><a href="https://support.eu.square-enix.com/rule.php?id=5385&la=4" target="_blank">Regeln & Richtlinien</a></li><li><a href="https://square-enix-games.com/de_DE/documents/privacy" target="_blank">Datenschutzrichtlinie</a></li><li><a href="https://square-enix-games.com/de_DE/documents/cookies" target="_blank">Cookie-Richtlinien</a></li><li><a href="https://sqex.to/DEcancel" target="_blank">Abo jetzt kündigen</a></li></ul></div><div class="l__footer__legal-area"><div class="l__footer__legal-area__inner clearfix"><div class="l__footer__legal-area__box"><ul class="l__footer__legal-area__bnr-list"><li><img src="https://lds-img.finalfantasyxiv.com/h/_/45sv0DETIHyh_gl2FyLgD6kUJE.png" width="245" height="39" alt="PlayStation PS5 PS4"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/M/5T9l7AE_cSDlsD4EM4rjEQRgCE.png" width="227" height="39" alt="XBOX SERIES XIS"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/i/-sl3kKCt6xCALS3zfHfBvnGTjc.png" width="39" height="39" alt="Switch2"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/E/38lyWv84H59UEwldgCOGU2B9dM.png" width="33" height="39" alt="PC"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/v/hyXqlwktN4v0EssRTzkbMf_7OQ.png" width="30" height="39" alt="Mac"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/U/15QxPO___EcPlhMI9ydNRRxEY8.png" width="90" height="39" alt="STEAM"></li></ul><ul class="l__footer__legal-area__bnr-list"><li><a href="http://www.usk.de/" target="_blank"><img src="https://lds-img.finalfantasyxiv.com/h/x/BaMXVLYO7w3-NS6z3098DfhS_g.png" width="50" height="50" alt="USK"></a></li></ul><p class="l__footer__legal-area__text">&copy;2026 Sony Interactive Entertainment LLC."PlayStation Family Mark", "PlayStation", "PS5 logo", "PS5", "PS4 logo" and "PS4" are registered trademarks or trademarks of Sony Interactive Entertainment Inc.<br />Microsoft, the XBOX Sphere mark, the Series X|S logo and XBOX Series X|S are trademarks of the Microsoft group of companies.<br />Nintendo Switch is a trademark of Nintendo.<br />Mac is a trademark of Apple Inc.<br />&copy;2026 Valve Corporation. Steam and the Steam logo are trademarks and/or registered trademarks of Valve Corporation in the U.S. and/or other countries.</p></div><div class="l__footer__legal-area__box"><p class="l__footer__legal-area__copyright">© SQUARE ENIX<br />Square Enix Limited, registriert in England No. 01804186 - Registrierte Niederlassung: 240 Blackfriars Road, London, SE1 8NW.<br>LOGO ILLUSTRATION:© YOSHITAKA AMANO</p></div></div></div></footer>
+
+<!-- //footer -->
+
+
+
+<script src="https://lds-img.finalfantasyxiv.com/pc/de/js/i18n.js?c146df79ea"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/7/khZLR__lS_PBs4LZm7UeFSTr9w.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/g/uQNBgvCaabd4gw5kMpaT-psp1Q.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/b/RKD_bGx738E81TyiPQN4kGf-_Y.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/Z/wqo4GxX1wALdnxx6xOv38NxFVY.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/e/TSPHxkEhdcyaPMm0rpoBtk1dZA.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/6/z0eVVJmQzwrm9wpLxwxsLqUL4Q.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/J/_A05duMMuJo4pWbmnwSWNNuRRA.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/8/b_tPmOnEw1tyr2dp2InkGxUlMA.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/Y/6WaukM6m3WFE2JXrCEb6tsknik.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/l/dmowllk61MDsDA64pZqroR5OIw.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/b/M5IszZ2CA4ytUYpG_qCcfDx1GM.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/V/6HyqXCkjgk21c-wPWUwv57Cubk.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/-/-A1gnsYCMckjdruzZT-WfgevBg.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/S/7-Q0K-ExtOpkcmgNFSIzKfeEiM.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/m/frS9tr4pNIFJN6EqyjEYY-wtbM.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/P/ZS_64NhEW6Lhy_mjuKREowBe3Y.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/R/gvHs-ADo5VulodZlJcepFeUORI.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/u/kT-Uc5bStNbLIYU4HvTpzY-UX4.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/0/f52zA7ACWvjEMB1oWe8kfyGWH0.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/l/-_ePiHXNE_1t8LnRcmRAbhRME8.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/P/MYGDtxveSuUwuhprm8oj1Hhuq8.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/F/537IFhrnUY-z_UKOewrVygH8hQ.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/n/HMQm8_JEoqrSmuv5RmmKgTldGc.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/E/nHFcy6a0pgPo3A7WYMg158A1uw.js"></script>
+
+
+<div id="dialog_bg" style="opacity:0; visibility: hidden;"></div>
+<!-- dialog -->
+<div name="ldstDialog" class="overlay__area js__overlay" style="opacity:0; visibility: hidden; top: 0px">
+	<p class="overlay__text--icon"></p>
+
+	<div class="outbound_consent hide">
+		<input type="checkbox" name="outbound_consent" value="1" id="outbound_consent" class="form__checkbox">
+		<label for="outbound_consent" class="form__checkbox__label form__outbound">
+			Diese Nachricht in Zukunft nicht mehr anzeigen.
+		</label>
+	</div>
+
+	<!-- SIMPLE DIALOG -->
+	<a href="javascript:void(0);" class="js__dialog_btn btn__color--radius js__overlay_ok">OK</a>
+	<!-- //SIMPLE DIALOG -->
+	<!-- CONFIRM DIALOG -->
+	<ul class="js__dialog_btn overlay__btn js__overlay_btn">
+		<li><a href="javascript:void(0);" class="js__overlay_yes">Ja</a></li>
+		<li><a href="javascript:void(0);" class="js__overlay_no">Nein</a></li>
+	</ul>
+	<!-- //CONFIRM DIALOG -->
+</div>
+<!-- //dialog -->
+
+
+
+</body>
+</html>

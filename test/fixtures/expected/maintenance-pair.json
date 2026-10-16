@@ -1,0 +1,27 @@
+{
+  "original": {
+    "fixture": "maintenance/all-worlds-original.html",
+    "url": "/lodestone/news/detail/937bc8f7dda7fe51008b7ea77d65548fcd4e5ebe",
+    "title": "[Wartung]Wartung aller Welten (12-13. Okt.)",
+    "stem": "Wartung aller Welten (12-13. Okt.)",
+    "startUtc": "2026-10-12T10:00:00Z",
+    "endUtc": "2026-10-13T10:00:00Z",
+    "bodyText": "Vom 12. Okt. 2026 um 12 Uhr (MESZ) bis zum 13. Okt. 2026 um 12 Uhr (MESZ)."
+  },
+  "followup": {
+    "fixture": "maintenance/all-worlds-followup.html",
+    "url": "/lodestone/news/detail/e06c2ed28cd282761a0204f7c0af613bb873cb3e",
+    "title": "[Folge-News]Wartung aller Welten (12-13. Okt.): Folgenews",
+    "stem": "Wartung aller Welten (12-13. Okt.)",
+    "startUtc": "2026-10-12T10:00:00Z",
+    "endUtc": "2026-10-13T09:25:00Z",
+    "bodyText": "Vom 12. Okt. 2026 um 12 Uhr (MESZ) bis zum 13. Okt. 2026 um 11:25 (MESZ)."
+  },
+  "stemsMatch": true,
+  "mogstationIgnored": {
+    "fixture": "maintenance/mogstation.html",
+    "title": "[Wartung]Wartung der Mogry-Station / des Online-Shops (15. Okt.)",
+    "expected": "ignore",
+    "bodyText": "Am 15. Okt. 2026 von 9 Uhr bis 11 Uhr (MESZ)"
+  }
+}

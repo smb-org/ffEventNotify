@@ -1,0 +1,48 @@
+{
+  "period": {
+    "startUtc": "2026-10-15T08:00:00Z",
+    "endUtc": "2026-11-02T14:59:00Z"
+  },
+  "rewards": [
+    {
+      "section": "Ausrüstung",
+      "itemId": "1077b68a626",
+      "name": "Grizzlybär-Kopf"
+    },
+    {
+      "section": "Ausrüstung",
+      "itemId": "c7ee1246362",
+      "name": "Grizzlybär-Anzug"
+    },
+    {
+      "section": "Möbel",
+      "itemId": "5476f014104",
+      "name": "Grinse-Spukpilz"
+    },
+    {
+      "section": "Möbel",
+      "itemId": "cc7809c11e9",
+      "name": "Starrblick-Spukpilz"
+    },
+    {
+      "section": "Möbel",
+      "itemId": "8a384b261f9",
+      "name": "Wachseelen-Kinderwagen"
+    },
+    {
+      "section": "Möbel",
+      "itemId": "7e4c515afd3",
+      "name": "Allerschutzheiligen-Plakat 2025"
+    },
+    {
+      "section": "Möbel",
+      "itemId": "8a4634e287d",
+      "name": "Allerschutzheiligen-Tischgemälde 2025"
+    },
+    {
+      "section": "Möbel",
+      "itemId": "04393053cf6",
+      "name": "Allerschutzheiligen-Plakat 2016"
+    }
+  ]
+}

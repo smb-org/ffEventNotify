@@ -1,0 +1,63 @@
+{
+  "now": "2026-10-16T12:00:00Z",
+  "railContainer": "div.ldst__side > div.mb10 > a  (promo banners, href has ?utm_source=lodestone&utm_medium=pc_banner&utm_campaign=...)",
+  "specials": [
+    {
+      "path": "/lodestone/special/2026/All_Saints_Wake/tfrx2rkv52",
+      "location": "banner-rail",
+      "hasPeriod": true,
+      "period": {
+        "startUtc": "2026-10-15T08:00:00Z",
+        "endUtc": "2026-11-02T14:59:00Z"
+      },
+      "running": true,
+      "fixture": "special/all-saints-wake-2026.html"
+    },
+    {
+      "path": "/lodestone/special/fallguys/",
+      "location": "banner-rail",
+      "hasPeriod": true,
+      "period": {
+        "startUtc": "2026-10-07T08:00:00Z",
+        "endUtc": "2026-10-27T14:59:00Z"
+      },
+      "running": true,
+      "fixture": "special/fallguys.html"
+    },
+    {
+      "path": "/lodestone/special/mogmog-collection/202609/lsekubsk45",
+      "location": "banner-rail",
+      "hasPeriod": true,
+      "period": {
+        "startUtc": "2026-09-09T08:00:00Z",
+        "endUtc": "2026-10-19T14:59:00Z"
+      },
+      "running": true,
+      "fixture": "special/mogmog-202609.html"
+    },
+    {
+      "path": "/lodestone/special/friend_recruit/",
+      "location": "banner-rail",
+      "hasPeriod": false,
+      "fixture": "special/friend-recruit.html"
+    },
+    {
+      "path": "/lodestone/special/fankit/",
+      "location": "global-nav (sub-nav__community__fankit), not banner rail",
+      "hasPeriod": false,
+      "fixture": "special/fankit.html"
+    },
+    {
+      "path": "/lodestone/special/patchnote_log/",
+      "location": "global-nav (sub-nav__news__text), not banner rail",
+      "hasPeriod": false,
+      "fixture": "special/patchnote-log.html"
+    },
+    {
+      "path": "/lodestone/special/update_log/",
+      "location": "global-nav (sub-nav__news__text), not banner rail",
+      "hasPeriod": false,
+      "fixture": "special/update-log.html"
+    }
+  ]
+}
