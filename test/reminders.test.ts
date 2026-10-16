@@ -81,6 +81,8 @@ test('due reminders batch only opted-in users with open items and persist slots 
     assert.match(discord.sent[0]?.payload.content ?? '', /<@user-01>/);
     assert.doesNotMatch(discord.sent[0]?.payload.content ?? '', /<@user-02>|<@user-03>/);
     assert.deepEqual(discord.sent[0]?.payload.allowedMentions, { parse: [], users: ['user-01'] });
+    assert.equal((discord.sent[0]?.payload as unknown as { suppressEmbeds?: boolean }).suppressEmbeds, true);
+    assert.match(discord.sent[0]?.payload.content ?? '', /\]\(<https:\/\/de\.finalfantasyxiv\.com\//);
 
     db.close();
     db = openDb(path);

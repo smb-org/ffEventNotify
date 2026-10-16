@@ -155,6 +155,7 @@ export interface DiscordMessagePayload {
   embeds?: DiscordEmbed[];
   components?: DiscordActionRow[];
   allowedMentions?: DiscordAllowedMentions;
+  suppressEmbeds?: boolean;
 }
 
 export interface DiscordMessageSnapshot extends DiscordMessagePayload {

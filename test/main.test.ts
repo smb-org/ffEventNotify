@@ -250,6 +250,26 @@ test('DiscordJsPort disables implicit mention parsing while retaining explicit r
   }
 });
 
+test('DiscordJsPort suppresses embeds and wraps URLs in log messages', async () => {
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const guild = Reflect.construct(Guild as unknown as Function, [client, rawGuild('123456789012345678')]) as Guild;
+  const channel = Reflect.construct(TextChannel as unknown as Function, [guild, rawTextChannel(guild.id, '323456789012345678'), client]) as TextChannel;
+  client.channels.fetch = async () => channel;
+  let postOptions: unknown;
+  client.rest.post = async (_route, options) => {
+    postOptions = options;
+    return rawMessage(guild.id, channel.id, '423456789012345678', 'warning');
+  };
+  try {
+    await new DiscordJsPort(client).sendLog(channel.id, 'Quelle nicht lesbar: https://de.finalfantasyxiv.com/lodestone/topics/.');
+    const body = (postOptions as { body: { content: string; flags: number } }).body;
+    assert.equal(body.content, 'Quelle nicht lesbar: <https://de.finalfantasyxiv.com/lodestone/topics/>.');
+    assert.equal(body.flags, MessageFlags.SuppressEmbeds);
+  } finally {
+    client.destroy();
+  }
+});
+
 test('overlapping hourly and setup syncs create one card, one status post, and one scheduled event', async () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   const guildId = '123456789012345678';
@@ -382,10 +402,14 @@ test('setup defers before fetching the bot member and completes with editReply',
   ]);
   const guildId = '123456789012345678';
   const loggedMessages: string[] = [];
+  const setupLogMessages: Array<{ content?: string; flags?: MessageFlags }> = [];
   const originalLog = console.log;
   console.log = (...values: unknown[]) => { loggedMessages.push(values.map(String).join(' ')); };
   const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
-  const logChannel = { id: '423456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
+  const logChannel = {
+    id: '423456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions,
+    send: async (payload: { content?: string; flags?: MessageFlags }) => { order.push('send-log'); setupLogMessages.push(payload); },
+  };
   const interaction = {
     guildId,
     guild: { name: 'Testserver', members: { fetchMe: async () => { order.push('fetch'); return { permissions: new PermissionsBitField([PermissionFlagsBits.CreateEvents]) }; } } },
@@ -397,7 +421,10 @@ test('setup defers before fetching the bot member and completes with editReply',
   };
   try {
     await handleFfEventsSetup(interaction as never, db, async (selectedGuildId) => { order.push(`sync:${selectedGuildId}`); });
-    assert.deepEqual(order, ['defer', 'fetch', `sync:${guildId}`, 'edit']);
+    assert.deepEqual(order, ['defer', 'fetch', `sync:${guildId}`, 'send-log', 'edit']);
+    assert.equal(setupLogMessages[0]?.content, `✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>.`);
+    assert.equal(setupLogMessages[0]?.flags, MessageFlags.SuppressEmbeds);
+    assert.doesNotMatch(setupLogMessages[0]?.content ?? '', /\r|\n/);
     assert.deepEqual(loggedMessages, ['Server Testserver eingerichtet']);
   } finally {
     console.log = originalLog;

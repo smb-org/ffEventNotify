@@ -146,7 +146,7 @@ async function syncEventRemindersUnlocked({
       }
       const displayTitle = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
       const title = displayTitle.replace(/[\\[\]()*_~`|>]/g, '\\$&');
-      const linkedTitle = placeholderLink ? `[${title}](${placeholderLink})` : title;
+      const linkedTitle = placeholderLink ? `[${title}](<${placeholderLink}>)` : title;
       const prefix = `${reminderLeadLabel(leadHours)}: ${linkedTitle} — offen bei euch:`;
       const delivery: Omit<ReminderDeliveryKey, 'userId'> = { guildId, eventKey: event.eventKey, leadHours };
       const states = ensureReminderDeliveries(store, delivery, recipients.map((recipient) => recipient.userId));
@@ -187,6 +187,7 @@ async function syncEventRemindersUnlocked({
           await discord.createMessage(channelId, {
             content,
             allowedMentions: { parse: [], users: message.userIds },
+            suppressEmbeds: true,
           });
           markReminderDeliveriesSent(store, delivery, message.userIds, now.toISOString());
         } catch (error) {

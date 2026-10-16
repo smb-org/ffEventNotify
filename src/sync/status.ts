@@ -70,9 +70,11 @@ async function syncLiveStatusPostUnlocked({
   if (!existing) {
     const history = await discord.fetchRecentBotMessages(channelId, 2_000, { requireChannelStart: true });
     if (!history.complete) {
-      await deliverWarning(store, guildId, logChannelId, 'status-post:recovery-incomplete',
-        'Die vorhandene Statusmeldung konnte nicht vollständig gesucht werden. Es wurde keine neue erstellt; der Bot versucht es erneut.',
-        (target, content) => discord.sendLog(target, content));
+      if (!suppressLogs) {
+        await deliverWarning(store, guildId, logChannelId, 'status-post:recovery-incomplete',
+          'Die vorhandene Statusmeldung konnte nicht vollständig gesucht werden. Es wurde keine neue erstellt; der Bot versucht es erneut.',
+          (target, content) => discord.sendLog(target, content));
+      }
       return;
     }
     existing = history.messages.find((message) => message.authorIsBot && message.embeds.some((embed) => embed.title === 'Läuft gerade')) ?? null;

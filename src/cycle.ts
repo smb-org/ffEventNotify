@@ -17,6 +17,7 @@ import {
   getGuildEventObject,
   getGuild,
   getPendingWarnings,
+  isSeen,
   isFirstRun,
   markGuildFirstRunDone,
   markGuildEventFirstRunSuppressed,
@@ -56,6 +57,8 @@ import { syncLiveStatusPost } from './sync/status.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { SourceHealthMonitor } from './health.ts';
 import { parseGermanDateTime } from './time.ts';
+import { stableEventIdentity } from './event-identity.ts';
+import { splitUnclassifiedNotices } from './log-format.ts';
 import type {
   Classification,
   DiscordPort,
@@ -136,11 +139,13 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
   health: SourceHealthMonitor;
   clock: () => Date;
   currentTime: Date;
+  globalFirstRun: boolean;
   firstRun: boolean;
   guilds: CycleGuild[];
   processedSources: Set<string>;
   capturedEventIds: Set<number>;
   unclassifiedUrls: Set<string>;
+  newUnclassifiedTopics: Map<string, string>;
   ignoredUrls: Set<string>;
   processedMaintenanceOriginals: Map<string, number>;
   pendingFollowupWarnings: Array<{ eventId: number; entry: ListEntry; ambiguity: 'missing' | 'multiple' }>;
@@ -534,29 +539,49 @@ async function classifyAndLog(
   entry: ListEntry,
   classification: Classification,
 ): Promise<void> {
+  const url = normalizeLodestoneUrl(entry.url);
   const unresolvedShortLink = classification.status === 'unclassified'
     && classification.reason === 'Ein Kurzlink konnte nicht aufgelöst werden.';
-  const newlySeen = unresolvedShortLink
-    ? false
-    : markSeen(context.store, normalizeLodestoneUrl(entry.url), classification.status, context.currentTime.toISOString());
+  const newlySeen = !isSeen(context.store, url);
+  if (!unresolvedShortLink) markSeen(context.store, url, classification.status, context.currentTime.toISOString());
   const title = displayEntryTitle(entry);
   const hasEstablishedGuild = context.guilds.some((guild) => !guild.firstRun);
   if (classification.status === 'unclassified') {
-    context.unclassifiedUrls.add(normalizeLodestoneUrl(entry.url));
-    if (unresolvedShortLink || newlySeen || hasEstablishedGuild) {
-      const message = unresolvedShortLink
-        ? `Kurzlink konnte nicht aufgelöst werden: „${title}“ (${normalizeLodestoneUrl(entry.url)})`
-        : `Nicht klassifiziert: ${title} (${normalizeLodestoneUrl(entry.url)})`;
-      await logWarningToEstablishedGuilds(context, `${unresolvedShortLink ? 'short-link-unresolved' : 'unclassified'}:${normalizeLodestoneUrl(entry.url)}`, message);
+    context.unclassifiedUrls.add(url);
+    if (unresolvedShortLink) {
+      if (!context.globalFirstRun) {
+        await logWarningToEstablishedGuilds(context, `short-link-unresolved:${url}`, `Kurzlink konnte nicht aufgelöst werden: „${title}“ (${url})`);
+      }
+    } else if (entry.source === 'topic' && newlySeen && !context.globalFirstRun) {
+      context.newUnclassifiedTopics.set(url, title);
     }
   } else if (classification.status === 'ignored') {
-    context.ignoredUrls.add(normalizeLodestoneUrl(entry.url));
+    context.ignoredUrls.add(url);
     if (entry.source === 'banner' && (newlySeen || hasEstablishedGuild)) {
       await logWarningToEstablishedGuilds(
         context,
-        `ignored-banner:${normalizeLodestoneUrl(entry.url)}`,
-        `Nicht berücksichtigt: ${title} (${normalizeLodestoneUrl(entry.url)}) — ${classification.reason}`,
+        `ignored-banner:${url}`,
+        `Nicht berücksichtigt: ${title} (${url}) — ${classification.reason}`,
       );
+    }
+  }
+}
+
+async function logNewUnclassifiedTopics(context: CycleContext): Promise<void> {
+  if (context.globalFirstRun || context.newUnclassifiedTopics.size === 0) return;
+  const items = [...context.newUnclassifiedTopics.entries()]
+    .map(([url, title]) => ({ title, url }))
+    .sort((left, right) => left.url.localeCompare(right.url));
+  const messages = splitUnclassifiedNotices(items);
+  for (const guild of context.guilds.filter((candidate) => !candidate.firstRun)) {
+    for (const content of messages) {
+      const key = `unclassified-cycle:${stableEventIdentity(content)}`;
+      try {
+        await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, key, content,
+          (channelId, warning) => context.discord.sendLog(channelId, warning)));
+      } catch (error) {
+        console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+      }
     }
   }
 }
@@ -1166,7 +1191,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         }
         return undefined;
       }
-      return guild;
+      return { ...guild, firstRun: !storedGuild.firstRunDone };
     });
     if (validatedGuild) guilds.push(validatedGuild);
   }
@@ -1178,10 +1203,12 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     health: options.health ?? new SourceHealthMonitor(options.store),
     clock,
     currentTime,
+    globalFirstRun,
     firstRun,
     processedSources: new Set(),
     capturedEventIds: new Set(),
     unclassifiedUrls: new Set(),
+    newUnclassifiedTopics: new Map(),
     ignoredUrls: new Set(),
     processedMaintenanceOriginals: new Map(),
     pendingFollowupWarnings: [],
@@ -1203,6 +1230,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     }
     for (const entry of entries.values()) await processEntry(context, entry);
     await processBannerRail(context, lists.bannerHtml);
+    await logNewUnclassifiedTopics(context);
     await refreshOpenEvents(context);
     await warnForUnmatchedFollowups(context);
   }
@@ -1262,6 +1290,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
 async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId: string): Promise<void> {
   const storedGuild = getConfiguredGuilds(options.store).find((guild) => guild.guildId === guildId);
   if (!storedGuild) return;
+  const globalFirstRun = isFirstRun(options.store);
   const guild: CycleGuild = {
     guildId,
     eventChannelId: storedGuild.eventChannelId!,
@@ -1297,10 +1326,12 @@ async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId
     health: options.health ?? new SourceHealthMonitor(options.store),
     clock: options.now ?? (() => new Date()),
     currentTime,
+    globalFirstRun: isFirstRun(options.store),
     firstRun: guild.firstRun,
     processedSources: new Set(),
     capturedEventIds: new Set(),
     unclassifiedUrls: new Set(),
+    newUnclassifiedTopics: new Map(),
     ignoredUrls: new Set(),
     processedMaintenanceOriginals: new Map(),
     pendingFollowupWarnings: [],

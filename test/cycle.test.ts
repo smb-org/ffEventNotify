@@ -21,6 +21,7 @@ import type {
 import { runCycle, runGuildSyncFromStoredData } from '../src/cycle.ts';
 import { runDryRunCycle } from '../src/dry-run.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
+import { formatLogContent } from '../src/log-format.ts';
 import { assertDiscordActionRows } from './component-invariants.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
@@ -139,8 +140,9 @@ class FakeDiscordPort implements DiscordPort {
   }
 
   async sendLog(channelId: string, content: string): Promise<void> {
-    this.logs.push(content);
-    this.logChannels.push({ channelId, content });
+    const formatted = formatLogContent(content);
+    this.logs.push(formatted);
+    this.logChannels.push({ channelId, content: formatted });
   }
 
   private makeMessage(channelId: string, payload: DiscordMessagePayload): DiscordMessageSnapshot {
@@ -263,12 +265,14 @@ function eventEmbeds(discord: FakeDiscordPort): Array<{ eventId: string; embed: 
 }
 
 function cycleOptions(store: Store, discord: FakeDiscordPort, health = new SourceHealthMonitor(store)) {
+  const firstRun = isFirstRun(store);
   upsertGuildSetup(store, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+  if (!firstRun) markGuildFirstRunDone(store, 'guild');
   return {
     store,
     discord,
     fetchText: fixtureFetcher(),
-    guilds: [{ guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs', firstRun: isFirstRun(store) }],
+    guilds: [{ guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs', firstRun }],
     now: () => new Date(NOW),
     health,
   };
@@ -416,7 +420,7 @@ test('ignored banner log uses the page title instead of an empty title', async (
   try {
     await runCycle({ ...cycleOptions(db, discord), fetchText });
     assert.ok(discord.logs.includes(
-      'Nicht berücksichtigt: Lade einen Freund ein (https://de.finalfantasyxiv.com/lodestone/special/friend_recruit/) — Auf der Sonderseite steht kein Zeitraum.',
+      'Nicht berücksichtigt: Lade einen Freund ein (<https://de.finalfantasyxiv.com/lodestone/special/friend_recruit/>) — Auf der Sonderseite steht kein Zeitraum.',
     ));
     assert.ok(discord.logs.every((message) => !message.includes('Nicht berücksichtigt:  (')));
   } finally {
@@ -650,7 +654,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     });
     await runCycle({ ...cycleOptions(db, discord), fetchText: secondCycleFetch });
     assert.deepEqual(discord.logs, [
-      `Nicht klassifiziert: Neue Meldung ohne Eventbezug (https://de.finalfantasyxiv.com${newTopicUrl})`,
+      `Neue Lodestone-News ohne Event:\n• [Neue Meldung ohne Eventbezug](<https://de.finalfantasyxiv.com${newTopicUrl}>)`,
     ]);
   } finally {
     db.close();
@@ -1247,6 +1251,7 @@ test('a transient channel lookup failure does not mark a guild as needing setup'
 test('one guild first-run does not suppress an unclassified warning for an established guild', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
   upsertGuildSetup(db, { guildId: 'established', eventChannelId: 'events-a', logChannelId: 'logs-a' });
   upsertGuildSetup(db, { guildId: 'initializing', eventChannelId: 'events-b', logChannelId: 'logs-b' });
   markGuildFirstRunDone(db, 'established');
@@ -1267,8 +1272,101 @@ test('one guild first-run does not suppress an unclassified warning for an estab
         { guildId: 'initializing', eventChannelId: 'events-b', logChannelId: 'logs-b', firstRun: true },
       ],
     });
-    assert.ok(discord.logChannels.some(({ channelId, content }) => channelId === 'logs-a' && content.includes('Nicht klassifiziert')));
-    assert.ok(!discord.logChannels.some(({ channelId, content }) => channelId === 'logs-b' && content.includes('Nicht klassifiziert')));
+    assert.ok(discord.logChannels.some(({ channelId, content }) => channelId === 'logs-a' && content.startsWith('Neue Lodestone-News ohne Event:\n')));
+    assert.ok(!discord.logChannels.some(({ channelId, content }) => channelId === 'logs-b' && content.startsWith('Neue Lodestone-News ohne Event:\n')));
+  } finally {
+    db.close();
+  }
+});
+
+test('global first crawl suppresses backlog notices, then logs new unclassified topics once per cycle', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const backlogUrl = '/lodestone/topics/detail/backlog-topic';
+  const freshUrl = '/lodestone/topics/detail/fresh-topic';
+  let entries = [{ title: 'Backlog topic', url: backlogUrl }];
+  const fetchText: FetchText = async (requestedUrl) => {
+    const url = new URL(requestedUrl);
+    if (url.pathname === '/lodestone/topics/') {
+      return { status: 200, body: topicListHtml(entries), finalUrl: requestedUrl };
+    }
+    if (url.pathname === '/lodestone/news/category/2') {
+      return {
+        status: 200,
+        body: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+        finalUrl: requestedUrl,
+      };
+    }
+    if (url.pathname === '/lodestone/news/news.xml') {
+      return { status: 200, body: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>', finalUrl: requestedUrl };
+    }
+    if (url.pathname === backlogUrl || url.pathname === freshUrl) {
+      return { status: 200, body: '<article><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: requestedUrl };
+    }
+    return { status: 404, body: '', finalUrl: requestedUrl };
+  };
+
+  try {
+    await runCycle({
+      store: db, discord, fetchText, now: () => new Date(NOW),
+      guilds: [{ guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs', firstRun: false }],
+    });
+
+    assert.deepEqual(discord.logChannels.map(({ content }) => content), [
+      'Erststart: 0 erfasst, 0 gepostet, 1 unklassifiziert, 1 ignoriert',
+    ]);
+
+    const firstCycleLogCount = discord.logChannels.length;
+    entries = [
+      { title: 'Backlog topic', url: backlogUrl },
+      { title: 'Neue [News] (Info) * _ ~ ` |', url: freshUrl },
+    ];
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+
+    const newMessages = discord.logChannels.slice(firstCycleLogCount).map(({ content }) => content);
+    assert.deepEqual(newMessages, [
+      'Neue Lodestone-News ohne Event:\n• [Neue \\[News\\] \\(Info\\) \\* \\_ \\~ \\` \\|](<https://de.finalfantasyxiv.com/lodestone/topics/detail/fresh-topic>)',
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('new unclassified topic notices split only at Discord’s 2000-character limit', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+  markGuildFirstRunDone(db, 'guild');
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const entries = Array.from({ length: 30 }, (_, index) => ({
+    title: `Neue Ankündigung ${String(index).padStart(2, '0')} ${'x'.repeat(80)}`,
+    url: `/lodestone/topics/detail/unclassified-${index}`,
+  }));
+  const fetchText: FetchText = async (requestedUrl) => {
+    const url = new URL(requestedUrl);
+    if (url.pathname === '/lodestone/topics/') return { status: 200, body: topicListHtml(entries), finalUrl: requestedUrl };
+    if (url.pathname === '/lodestone/news/category/2') {
+      return { status: 200, body: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]), finalUrl: requestedUrl };
+    }
+    if (url.pathname === '/lodestone/news/news.xml') return { status: 200, body: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>', finalUrl: requestedUrl };
+    if (url.pathname.startsWith('/lodestone/topics/detail/')) {
+      return { status: 200, body: '<article><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: requestedUrl };
+    }
+    return { status: 404, body: '', finalUrl: requestedUrl };
+  };
+
+  try {
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+
+    const messages = discord.logChannels.map(({ content }) => content)
+      .filter((content) => content.startsWith('Neue Lodestone-News ohne Event:\n'));
+    assert.ok(messages.length > 1);
+    assert.ok(messages.every((message) => message.length <= 2_000));
+    assert.ok(messages.every((message) => message.startsWith('Neue Lodestone-News ohne Event:\n')));
+    assert.equal(messages.join('\n').match(/\[Neue Ankündigung/g)?.length, entries.length);
   } finally {
     db.close();
   }

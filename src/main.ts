@@ -45,6 +45,7 @@ import {
   type Store,
 } from './store.ts';
 import { syncEventReminders } from './sync/reminders.ts';
+import { formatLogContent } from './log-format.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { handleChecklistInteraction } from './interactions/checklist.ts';
 import type {
@@ -274,6 +275,7 @@ export class DiscordJsPort implements DiscordPort {
       embeds: payload.embeds?.map(embedBuilder),
       ...(payload.components === undefined ? {} : { components: actionRowBuilders(payload.components) }),
       allowedMentions: { parse: [], users: payload.allowedMentions?.users ?? [] },
+      ...(payload.suppressEmbeds ? { flags: MessageFlags.SuppressEmbeds } : {}),
     });
     return messageSnapshot(message, this.client.user?.id);
   }
@@ -372,7 +374,7 @@ export class DiscordJsPort implements DiscordPort {
   }
 
   async sendLog(channelId: string, content: string): Promise<void> {
-    await this.createMessage(channelId, { content });
+    await this.createMessage(channelId, { content: formatLogContent(content), suppressEmbeds: true });
   }
 }
 
@@ -698,6 +700,15 @@ export async function handleFfEventsSetup(
     });
   } catch (error) {
     console.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);
+  }
+  try {
+    await logChannel.send({
+      content: formatLogContent(`✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>.`),
+      flags: MessageFlags.SuppressEmbeds,
+      allowedMentions: { parse: [] },
+    });
+  } catch (error) {
+    console.warn(`Setup-Bestätigung für Server ${interaction.guildId} konnte nicht im Log-Kanal gesendet werden.`, error);
   }
   await interaction.editReply({
     content: `✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>. Der erste Abgleich für diesen Server startet jetzt.`,
