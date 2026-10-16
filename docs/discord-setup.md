@@ -20,7 +20,7 @@ Du brauchst Admin- bzw. „Server verwalten“-Rechte auf dem Server. Dauer: ca.
 
 ## 3. Einladungslink mit den richtigen Rechten erzeugen
 1. Links **„OAuth2“** → **„URL Generator“**.
-2. **Scopes:** **`bot`** und **`applications.commands`** anhaken (Letzteres für `/setup`).
+2. **Scopes:** **`bot`** und **`applications.commands`** anhaken (Letzteres für `/ffevents setup`).
 3. Darunter erscheint **Bot Permissions**. Genau diese anhaken:
 
 | Berechtigung (im Portal) | Wofür |
@@ -58,6 +58,6 @@ DISCORD_TOKEN=<Token aus Schritt 2>
 - Docker: `docker compose up -d`
 
 ## 8. Auf dem Server einrichten
-1. Nach dem Start führt ein Mitglied mit „Server verwalten“ auf dem Server `/setup` aus und wählt **Event-Kanal** und **Log-Kanal** aus.
+1. Nach dem Start führt ein Mitglied mit „Server verwalten“ auf dem Server `/ffevents setup` aus und wählt **Event-Kanal** und **Log-Kanal** aus.
 2. Der Bot bestätigt und macht für diesen Server den ersten Durchlauf: Er postet nur Events, die gerade laufen oder noch kommen, und schreibt eine kurze Zusammenfassung in den Log-Kanal.
-3. Wer `/setup` erneut ausführt, ändert die Kanäle.
+3. Wer `/ffevents setup` erneut ausführt, ändert die Kanäle.

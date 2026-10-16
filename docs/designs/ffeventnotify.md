@@ -21,7 +21,7 @@ Abgedeckte Event-Typen: Saison-Events und Kollaborationen, Mogry-Schatzkammer un
 
 ## Constraints
 
-- Öffentlicher Mehr-Server-Bot: Jeder Server-Admin lädt ihn ein und richtet ihn mit `/setup` ein (Event- und Log-Kanal, nur mit „Server verwalten“). Lodestone wird 1×/h für alle Server geholt, Discord-IDs liegen pro Server. `.env` enthält nur `DISCORD_TOKEN` (plus `DB_PATH`, `FIXTURE_DUMP_DIR`). *(Umsetzungs-Entscheidung D21, ersetzt Ein-Server)*
+- Öffentlicher Mehr-Server-Bot: Jeder Server-Admin lädt ihn ein und richtet ihn mit `/ffevents setup` ein (Event- und Log-Kanal, nur mit „Server verwalten“). Lodestone wird 1×/h für alle Server geholt, Discord-IDs liegen pro Server. `.env` enthält nur `DISCORD_TOKEN` (plus `DB_PATH`, `FIXTURE_DUMP_DIR`). *(Umsetzungs-Entscheidung D21, ersetzt Ein-Server)*
 - Alle Texte, die Spieler sehen, sind auf Deutsch.
 - Es gibt keine offizielle API. Drittanbieter-Spiegel (lodestonenews.com, npm `lodestone-news`) werden seit etwa 2022 nicht gepflegt und fallen als Quelle aus.
 - Discord-Grenzen:
@@ -1176,7 +1176,8 @@ Keine.
 ## Umsetzungs-Entscheidungen (nach Eng-Review)
 
 - D20: SQLite über `node:sqlite` statt better-sqlite3 (keine native Abhängigkeit). Paketmanager pnpm (Vorgabe sb).
-- D21: Öffentlicher Mehr-Server-Bot mit `/setup` (Manage Guild), Lodestone 1×/h für alle, Discord-IDs pro Server, Erststart-Regel pro Server, Aufräumen beim Entfernen, Scope `applications.commands`, Public Bot an.
+- D21: Öffentlicher Mehr-Server-Bot mit `/ffevents setup` (Manage Guild), Lodestone 1×/h für alle, Discord-IDs pro Server, Erststart-Regel pro Server, Aufräumen beim Entfernen, Scope `applications.commands`, Public Bot an.
+- D22: Befehl `/ffevents` mit Unterbefehlen (`setup`, später `status`, `test`) statt `/setup`, um Verwechslung mit anderen Bots zu vermeiden (Vorgabe sb).
 - Technische Festlegungen: sqex.to-Kurzlinks werden aufgelöst und auf de. normalisiert; Sonderseite ohne Zeitraum macht ein Topic nicht saisonal; Banner-Leiste nur `div.ldst__side`; Item-Fixtures gzip.
 
 ## GSTACK REVIEW REPORT
