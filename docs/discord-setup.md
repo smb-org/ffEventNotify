@@ -35,16 +35,17 @@ Du brauchst Admin- bzw. „Server verwalten“-Rechte auf dem Server. Dauer: ca.
 | **Create Public Threads** | Erinnerungs-Thread unter der Event-Karte |
 | **Send Messages in Threads** | Erinnerungen im Thread |
 | **Manage Threads** | Erinnerungs-Threads archivieren und aufräumen |
+| **Manage Channels** | Tags im Event-Forum anlegen (Saison-Event, Wartung, Schatzkammer, läuft/beendet) |
 | **Create Private Threads** | für spätere Funktionen vorgesehen |
 | **Add Reactions** | für spätere Funktionen vorgesehen |
 | **Use Application Commands** | Slash-Befehle wie `/ffevents setup` |
 
-   **Nicht** anhaken: Administrator, Manage Server, Mention Everyone und alles andere.
+   **Nicht** anhaken: Administrator, Manage Server, Mention Everyone.
 
    Fertiger Einladungslink mit genau diesen Rechten:
 
    ```
-   https://discord.com/oauth2/authorize?client_id=1560738471470043236&permissions=2269797874224192&integration_type=0&scope=bot+applications.commands
+   https://discord.com/oauth2/authorize?client_id=1560738471470043236&permissions=2269797874224208&integration_type=0&scope=bot+applications.commands
    ```
 
    Wer eine eigene Bot-App betreibt, ersetzt die `client_id` durch die eigene Application ID.
