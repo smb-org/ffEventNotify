@@ -2,6 +2,7 @@
 
 import { load } from 'cheerio';
 import { resolveItem, type ResolveItemOptions } from '../items.ts';
+import { isAllowedSpecialImageUrl } from '../store.ts';
 import { parseGermanDateTime, type BerlinTimezoneLabel } from '../time.ts';
 import type {
   FieldStatus,
@@ -393,6 +394,16 @@ export async function extractSeasonal(
   const rewards = ids.status === 'unsicher' ? ids : await resolveRewards(ids.value, options);
   const $ = load(html);
   const descriptionText = $('meta[name="description"]').first().attr('content')?.trim();
+  const rawImageUrl = $('meta[property="og:image"]').first().attr('content')?.trim();
+  let imageUrl: string | undefined;
+  if (rawImageUrl) {
+    try {
+      const candidate = new URL(rawImageUrl, 'https://de.finalfantasyxiv.com').toString();
+      if (isAllowedSpecialImageUrl(candidate)) imageUrl = candidate;
+    } catch {
+      // Invalid or unapproved image links are omitted from the public embed.
+    }
+  }
   const description: FieldStatus<string> = descriptionText
     ? { status: 'ok', value: descriptionText }
     : { status: 'unsicher', reason: 'Auf der Sonderseite fehlt eine Beschreibungsangabe.' };
@@ -402,6 +413,7 @@ export async function extractSeasonal(
     ...periodResult,
     rewards,
     description,
+    ...(imageUrl ? { imageUrl } : {}),
   };
 }
 

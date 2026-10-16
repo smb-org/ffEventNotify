@@ -41,7 +41,21 @@ export interface StoreEvent {
   description: string | null;
   descriptionStatus: 'ok' | 'unsicher';
   descriptionReason: string | null;
+  imageUrl: string | null;
   createdAt: string;
+}
+
+export interface SaveChecklistSelectionInput {
+  guildId: string;
+  userId: string;
+  eventKey: string;
+  itemIds: readonly string[];
+  doneItemIds: readonly string[];
+}
+
+export interface ChecklistReminderRecipient {
+  userId: string;
+  openItemIds: string[];
 }
 
 export interface StoredGuild {
@@ -106,6 +120,7 @@ const SCHEMA = `
     description TEXT,
     description_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (description_status IN ('ok', 'unsicher')),
     description_reason TEXT DEFAULT 'Nicht extrahiert',
+    image_url TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   );
 
@@ -194,9 +209,37 @@ const SCHEMA = `
     PRIMARY KEY (event_id, user_id, lead_hours)
   );
 
+  CREATE TABLE IF NOT EXISTS checklist_items (
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (guild_id, user_id, event_key, item_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS checklist_reminder_preferences (
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (guild_id, user_id, event_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS reminder_slots (
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    lead_hours INTEGER NOT NULL CHECK (lead_hours IN (24, 72)),
+    claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (guild_id, event_key, lead_hours)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_events_end_utc ON events(end_utc);
   CREATE INDEX IF NOT EXISTS idx_event_sources_event_id ON event_sources(event_id);
   CREATE INDEX IF NOT EXISTS idx_seen_entries_first_seen_at ON seen_entries(first_seen_at);
+  CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
 function runTransaction<T>(db: Store, action: () => T): T {
@@ -215,6 +258,8 @@ export function openDb(path: string): Store {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
+  const eventColumns = db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>;
+  if (!eventColumns.some((column) => column.name === 'image_url')) db.exec('ALTER TABLE events ADD COLUMN image_url TEXT');
   for (const field of ['start', 'end', 'rewards', 'description'] as const) {
     db.prepare(`UPDATE events SET ${field}_reason = 'Nicht extrahiert' WHERE ${field}_reason = 'not extracted'`).run();
   }
@@ -604,6 +649,7 @@ export function getOpenEvents(db: Store, now: Date | string = new Date()): Store
            description,
            description_status AS descriptionStatus,
            description_reason AS descriptionReason,
+           image_url AS imageUrl,
            created_at AS createdAt
     FROM events
     WHERE end_status = 'unsicher'
@@ -634,6 +680,7 @@ export function getAllEvents(db: Store): StoreEvent[] {
            description,
            description_status AS descriptionStatus,
            description_reason AS descriptionReason,
+           image_url AS imageUrl,
            created_at AS createdAt
     FROM events
     ORDER BY created_at, id
@@ -708,4 +755,121 @@ export function getCachedItem(db: Store, itemId: string): CachedItem | undefined
     WHERE item_id = ?
   `).get(itemId) as CachedItem | undefined;
   return row;
+}
+
+const SPECIAL_IMAGE_HOSTS = new Set(['lds-img.finalfantasyxiv.com', 'img.finalfantasyxiv.com']);
+
+export function isAllowedSpecialImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && SPECIAL_IMAGE_HOSTS.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function setEventImageUrl(db: Store, eventId: number, imageUrl: string | null | undefined): boolean {
+  const value = imageUrl ?? null;
+  if (value !== null && !isAllowedSpecialImageUrl(value)) return false;
+  return db.prepare(`UPDATE events SET image_url = ? WHERE id = ? AND image_url IS NOT ?`).run(value, eventId, value).changes > 0;
+}
+
+function ensureChecklistGuild(db: Store, guildId: string): void {
+  db.prepare('INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING').run(guildId);
+}
+
+export function ensureChecklistItems(
+  db: Store,
+  guildId: string,
+  userId: string,
+  eventKey: string,
+  itemIds: readonly string[],
+): void {
+  ensureChecklistGuild(db, guildId);
+  const insert = db.prepare(`INSERT INTO checklist_items (guild_id, user_id, event_key, item_id, done)
+    VALUES (?, ?, ?, ?, 0) ON CONFLICT(guild_id, user_id, event_key, item_id) DO NOTHING`);
+  for (const itemId of new Set(itemIds)) insert.run(guildId, userId, eventKey, itemId);
+}
+
+export function saveChecklistSelection(db: Store, selection: SaveChecklistSelectionInput): void {
+  const itemIds = [...new Set(selection.itemIds)];
+  const doneItemIds = new Set(selection.doneItemIds.filter((itemId) => itemIds.includes(itemId)));
+  runTransaction(db, () => {
+    ensureChecklistGuild(db, selection.guildId);
+    db.prepare(`DELETE FROM checklist_items
+      WHERE guild_id = ? AND user_id = ? AND event_key = ?`).run(selection.guildId, selection.userId, selection.eventKey);
+    const insert = db.prepare(`INSERT INTO checklist_items (guild_id, user_id, event_key, item_id, done)
+      VALUES (?, ?, ?, ?, ?)`);
+    for (const itemId of itemIds) {
+      insert.run(selection.guildId, selection.userId, selection.eventKey, itemId, doneItemIds.has(itemId) ? 1 : 0);
+    }
+  });
+}
+
+export function getChecklistDoneItemIds(db: Store, guildId: string, userId: string, eventKey: string): string[] {
+  return (db.prepare(`SELECT item_id AS itemId FROM checklist_items
+    WHERE guild_id = ? AND user_id = ? AND event_key = ? AND done = 1 ORDER BY rowid`)
+    .all(guildId, userId, eventKey) as Array<{ itemId: string }>).map(({ itemId }) => itemId);
+}
+
+export function ensureChecklistReminderPreference(db: Store, guildId: string, userId: string, eventKey: string): boolean {
+  ensureChecklistGuild(db, guildId);
+  db.prepare(`INSERT INTO checklist_reminder_preferences (guild_id, user_id, event_key, enabled)
+    VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, event_key) DO NOTHING`).run(guildId, userId, eventKey);
+  return getChecklistReminderPreference(db, guildId, userId, eventKey);
+}
+
+export function getChecklistReminderPreference(db: Store, guildId: string, userId: string, eventKey: string): boolean {
+  const row = db.prepare(`SELECT enabled FROM checklist_reminder_preferences
+    WHERE guild_id = ? AND user_id = ? AND event_key = ?`).get(guildId, userId, eventKey) as { enabled: number } | undefined;
+  return row?.enabled === 1;
+}
+
+export function setChecklistReminderPreference(
+  db: Store,
+  guildId: string,
+  userId: string,
+  eventKey: string,
+  enabled: boolean,
+): void {
+  ensureChecklistGuild(db, guildId);
+  db.prepare(`INSERT INTO checklist_reminder_preferences (guild_id, user_id, event_key, enabled)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id, event_key) DO UPDATE SET
+      enabled = excluded.enabled,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE checklist_reminder_preferences.enabled IS NOT excluded.enabled`)
+    .run(guildId, userId, eventKey, enabled ? 1 : 0);
+}
+
+export function getChecklistReminderRecipients(
+  db: Store,
+  guildId: string,
+  eventKey: string,
+  itemIds: readonly string[],
+): ChecklistReminderRecipient[] {
+  const uniqueItemIds = [...new Set(itemIds)];
+  if (uniqueItemIds.length === 0) return [];
+  const placeholders = uniqueItemIds.map(() => '?').join(', ');
+  const rows = db.prepare(`SELECT c.user_id AS userId, c.item_id AS itemId
+    FROM checklist_items c
+    JOIN checklist_reminder_preferences p
+      ON p.guild_id = c.guild_id AND p.user_id = c.user_id AND p.event_key = c.event_key
+    WHERE c.guild_id = ? AND c.event_key = ? AND p.enabled = 1 AND c.done = 0
+      AND c.item_id IN (${placeholders})
+    ORDER BY c.rowid`).all(guildId, eventKey, ...uniqueItemIds) as Array<{ userId: string; itemId: string }>;
+  const recipients = new Map<string, string[]>();
+  for (const row of rows) {
+    const openItemIds = recipients.get(row.userId) ?? [];
+    openItemIds.push(row.itemId);
+    recipients.set(row.userId, openItemIds);
+  }
+  return [...recipients].map(([userId, openItemIds]) => ({ userId, openItemIds }));
+}
+
+export function claimReminderSlot(db: Store, guildId: string, eventKey: string, leadHours: 24 | 72): boolean {
+  ensureChecklistGuild(db, guildId);
+  return db.prepare(`INSERT INTO reminder_slots (guild_id, event_key, lead_hours)
+    VALUES (?, ?, ?) ON CONFLICT(guild_id, event_key, lead_hours) DO NOTHING`)
+    .run(guildId, eventKey, leadHours).changes > 0;
 }

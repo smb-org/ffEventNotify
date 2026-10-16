@@ -1,7 +1,8 @@
 // Keeps the single pinned live status message current without needless edits.
 
-import type { Store, StoreEvent } from '../store.ts';
-import { deliverWarning, getGuild, setGuildStatusMessage } from '../store.ts';
+import type { StoreEvent } from '../store.ts';
+import { deliverWarning, getEventSources, getGuild, setGuildStatusMessage, type Store } from '../store.ts';
+import { eventSourceLink } from '../event-identity.ts';
 import type { DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
 
 export interface SyncLiveStatusOptions {
@@ -15,13 +16,19 @@ export interface SyncLiveStatusOptions {
   suppressLogs?: boolean;
 }
 
-function statusEmbed(events: readonly StoreEvent[], now: Date): DiscordEmbed {
+function statusEmbed(events: readonly StoreEvent[], now: Date, store: Store): DiscordEmbed {
   const nowMs = now.getTime();
   const running = events
     .filter((event) => event.startStatus === 'ok' && event.endStatus === 'ok' && event.startUtc !== null && event.endUtc !== null)
     .filter((event) => Date.parse(event.startUtc!) <= nowMs && nowMs < Date.parse(event.endUtc!))
     .sort((left, right) => Date.parse(left.endUtc!) - Date.parse(right.endUtc!) || left.title.localeCompare(right.title));
-  const lines = running.map((event) => `• **${event.title.slice(0, 256)}** — endet <t:${Math.floor(Date.parse(event.endUtc!) / 1_000)}:R>`);
+  const lines = running.map((event) => {
+    const title = event.title.slice(0, 256).replace(/[\\[\]()*_~`|>]/g, '\\$&');
+    const sourceUrls = getEventSources(store, event.id).map((source) => source.url);
+    const link = eventSourceLink(event.eventKey, sourceUrls);
+    const linkedTitle = link ? `[**${title}**](${link})` : `**${title}**`;
+    return `• ${linkedTitle} — endet <t:${Math.floor(Date.parse(event.endUtc!) / 1_000)}:R>`;
+  });
   const overflow = '… Weitere Events sind im Event-Kanal aufgeführt.';
   let description = lines.join('\n');
   if (description.length > 4096) {
@@ -46,7 +53,7 @@ export async function syncLiveStatusPost({
   suppressLogs = false,
   guildId,
 }: SyncLiveStatusOptions): Promise<void> {
-  const desired = statusEmbed(events, now);
+  const desired = statusEmbed(events, now, store);
   const payload = { embeds: [desired] };
   const guild = getGuild(store, guildId);
   let existing: DiscordMessageSnapshot | null = null;

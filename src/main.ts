@@ -6,12 +6,17 @@ import {
   Client,
   ChannelType,
   EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Events,
   GatewayIntentBits,
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   type ChatInputCommandInteraction,
   type GuildScheduledEvent,
   type Message,
@@ -31,7 +36,9 @@ import {
   markGuildNeedsSetup,
   upsertGuildSetup,
 } from './store.ts';
+import { handleChecklistInteraction } from './interactions/checklist.ts';
 import type {
+  DiscordActionRow,
   DiscordEmbed,
   DiscordMessagePayload,
   DiscordMessageSnapshot,
@@ -81,22 +88,84 @@ const systemClock: SchedulerClock = {
 function embedBuilder(embed: DiscordEmbed): EmbedBuilder {
   const builder = new EmbedBuilder();
   if (embed.title !== undefined) builder.setTitle(embed.title);
+  if (embed.url !== undefined) builder.setURL(embed.url);
   if (embed.description !== undefined) builder.setDescription(embed.description);
+  if (embed.color !== undefined) builder.setColor(embed.color);
+  if (embed.author !== undefined) builder.setAuthor(embed.author);
+  if (embed.image !== undefined) builder.setImage(embed.image.url);
   if (embed.fields !== undefined) builder.addFields(embed.fields);
   if (embed.footer !== undefined) builder.setFooter(embed.footer);
   return builder;
 }
 
+function actionRowBuilders(rows: readonly DiscordActionRow[]) {
+  return rows.map((row) => {
+    const first = row.components[0];
+    if (!first) return new ActionRowBuilder<ButtonBuilder>();
+    if (first.type === 'string-select') {
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId(first.customId)
+        .setMinValues(first.minValues)
+        .setMaxValues(first.maxValues)
+        .addOptions(first.options.map((option) => {
+          const builder = new StringSelectMenuOptionBuilder()
+            .setLabel(option.label)
+            .setValue(option.value);
+          if (option.description !== undefined) builder.setDescription(option.description);
+          if (option.default !== undefined) builder.setDefault(option.default);
+          return builder;
+        }));
+      if (first.placeholder !== undefined) menu.setPlaceholder(first.placeholder);
+      return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+    }
+
+    const buttons = row.components.map((component) => {
+      if (component.type !== 'button') throw new Error('Discord-Aktionszeile enthält gemischte Komponententypen.');
+      const builder = new ButtonBuilder().setLabel(component.label).setStyle(
+        component.style === 'primary' ? ButtonStyle.Primary
+          : component.style === 'secondary' ? ButtonStyle.Secondary
+            : ButtonStyle.Link,
+      );
+      if (component.style === 'link') {
+        if (!component.url) throw new Error('Ein Link-Button benötigt eine Zieladresse.');
+        builder.setURL(component.url);
+      } else if (component.customId !== undefined) {
+        builder.setCustomId(component.customId);
+      }
+      if (component.disabled !== undefined) builder.setDisabled(component.disabled);
+      return builder;
+    });
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
+  });
+}
+
 function embedSnapshot(embed: Message['embeds'][number]): DiscordEmbed {
   return {
     ...(embed.title === null ? {} : { title: embed.title }),
+    ...(embed.url === null ? {} : { url: embed.url }),
     ...(embed.description === null ? {} : { description: embed.description }),
+    ...(embed.color === null ? {} : { color: embed.color }),
+    ...(embed.author === null ? {} : { author: { name: embed.author.name } }),
+    ...(embed.image === null ? {} : { image: { url: embed.image.url } }),
     ...(embed.fields.length === 0 ? {} : { fields: embed.fields.map(({ name, value, inline }) => ({ name, value, inline })) }),
     ...(embed.footer === null ? {} : { footer: { text: embed.footer.text } }),
   };
 }
 
 function messageSnapshot(message: Message, botId: string | undefined): DiscordMessageSnapshot {
+  type RawComponent = {
+    type?: number;
+    customId?: string;
+    url?: string;
+    label?: string;
+    style?: number;
+    disabled?: boolean;
+    placeholder?: string;
+    minValues?: number;
+    maxValues?: number;
+    options?: Array<{ label: string; value: string; description?: string; default?: boolean }>;
+  };
+  const rawRows = message.components as unknown as Array<{ components?: RawComponent[] }>;
   return {
     id: message.id,
     channelId: message.channelId,
@@ -104,6 +173,38 @@ function messageSnapshot(message: Message, botId: string | undefined): DiscordMe
     pinned: message.pinned,
     content: message.content,
     embeds: message.embeds.map(embedSnapshot),
+    components: rawRows.flatMap((row) => !row.components ? [] : [{
+      components: row.components.flatMap<DiscordActionRow['components'][number]>((component) => {
+        if (component.type === 2) {
+          const button = component;
+          return [{
+            type: 'button' as const,
+            style: button.style === ButtonStyle.Link ? 'link' as const : button.style === ButtonStyle.Primary ? 'primary' as const : 'secondary' as const,
+            label: button.label ?? '',
+            ...(button.customId ? { customId: button.customId } : {}),
+            ...(button.url ? { url: button.url } : {}),
+            ...(button.disabled ? { disabled: true } : {}),
+          }];
+        }
+        if (component.type === 3) {
+          const select = component;
+          return [{
+            type: 'string-select' as const,
+            customId: select.customId ?? '',
+            ...(select.placeholder ? { placeholder: select.placeholder } : {}),
+            minValues: select.minValues ?? 1,
+            maxValues: select.maxValues ?? 1,
+            options: (select.options ?? []).map((option) => ({
+              label: option.label,
+              value: option.value,
+              ...(option.description ? { description: option.description } : {}),
+              ...(option.default ? { default: true } : {}),
+            })),
+          }];
+        }
+        return [];
+      }),
+    }]),
   };
 }
 
@@ -150,6 +251,8 @@ export class DiscordJsPort implements DiscordPort {
     const message = await channel.send({
       content: payload.content,
       embeds: payload.embeds?.map(embedBuilder),
+      ...(payload.components === undefined ? {} : { components: actionRowBuilders(payload.components) }),
+      ...(payload.allowedMentions === undefined ? {} : { allowedMentions: payload.allowedMentions }),
     });
     return messageSnapshot(message, this.client.user?.id);
   }
@@ -160,6 +263,8 @@ export class DiscordJsPort implements DiscordPort {
     const edited = await message.edit({
       content: payload.content ?? null,
       embeds: payload.embeds?.map(embedBuilder) ?? [],
+      components: payload.components === undefined ? message.components : actionRowBuilders(payload.components),
+      ...(payload.allowedMentions === undefined ? {} : { allowedMentions: payload.allowedMentions }),
     });
     return messageSnapshot(edited, this.client.user?.id);
   }
@@ -405,6 +510,8 @@ export async function startBot(): Promise<void> {
     client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
         void handleFfEventsSetup(interaction, store, runSerializedCycle);
+      } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
+        void handleChecklistInteraction(interaction, store);
       }
     });
     client.on(Events.GuildDelete, (guild) => deleteGuild(store, guild.id));

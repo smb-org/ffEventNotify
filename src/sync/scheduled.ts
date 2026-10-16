@@ -2,7 +2,12 @@
 
 import type { Store, StoreEvent } from '../store.ts';
 import { getGuildEventObject, setGuildDiscordIds } from '../store.ts';
-import { stableEventIdentity } from '../event-identity.ts';
+import {
+  bestEventSourceUrl,
+  eventSourceLink,
+  hasEventMarkerUrl,
+  stableEventIdentity,
+} from '../event-identity.ts';
 import type { DiscordPort, ScheduledEventPayload, ScheduledEventSnapshot } from '../types.ts';
 
 export interface SyncScheduledEventOptions {
@@ -33,10 +38,6 @@ function orderedUrls(sourceUrls: readonly string[]): string[] {
   ];
 }
 
-function eventMarker(eventKey: string): string {
-  return `Event-ID: ${stableEventIdentity(eventKey)}`;
-}
-
 export function scheduledEventPayloadFor(
   event: StoreEvent,
   sourceUrls: readonly string[],
@@ -49,10 +50,10 @@ export function scheduledEventPayloadFor(
   if (!Number.isFinite(nowMs) || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= nowMs || endMs <= startMs) return undefined;
 
   const urls = orderedUrls(sourceUrls);
-  const chosenUrl = urls[0];
+  const chosenUrl = bestEventSourceUrl(urls);
   const selectedLocation = chosenUrl && chosenUrl.length <= 100 ? chosenUrl : LOCATION_FALLBACK;
-  const descriptionUrl = urls.find((url) => url.length <= 980) ?? chosenUrl ?? '';
-  const description = `${eventMarker(event.eventKey)}${descriptionUrl ? `\n${descriptionUrl}` : ''}`;
+  const markedLink = eventSourceLink(event.eventKey, urls);
+  const description = markedLink ? `[Zur Lodestone-Ankündigung](${markedLink})` : '';
 
   const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
   if (!(nowMs < scheduledStart && scheduledStart < endMs)) return undefined;
@@ -97,8 +98,37 @@ function sameSchedule(event: ScheduledEventSnapshot, payload: ScheduledEventPayl
     event.location === payload.location && event.description === payload.description;
 }
 
-function hasExactMarkerLine(description: string, marker: string): boolean {
-  return description.split(/\r?\n/).includes(marker);
+function linksInDescription(description: string): string[] {
+  const markdown = [...description.matchAll(/\]\((https?:\/\/[^\s)]+)\)/g)].map((match) => match[1] ?? '');
+  const bare = description.split(/\r?\n/).filter((line) => /^https?:\/\//.test(line.trim())).map((line) => line.trim());
+  return [...markdown, ...bare];
+}
+
+function hasExactMarkerLink(description: string, event: StoreEvent): boolean {
+  return linksInDescription(description).some((link) => hasEventMarkerUrl(link, event.eventKey));
+}
+
+function hasExactLegacyStableMarker(description: string, event: StoreEvent): boolean {
+  return description.split(/\r?\n/).includes(`Event-ID: ${stableEventIdentity(event.eventKey)}`);
+}
+
+function hasLegacyDescription(description: string, marker: string, sourceUrls: readonly string[]): boolean {
+  if (!description.split(/\r?\n/).includes(marker)) return false;
+  return linksInDescription(description).some((link) => {
+    try {
+      const url = new URL(link);
+      url.hash = '';
+      url.search = '';
+      return sourceUrls.some((source) => {
+        const sourceUrl = new URL(source);
+        sourceUrl.hash = '';
+        sourceUrl.search = '';
+        return sourceUrl.toString().replace(/\/$/, '') === url.toString().replace(/\/$/, '');
+      });
+    } catch {
+      return false;
+    }
+  });
 }
 
 function findByMarker(
@@ -106,16 +136,18 @@ function findByMarker(
   event: StoreEvent,
   sourceUrls: readonly string[],
 ): ScheduledEventSnapshot | undefined {
-  const marker = eventMarker(event.eventKey);
-  const stableMatches = events.filter((candidate) => hasExactMarkerLine(candidate.description, marker));
-  if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Events tragen dieselbe Event-ID ${marker}.`);
+  const stableMatches = events.filter((candidate) => hasExactMarkerLink(candidate.description, event));
+  if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Events tragen dieselbe Quellenmarkierung für ${event.title}.`);
   if (stableMatches.length === 1) return stableMatches[0];
+
+  const legacyStableMatches = events.filter((candidate) => hasExactLegacyStableMarker(candidate.description, event));
+  if (legacyStableMatches.length > 1) throw new Error(`Mehrere ältere Discord-Events passen zu ${event.title}.`);
+  if (legacyStableMatches.length === 1) return legacyStableMatches[0];
 
   // Older versions stored numeric row IDs. Adopt one only when its title and exact source URL
   // prove that it belongs to this Lodestone event; a reused SQLite ID alone is not identity.
-  const legacyMarker = `Event-ID: ${event.id}`;
-  return events.find((candidate) => hasExactMarkerLine(candidate.description, legacyMarker) &&
-    candidate.name === event.title && candidate.description.split(/\r?\n/).some((line) => sourceUrls.includes(line)));
+  return events.find((candidate) => candidate.name === event.title &&
+    hasLegacyDescription(candidate.description, `Event-ID: ${event.id}`, sourceUrls));
 }
 
 async function createReplacement(

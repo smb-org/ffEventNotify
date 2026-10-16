@@ -132,7 +132,11 @@ export type RecordingDiscordAction =
 function copyEmbed(embed: DiscordEmbed): DiscordEmbed {
   return {
     ...(embed.title === undefined ? {} : { title: embed.title }),
+    ...(embed.url === undefined ? {} : { url: embed.url }),
     ...(embed.description === undefined ? {} : { description: embed.description }),
+    ...(embed.color === undefined ? {} : { color: embed.color }),
+    ...(embed.author === undefined ? {} : { author: { ...embed.author } }),
+    ...(embed.image === undefined ? {} : { image: { ...embed.image } }),
     ...(embed.fields === undefined ? {} : {
       fields: embed.fields.map((field) => ({ ...field })),
     }),
@@ -144,6 +148,13 @@ function copyPayload(payload: DiscordMessagePayload): DiscordMessagePayload {
   return {
     ...(payload.content === undefined ? {} : { content: payload.content }),
     ...(payload.embeds === undefined ? {} : { embeds: payload.embeds.map(copyEmbed) }),
+    ...(payload.components === undefined ? {} : { components: payload.components.map((row) => ({
+      components: row.components.map((component) => component.type === 'button' ? { ...component } : {
+        ...component,
+        options: component.options.map((option) => ({ ...option })),
+      }),
+    })) }),
+    ...(payload.allowedMentions === undefined ? {} : { allowedMentions: { parse: [], users: [...payload.allowedMentions.users] } }),
   };
 }
 
@@ -166,7 +177,11 @@ export class RecordingDiscordPort implements DiscordPort {
 
   async editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     this.recordedActions.push({ type: 'edit-message', channelId, messageId, payload: copyPayload(payload) });
-    const message = this.messageSnapshot(messageId, channelId, payload, this.messages.get(messageId)?.pinned ?? false);
+    const previous = this.messages.get(messageId);
+    const merged = payload.components === undefined && previous?.components
+      ? { ...payload, components: previous.components }
+      : payload;
+    const message = this.messageSnapshot(messageId, channelId, merged, previous?.pinned ?? false);
     this.messages.set(messageId, message);
     return message;
   }
@@ -245,6 +260,12 @@ export class RecordingDiscordPort implements DiscordPort {
       pinned,
       content: payload.content ?? '',
       embeds: payload.embeds?.map(copyEmbed) ?? [],
+      components: payload.components?.map((row) => ({
+        components: row.components.map((component) => component.type === 'button' ? { ...component } : {
+          ...component,
+          options: component.options.map((option) => ({ ...option })),
+        }),
+      })) ?? [],
     };
   }
 }
@@ -294,14 +315,27 @@ function eventTypeName(event: StoreEvent): string {
 
 function eventIdentityFromMessageAction(action: RecordingDiscordAction): string | undefined {
   if (action.type !== 'create-message' && action.type !== 'edit-message') return undefined;
-  const footer = action.payload.embeds?.flatMap((embed) => embed.footer ? [embed.footer.text] : [])[0];
-  return /^Event-ID: ([a-f0-9]{64})$/.exec(footer ?? '')?.[1];
+  const url = action.payload.embeds?.find((embed) => embed.title !== 'Läuft gerade')?.url;
+  if (!url) return undefined;
+  try {
+    return /^#ffe-([a-f0-9]{64})$/.exec(new URL(url).hash)?.[1];
+  } catch {
+    return undefined;
+  }
 }
 
 function eventIdentityFromScheduledAction(action: RecordingDiscordAction): string | undefined {
   if (action.type !== 'create-scheduled-event' && action.type !== 'edit-scheduled-event') return undefined;
-  const marker = action.payload.description.split(/\r?\n/).find((line) => /^Event-ID: [a-f0-9]{64}$/.test(line));
-  return marker?.slice('Event-ID: '.length);
+  const links = [...action.payload.description.matchAll(/\]\((https?:\/\/[^\s)]+)\)/g)].map((match) => match[1] ?? '');
+  for (const link of links) {
+    try {
+      const marker = /^#ffe-([a-f0-9]{64})$/.exec(new URL(link).hash)?.[1];
+      if (marker) return marker;
+    } catch {
+      // Ignore malformed source links in recorded actions.
+    }
+  }
+  return undefined;
 }
 
 function scheduledActionFor(

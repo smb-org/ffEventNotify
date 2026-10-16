@@ -18,6 +18,7 @@ import {
   openDb,
   setGuildStatusMessage,
   setGuildDiscordIds,
+  setEventImageUrl,
 } from '../src/store.ts';
 import { buildEventEmbed, syncEventEmbed } from '../src/sync/embed.ts';
 import { scheduleEventReminders } from '../src/sync/reminders.ts';
@@ -30,11 +31,24 @@ const NOW = new Date('2026-10-16T12:00:00.000Z');
 function discordEmbedSnapshots(embeds: readonly DiscordEmbed[] = []): DiscordEmbed[] {
   return embeds.map((embed) => ({
     ...(embed.title === undefined ? {} : { title: embed.title }),
+    ...(embed.url === undefined ? {} : { url: embed.url }),
     ...(embed.description === undefined ? {} : { description: embed.description }),
+    ...(embed.color === undefined ? {} : { color: embed.color }),
+    ...(embed.author === undefined ? {} : { author: { ...embed.author } }),
+    ...(embed.image === undefined ? {} : { image: { ...embed.image } }),
     ...(embed.fields === undefined ? {} : {
       fields: embed.fields.map((field) => ({ name: field.name, value: field.value, inline: field.inline ?? false })),
     }),
     ...(embed.footer === undefined ? {} : { footer: { text: embed.footer.text } }),
+  }));
+}
+
+function componentSnapshots(rows: DiscordMessagePayload['components'] = []) {
+  return rows.map((row) => ({
+    components: row.components.map((component) => component.type === 'button' ? { ...component } : {
+      ...component,
+      options: component.options.map((option) => ({ ...option })),
+    }),
   }));
 }
 
@@ -67,7 +81,12 @@ class FakeDiscordPort implements DiscordPort {
     const index = this.messages.findIndex((message) => message.id === messageId && message.channelId === channelId);
     assert.notEqual(index, -1);
     const old = this.messages[index]!;
-    const updated = { ...old, content: payload.content ?? '', embeds: discordEmbedSnapshots(payload.embeds) };
+    const updated = {
+      ...old,
+      content: payload.content ?? '',
+      embeds: discordEmbedSnapshots(payload.embeds),
+      components: payload.components === undefined ? old.components : componentSnapshots(payload.components),
+    };
     this.messages[index] = updated;
     return updated;
   }
@@ -146,6 +165,7 @@ class FakeDiscordPort implements DiscordPort {
       pinned: false,
       content: payload.content ?? '',
       embeds: discordEmbedSnapshots(payload.embeds),
+      components: componentSnapshots(payload.components),
     };
   }
 }
@@ -200,12 +220,13 @@ test('two parallel events get separate messages and scheduled events and share o
     assert.ok(status?.pinned);
     assert.match(embedOf(status).description ?? '', /Allerschutzheiligen.*Fall Guys|Fall Guys.*Allerschutzheiligen/s);
     assert.match(embedOf(status).description ?? '', /<t:\d+:R>/);
+    assert.match(embedOf(status).description ?? '', new RegExp(`#ffe-${stableEventIdentity(events[0]!.eventKey)}`));
   } finally {
     db.close();
   }
 });
 
-test('event embeds show German local periods, Discord timestamps, linked rewards, and an internal event marker', () => {
+test('event embeds show German source links, Discord timestamps, and linked rewards without visible ids', () => {
   const db = openDb(':memory:');
   try {
     const event = seedEvent(db, 'wake', 'Allerschutzheiligen', '2026-10-15T08:00:00.000Z', '2026-11-02T14:59:00.000Z', [
@@ -213,18 +234,25 @@ test('event embeds show German local periods, Discord timestamps, linked rewards
     ]);
     const embed = buildEventEmbed(event, ['https://de.finalfantasyxiv.com/lodestone/special/wake/'], NOW);
     assert.equal(embed.title, 'Allerschutzheiligen');
-    assert.match(embed.description ?? '', /Do\., 15\.10\.2026, 10:00 Uhr – Mo\., 02\.11\.2026, 15:59 Uhr/);
-    assert.match(embed.description ?? '', /<t:1792051200:F>.*<t:1793631540:F>/);
-    assert.equal(embed.fields?.[0]?.name, 'Ausrüstung');
-    assert.match(embed.fields?.[0]?.value ?? '', /\[Grizzlybär-Kopf\]\(https:\/\/de\.finalfantasyxiv\.com\/lodestone\/playguide\/db\/item\/1077b68a626\/\)/);
-    assert.notEqual(embed.footer?.text, String(event.id));
-    assert.ok(embed.footer?.text && /^Event-ID: [a-f0-9]{64}$/.test(embed.footer.text));
+    assert.equal(embed.author?.name, 'Saison-Event · Lodestone');
+    assert.equal(embed.color, 0xE67E22);
+    assert.equal(embed.url, `https://de.finalfantasyxiv.com/lodestone/special/wake/#ffe-${stableEventIdentity(event.eventKey)}`);
+    assert.equal(embed.footer?.text, 'Quelle: Lodestone');
+    assert.doesNotMatch(JSON.stringify(embed), /Event-ID|\bid\b/i);
+    assert.equal(embed.description, undefined);
+    assert.deepEqual(embed.fields?.slice(0, 3).map(({ name, value, inline }) => ({ name, value, inline })), [
+      { name: 'Beginn', value: '<t:1792051200:f>', inline: true },
+      { name: 'Ende', value: '<t:1793631540:f>', inline: true },
+      { name: 'Endet', value: '<t:1793631540:R>', inline: true },
+    ]);
+    assert.equal(embed.fields?.[3]?.name, 'Ausrüstung');
+    assert.match(embed.fields?.[3]?.value ?? '', /\[Grizzlybär-Kopf\]\(https:\/\/de\.finalfantasyxiv\.com\/lodestone\/playguide\/db\/item\/1077b68a626\/\)/);
   } finally {
     db.close();
   }
 });
 
-test('reward fields split at line boundaries and fit the field and overall embed caps with an overflow link', () => {
+test('reward fields show at most eight items per section and fit the field and overall embed caps', () => {
   const db = openDb(':memory:');
   try {
     const rewards = Array.from({ length: 120 }, (_, index) => ({
@@ -239,8 +267,47 @@ test('reward fields split at line boundaries and fit the field and overall embed
     const characterCount = (embed.title?.length ?? 0) + (embed.description?.length ?? 0) +
       (embed.footer?.text.length ?? 0) + (embed.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
     assert.ok(characterCount <= 5_500);
-    assert.match(embed.fields?.at(-1)?.value ?? '', /… und \d+ weitere Belohnungen auf der \[Sonderseite\]/);
-    assert.ok((embed.fields ?? []).some((field) => /Möbel \(\d+\/\d+\)/.test(field.name)));
+    assert.match(embed.fields?.at(-1)?.value ?? '', /… und \d+ weitere auf der Sonderseite/);
+    assert.equal((embed.fields?.at(-1)?.value?.match(/\[Belohnung /g) ?? []).length, 8);
+  } finally {
+    db.close();
+  }
+});
+
+test('thirty Mog Mog rewards render eight links and the exact twenty-two item overflow', () => {
+  const db = openDb(':memory:');
+  try {
+    const rewards = Array.from({ length: 30 }, (_, index) => ({
+      itemId: String(index + 1).padStart(11, '0'),
+      name: `Mogry-Gegenstand ${index + 1}`,
+      section: 'Belohnungen',
+    }));
+    const event = seedEvent(db, 'mogmog-collection/202609', 'Mog Mog-Kollektion 2026', undefined, undefined, rewards);
+    const embed = buildEventEmbed(event, ['https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/'], NOW);
+    const rewardField = embed.fields?.find((field) => field.name === 'Belohnungen');
+
+    assert.equal(embed.author?.name, 'Mog Mog-Kollektion · Lodestone');
+    assert.equal(embed.color, 0xF1C40F);
+    assert.equal((rewardField?.value.match(/\[Mogry-Gegenstand /g) ?? []).length, 8);
+    assert.match(rewardField?.value ?? '', /… und 22 weitere auf der Sonderseite$/);
+  } finally {
+    db.close();
+  }
+});
+
+test('special page images are stored only for the approved Lodestone image hosts', () => {
+  const db = openDb(':memory:');
+  try {
+    const event = seedEvent(db, 'image', 'Mit Bild');
+    assert.equal(setEventImageUrl(db, event.id, 'https://lds-img.finalfantasyxiv.com/h/event.jpg'), true);
+    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.imageUrl,
+      'https://lds-img.finalfantasyxiv.com/h/event.jpg');
+    const withImage = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
+    assert.deepEqual(buildEventEmbed(withImage, [`https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`], NOW).image,
+      { url: 'https://lds-img.finalfantasyxiv.com/h/event.jpg' });
+    assert.equal(setEventImageUrl(db, event.id, 'https://example.test/image.jpg'), false);
+    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.imageUrl,
+      'https://lds-img.finalfantasyxiv.com/h/event.jpg');
   } finally {
     db.close();
   }
@@ -253,13 +320,13 @@ test('uncertain rewards link to the special page without guessing names', () => 
     applyField(db, event.id, 'rewards', { status: 'unsicher', reason: 'not complete' }, `https://de.finalfantasyxiv.com/lodestone/special/uncertain/`);
     const updated = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
     const embed = buildEventEmbed(updated, ['https://de.finalfantasyxiv.com/lodestone/special/uncertain/'], NOW);
-    assert.equal(embed.fields?.[0]?.value, 'Belohnungen: siehe Sonderseite\n[Zur Sonderseite](https://de.finalfantasyxiv.com/lodestone/special/uncertain/)');
+    assert.equal(embed.fields?.find((field) => field.name === 'Belohnungen')?.value, 'Belohnungen: siehe Sonderseite');
   } finally {
     db.close();
   }
 });
 
-test('uncertain refreshes keep the last verified dates and rewards in the public embed', () => {
+test('uncertain refreshes mark the period for Lodestone and keep verified rewards', () => {
   const db = openDb(':memory:');
   try {
     const rewards = [{ itemId: 'item-1', name: 'Verifizierte Belohnung', section: 'Möbel' }];
@@ -272,9 +339,11 @@ test('uncertain refreshes keep the last verified dates and rewards in the public
 
     const embed = buildEventEmbed(refreshed, [sourceUrl], NOW);
 
-    assert.match(embed.description ?? '', /15\.10\.2026, 10:00 Uhr – .*20\.10\.2026, 16:59 Uhr/);
-    assert.match(embed.fields?.[0]?.value ?? '', /Verifizierte Belohnung/);
-    assert.doesNotMatch(embed.fields?.[0]?.value ?? '', /siehe Sonderseite/);
+    assert.equal(embed.description, 'Zeitraum: siehe Lodestone');
+    assert.equal(embed.fields?.some((field) => ['Beginn', 'Ende', 'Endet'].includes(field.name)), false);
+    const rewardsField = embed.fields?.find((field) => field.name === 'Möbel');
+    assert.match(rewardsField?.value ?? '', /Verifizierte Belohnung/);
+    assert.doesNotMatch(rewardsField?.value ?? '', /siehe Sonderseite/);
   } finally {
     db.close();
   }
@@ -346,7 +415,32 @@ test('legacy numeric message recovery requires an exact Lodestone source link an
     assert.equal(discord.createMessageCount, 0);
     assert.equal(discord.editMessageCount, 1);
     assert.equal(discord.messages[0]?.id, 'legacy-exact-message');
-    assert.equal(embedOf(discord.messages[0]!).footer?.text, `Event-ID: ${stableEventIdentity(event.eventKey)}`);
+    assert.equal(embedOf(discord.messages[0]!).footer?.text, 'Quelle: Lodestone');
+    assert.equal(embedOf(discord.messages[0]!).url, `${sourceUrl}#ffe-${stableEventIdentity(event.eventKey)}`);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacy stable footer markers recover older posts even when their embed has no source link', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'legacy-stable-footer', 'Alte Meldung');
+    discord.messages.push({
+      id: 'legacy-hash-message', channelId: 'events', authorIsBot: true, pinned: false, content: '',
+      embeds: [{ title: event.title, footer: { text: `Event-ID: ${stableEventIdentity(event.eventKey)}` } }],
+    });
+
+    await syncEventEmbed({
+      event,
+      sourceUrls: [`https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`],
+      guildId: 'guild', channelId: 'events', discord, store: db,
+    });
+
+    assert.equal(discord.createMessageCount, 0);
+    assert.equal(discord.editMessageCount, 1);
+    assert.equal(embedOf(discord.messages[0]!).footer?.text, 'Quelle: Lodestone');
   } finally {
     db.close();
   }
@@ -360,7 +454,10 @@ test('maintenance and generic embeds omit the not-applicable rewards field', () 
       const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
 
       assert.equal(event.rewardsStatus, 'n/a');
-      assert.equal(buildEventEmbed(event, [], NOW).fields, undefined);
+      const embed = buildEventEmbed(event, [], NOW);
+      assert.equal(embed.fields, undefined);
+      assert.deepEqual(embed.author, { name: eventType === 'maintenance' ? 'Wartung · Lodestone' : 'News · Lodestone' });
+      assert.equal(embed.color, eventType === 'maintenance' ? 0x95A5A6 : 0x5865F2);
     }
   } finally {
     db.close();
@@ -380,7 +477,30 @@ test('Discord embed snapshots with normalized field order do not cause repeat ed
 
     assert.equal(discord.createMessageCount, 1);
     assert.equal(discord.editMessageCount, 0);
-    assert.equal(embedOf(discord.messages[0]!).fields?.[0]?.inline, false);
+    assert.equal(embedOf(discord.messages[0]!).fields?.[3]?.inline, false);
+  } finally {
+    db.close();
+  }
+});
+
+test('event message components survive embed edits', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'component-edit', 'Mit Checkliste', undefined, undefined, [
+      { itemId: 'item-1', name: 'Belohnung', section: 'Möbel' },
+    ]);
+    const sourceUrls = ['https://de.finalfantasyxiv.com/lodestone/special/component-edit/'];
+    await syncEventEmbed({ event, sourceUrls, channelId: 'events', discord, store: db });
+    const created = discord.messages[0]!;
+    assert.ok(created.components?.some((row) => row.components.some((component) => component.type === 'button' && component.customId === `ffe:cl:${event.eventKey}`)));
+
+    applyField(db, event.id, 'title', { status: 'ok', value: 'Aktualisierter Titel' }, sourceUrls[0]!);
+    const updated = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
+    await syncEventEmbed({ event: updated, sourceUrls, channelId: 'events', discord, store: db });
+
+    assert.equal(discord.editMessageCount, 1);
+    assert.deepEqual(discord.messages[0]?.components, created.components);
   } finally {
     db.close();
   }
@@ -396,8 +516,9 @@ test('scheduled event uses a short preferred source URL and moves a running star
     await syncScheduledEvent({ event, sourceUrls: [topicUrl, specialUrl], guildId: 'guild', discord, store: db, now: NOW });
     assert.equal(discord.scheduledEvents[0]?.location, specialUrl);
     assert.equal(discord.scheduledEvents[0]?.startUtc, '2026-10-16T12:02:00.000Z');
-    assert.equal(discord.scheduledEvents[0]?.description.split('\n')[0], `Event-ID: ${stableEventIdentity(event.eventKey)}`);
+    assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(`#ffe-${stableEventIdentity(event.eventKey)}`));
     assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(specialUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(discord.scheduledEvents[0]?.description ?? '', /Event-ID/i);
   } finally {
     db.close();
   }
@@ -434,6 +555,34 @@ test('schedule recovery does not match a complete marker for a longer event key'
     assert.equal(discord.createScheduledCount, 1);
     assert.equal(discord.scheduledEvents[0]?.name, longer.title);
     assert.equal(discord.scheduledEvents[1]?.name, target.title);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacy stable scheduled markers recover an event after its title changes', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'legacy-schedule', 'Aktueller Titel');
+    const sourceUrl = `https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`;
+    discord.scheduledEvents.push({
+      id: 'legacy-schedule-event',
+      guildId: 'guild',
+      name: 'Früherer Titel',
+      startUtc: '2026-10-16T12:02:00.000Z',
+      endUtc: event.endUtc!,
+      location: sourceUrl,
+      description: `Event-ID: ${stableEventIdentity(event.eventKey)}\n${sourceUrl}`,
+      status: 'SCHEDULED',
+    });
+
+    await syncScheduledEvent({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+
+    assert.equal(discord.createScheduledCount, 0);
+    assert.equal(discord.editScheduledCount, 1);
+    assert.equal(discord.scheduledEvents[0]?.id, 'legacy-schedule-event');
+    assert.equal(discord.scheduledEvents[0]?.name, event.title);
   } finally {
     db.close();
   }
@@ -532,10 +681,8 @@ test('generic embeds display a verified start when the end is uncertain', () => 
     const updated = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
     const embed = buildEventEmbed(updated, [`https://de.finalfantasyxiv.com/lodestone/special/generic-start/`], NOW);
 
-    assert.match(embed.description ?? '', /Beginn: Di\., 20\.10\.2026, 14:00 Uhr/);
-    assert.match(embed.description ?? '', /<t:1792497600:F>/);
-    assert.doesNotMatch(embed.description ?? '', /20\.10\.2026, 14:00 Uhr –/);
-    assert.match(embed.description ?? '', /Ende: siehe Lodestone/);
+    assert.equal(embed.description, 'Ende: siehe Lodestone');
+    assert.deepEqual(embed.fields?.[0], { name: 'Beginn', value: '<t:1792497600:f>', inline: true });
   } finally {
     db.close();
   }

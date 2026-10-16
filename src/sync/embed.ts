@@ -1,9 +1,14 @@
 // Renders player-facing German event embeds and synchronizes one message per event.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { getGuildEventObject, setGuildDiscordIds } from '../store.ts';
-import { stableEventIdentity } from '../event-identity.ts';
-import type { DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
+import { getGuildEventObject, isAllowedSpecialImageUrl, setGuildDiscordIds } from '../store.ts';
+import {
+  bestEventSourceUrl,
+  eventSourceLink,
+  hasEventMarkerUrl,
+  stableEventIdentity,
+} from '../event-identity.ts';
+import type { DiscordActionRow, DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
 
 export interface SyncEventEmbedOptions {
   event: StoreEvent;
@@ -18,119 +23,134 @@ export interface SyncEventEmbedOptions {
 interface EmbedField {
   name: string;
   value: string;
+  inline?: boolean;
 }
 
 const MAX_FIELD_VALUE = 1_024;
 const MAX_FIELDS = 25;
 const MAX_EMBED_CHARACTERS = 5_500;
 
-function sourceUrl(sourceUrls: readonly string[]): string | undefined {
-  const urls = [...new Set(sourceUrls)].filter((url) => {
-    try {
-      return new URL(url).protocol === 'https:';
-    } catch {
-      return false;
-    }
-  });
-  const specialPages = urls.filter((url) => new URL(url).pathname.startsWith('/lodestone/special/'));
-  return [...(specialPages.length > 0 ? specialPages : urls)].sort((left, right) => left.length - right.length || left.localeCompare(right))[0];
-}
-
-function berlinDateTime(utc: string): string {
-  const formatter = new Intl.DateTimeFormat('de-DE', {
-    timeZone: 'Europe/Berlin',
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  });
-  return `${formatter.format(new Date(utc))} Uhr`;
-}
-
-function timestamp(utc: string, style: 'F' | 'R'): string {
+function timestamp(utc: string, style: 'f' | 'R'): string {
   return `<t:${Math.floor(Date.parse(utc) / 1_000)}:${style}>`;
 }
 
-function eventDescription(event: StoreEvent, link?: string): string {
-  if (event.startUtc && event.endUtc) {
-    const localPeriod = `${berlinDateTime(event.startUtc)} – ${berlinDateTime(event.endUtc)}`;
-    return `${localPeriod}\n${timestamp(event.startUtc, 'F')} (${timestamp(event.startUtc, 'R')}) – ${timestamp(event.endUtc, 'F')} (${timestamp(event.endUtc, 'R')})`;
-  }
-  if (event.startUtc) {
-    const verifiedStart = `Beginn: ${berlinDateTime(event.startUtc)}\n${timestamp(event.startUtc, 'F')} (${timestamp(event.startUtc, 'R')})`;
-    const sourceLink = link ? `\n[Zur Ankündigung](${link})` : '';
-    return `${verifiedStart}\nEnde: siehe Lodestone${sourceLink}`;
-  }
-  return link ? `Zeitraum: siehe Lodestone\n[Zur Ankündigung](${link})` : 'Zeitraum: siehe Lodestone';
-}
-
-function rewardLine(itemId: string, name: string): string {
-  const url = `https://de.finalfantasyxiv.com/lodestone/playguide/db/item/${encodeURIComponent(itemId)}/`;
-  const maxNameLength = MAX_FIELD_VALUE - url.length - 4;
-  const safeName = name.length > maxNameLength ? `${name.slice(0, Math.max(0, maxNameLength - 1))}…` : name;
-  return `[${safeName}](${url})`;
-}
-
-function groupedFields(rewards: StoreEvent['rewards'], included: number): EmbedField[] {
-  const groups = new Map<string, string[]>();
-  for (const reward of rewards.slice(0, included)) {
-    const group = groups.get(reward.section) ?? [];
-    group.push(rewardLine(reward.itemId, reward.name));
-    groups.set(reward.section, group);
-  }
-
-  const fields: EmbedField[] = [];
-  for (const [section, lines] of groups) {
-    const chunks: string[] = [];
-    let value = '';
-    for (const line of lines) {
-      const next = value ? `${value}\n${line}` : line;
-      if (next.length > MAX_FIELD_VALUE && value) {
-        chunks.push(value);
-        value = line;
-      } else {
-        value = next;
-      }
-    }
-    if (value) chunks.push(value);
-    const safeSection = section.slice(0, 256);
-    chunks.forEach((chunk, index) => fields.push({
-      name: chunks.length === 1 ? safeSection : `${safeSection} (${index + 1}/${chunks.length})`.slice(0, 256),
-      value: chunk,
-    }));
+function timeFields(event: StoreEvent): EmbedField[] {
+  if (event.startStatus !== 'ok' || !event.startUtc) return [];
+  const fields: EmbedField[] = [{ name: 'Beginn', value: timestamp(event.startUtc, 'f'), inline: true }];
+  if (event.endStatus === 'ok' && event.endUtc) {
+    fields.push(
+      { name: 'Ende', value: timestamp(event.endUtc, 'f'), inline: true },
+      { name: 'Endet', value: timestamp(event.endUtc, 'R'), inline: true },
+    );
   }
   return fields;
 }
 
+function eventDescription(event: StoreEvent): string | undefined {
+  if (event.startStatus !== 'ok' || !event.startUtc) return 'Zeitraum: siehe Lodestone';
+  if (event.endStatus !== 'ok' || !event.endUtc) return 'Ende: siehe Lodestone';
+  return undefined;
+}
+
+function eventPresentation(event: StoreEvent, sourceUrl: string | undefined): { author: string; color: number } {
+  if (event.eventType === 'seasonal-special') {
+    let isMogMog = false;
+    try {
+      isMogMog = new URL(sourceUrl ?? '').pathname.includes('mogmog-collection');
+    } catch {
+      isMogMog = false;
+    }
+    return isMogMog
+      ? { author: 'Mog Mog-Kollektion · Lodestone', color: 0xF1C40F }
+      : { author: 'Saison-Event · Lodestone', color: 0xE67E22 };
+  }
+  if (event.eventType === 'maintenance') return { author: 'Wartung · Lodestone', color: 0x95A5A6 };
+  return { author: 'News · Lodestone', color: 0x5865F2 };
+}
+
+function itemUrl(itemId: string): string {
+  return `https://de.finalfantasyxiv.com/lodestone/playguide/db/item/${encodeURIComponent(itemId)}/`;
+}
+
+function rewardLine(itemId: string, name: string, maxNameLength: number): string {
+  const url = itemUrl(itemId);
+  const safeName = name.length > maxNameLength
+    ? `${name.slice(0, Math.max(0, maxNameLength - 1))}…`
+    : name;
+  return `[${safeName}](${url})`;
+}
+
+function rewardGroups(rewards: StoreEvent['rewards']): Array<{ section: string; rewards: StoreEvent['rewards'] }> {
+  const groups = new Map<string, StoreEvent['rewards']>();
+  for (const reward of rewards) {
+    const section = groups.get(reward.section) ?? [];
+    section.push(reward);
+    groups.set(reward.section, section);
+  }
+  return [...groups].map(([section, grouped]) => ({ section, rewards: grouped }));
+}
+
+function sectionField(
+  section: string,
+  rewards: StoreEvent['rewards'],
+  maxVisible: number,
+  additionallyOmitted: number,
+): EmbedField {
+  let visible = Math.min(8, maxVisible, rewards.length);
+  while (visible > 0) {
+    const omitted = rewards.length - visible + additionallyOmitted;
+    const overflow = omitted > 0 ? `… und ${omitted} weitere auf der Sonderseite` : '';
+    const selected = rewards.slice(0, visible);
+    const linkOverhead = selected.reduce((sum, reward) => sum + itemUrl(reward.itemId).length + 4, 0);
+    const separators = Math.max(0, visible - 1) + (overflow && visible > 0 ? 1 : 0);
+    const nameBudget = MAX_FIELD_VALUE - linkOverhead - separators - overflow.length;
+    if (nameBudget >= 0) {
+      const nameLength = Math.floor(nameBudget / visible);
+      const lines = selected.map((reward) => rewardLine(reward.itemId, reward.name, nameLength));
+      const value = [...lines, ...(overflow ? [overflow] : [])].join('\n');
+      return { name: section.slice(0, 256), value };
+    }
+    visible -= 1;
+  }
+  const omitted = rewards.length + additionallyOmitted;
+  return {
+    name: section.slice(0, 256),
+    value: `… und ${omitted} weitere auf der Sonderseite`.slice(0, MAX_FIELD_VALUE),
+  };
+}
+
 function characterCount(embed: DiscordEmbed): number {
-  return (embed.title?.length ?? 0) + (embed.description?.length ?? 0) +
+  return (embed.title?.length ?? 0) + (embed.description?.length ?? 0) + (embed.author?.name.length ?? 0) +
     (embed.footer?.text.length ?? 0) + (embed.fields ?? []).reduce((total, field) => total + field.name.length + field.value.length, 0);
 }
 
-function fieldsWithOverflow(
-  rewards: StoreEvent['rewards'],
-  included: number,
-  link?: string,
-): EmbedField[] | undefined {
-  const fields = groupedFields(rewards, included);
-  const remaining = rewards.length - included;
-  if (remaining === 0) return fields;
+function rewardFields(event: StoreEvent, baseEmbed: DiscordEmbed, fixedFields: EmbedField[]): EmbedField[] {
+  if (event.rewardsStatus === 'n/a') return [];
+  if (event.rewardsStatus === 'unsicher' && event.rewards.length === 0) {
+    return [{ name: 'Belohnungen', value: 'Belohnungen: siehe Sonderseite' }];
+  }
+  if (event.rewards.length === 0) return [];
 
-  const destination = link ? `[Sonderseite](${link})` : 'Sonderseite';
-  const line = `… und ${remaining} weitere Belohnungen auf der ${destination}`;
-  const last = fields.at(-1);
-  if (last && last.value.length + 1 + line.length <= MAX_FIELD_VALUE) {
-    last.value += `\n${line}`;
-    return fields;
+  const groups = rewardGroups(event.rewards);
+  const availableSlots = Math.max(0, MAX_FIELDS - fixedFields.length);
+  for (let groupCount = Math.min(groups.length, availableSlots); groupCount >= 1; groupCount -= 1) {
+    const omittedLater = groups.slice(groupCount).reduce((sum, group) => sum + group.rewards.length, 0);
+    const fields = groups.slice(0, groupCount).map((group, index) => sectionField(
+      group.section,
+      group.rewards,
+      8,
+      index === groupCount - 1 ? omittedLater : 0,
+    ));
+    const allFields = [...fixedFields, ...fields];
+    if (allFields.length <= MAX_FIELDS && characterCount({ ...baseEmbed, fields: allFields }) <= MAX_EMBED_CHARACTERS) return fields;
   }
-  if (fields.length < MAX_FIELDS && line.length <= MAX_FIELD_VALUE) {
-    fields.push({ name: 'Weitere Belohnungen', value: line });
-    return fields;
+
+  const total = event.rewards.length;
+  const value = `… und ${total} weitere auf der Sonderseite`;
+  if (availableSlots > 0 && characterCount({ ...baseEmbed, fields: [...fixedFields, { name: 'Belohnungen', value }] }) <= MAX_EMBED_CHARACTERS) {
+    return [{ name: 'Belohnungen', value }];
   }
-  return undefined;
+  return [];
 }
 
 function isUnverifiedPathFragment(event: StoreEvent): boolean {
@@ -140,41 +160,57 @@ function isUnverifiedPathFragment(event: StoreEvent): boolean {
   return fragment !== undefined && event.title === fragment.replace(/[_-]+/g, ' ');
 }
 
-export function buildEventEmbed(event: StoreEvent, sourceUrls: readonly string[], now = new Date()): DiscordEmbed {
-  void now;
-  const link = sourceUrl(sourceUrls);
+export function buildEventComponents(event: StoreEvent, sourceUrls: readonly string[]): DiscordActionRow[] {
+  const sourceUrl = bestEventSourceUrl(sourceUrls);
+  const buttons: DiscordActionRow['components'] = [];
+  if (event.rewardsStatus === 'ok' && event.rewards.length > 0) {
+    buttons.push({
+      type: 'button',
+      style: 'primary',
+      label: 'Meine Checkliste',
+      customId: `ffe:cl:${event.eventKey}`,
+    });
+  }
+  if (sourceUrl) {
+    const isSpecial = new URL(sourceUrl).pathname.startsWith('/lodestone/special/');
+    buttons.push({
+      type: 'button',
+      style: 'link',
+      label: isSpecial ? 'Zur Sonderseite' : 'Zur Ankündigung',
+      url: sourceUrl,
+    });
+  }
+  return buttons.length > 0 ? [{ components: buttons }] : [];
+}
+
+export function buildEventEmbed(event: StoreEvent, sourceUrls: readonly string[], _now = new Date()): DiscordEmbed {
+  const sourceUrl = bestEventSourceUrl(sourceUrls);
+  const sourceLink = eventSourceLink(event.eventKey, sourceUrls);
+  const presentation = eventPresentation(event, sourceUrl);
+  const fixedFields = timeFields(event);
   const embed: DiscordEmbed = {
-    description: eventDescription(event, link),
-    footer: { text: `Event-ID: ${stableEventIdentity(event.eventKey)}` },
+    author: { name: presentation.author },
+    color: presentation.color,
+    footer: { text: 'Quelle: Lodestone' },
+    ...(sourceLink ? { url: sourceLink } : {}),
   };
   if (event.title.length > 0 && !isUnverifiedPathFragment(event)) embed.title = event.title.slice(0, 256);
-
-  if (event.rewardsStatus === 'n/a') return embed;
-
-  if (event.rewardsStatus === 'unsicher' && event.rewards.length === 0) {
-    const value = link
-      ? `Belohnungen: siehe Sonderseite\n[Zur Sonderseite](${link})`
-      : 'Belohnungen: siehe Sonderseite';
-    embed.fields = [{ name: 'Belohnungen', value: value.slice(0, MAX_FIELD_VALUE) }];
-    return embed;
-  }
-
-  let included = event.rewards.length;
-  let fields = fieldsWithOverflow(event.rewards, included, link);
-  if (fields === undefined || fields.length > MAX_FIELDS || characterCount({ ...embed, fields }) > MAX_EMBED_CHARACTERS) {
-    for (included = event.rewards.length - 1; included >= 0; included -= 1) {
-      fields = fieldsWithOverflow(event.rewards, included, link);
-      if (fields !== undefined && fields.length <= MAX_FIELDS && characterCount({ ...embed, fields }) <= MAX_EMBED_CHARACTERS) break;
-    }
-  }
-  if (fields !== undefined && fields.length > 0) embed.fields = fields;
+  const description = eventDescription(event);
+  if (description) embed.description = description;
+  if (event.imageUrl && isAllowedSpecialImageUrl(event.imageUrl)) embed.image = { url: event.imageUrl };
+  const fields = [...fixedFields, ...rewardFields(event, embed, fixedFields)];
+  if (fields.length > 0) embed.fields = fields;
   return embed;
 }
 
 function samePayload(left: DiscordEmbed, right: DiscordEmbed): boolean {
   const normalized = (embed: DiscordEmbed) => ({
     title: embed.title ?? null,
+    url: embed.url ?? null,
     description: embed.description ?? null,
+    color: embed.color ?? null,
+    author: embed.author?.name ?? null,
+    image: embed.image?.url ?? null,
     fields: (embed.fields ?? []).map((field) => ({
       name: field.name,
       value: field.value,
@@ -185,9 +221,33 @@ function samePayload(left: DiscordEmbed, right: DiscordEmbed): boolean {
   return JSON.stringify(normalized(left)) === JSON.stringify(normalized(right));
 }
 
-function hasExactSourceLink(description: string, sourceUrls: readonly string[]): boolean {
+function exactSourceInDescription(description: string, sourceUrls: readonly string[]): boolean {
   const links = [...description.matchAll(/\]\((https?:\/\/[^\s)]+)\)/g)].map((match) => match[1]);
   return links.some((link) => sourceUrls.includes(link ?? ''));
+}
+
+function hasLegacyMarker(embed: DiscordEmbed, event: StoreEvent, sourceUrls: readonly string[]): boolean {
+  const footer = embed.footer?.text;
+  if (footer === `Event-ID: ${stableEventIdentity(event.eventKey)}`) return true;
+  const legacyNumeric = footer === String(event.id) || footer === `Event-ID: ${event.id}`;
+  if (!legacyNumeric || embed.title !== event.title) return false;
+  let embedUrlMatches = false;
+  if (embed.url !== undefined) {
+    try {
+      const url = new URL(embed.url);
+      url.hash = '';
+      embedUrlMatches = sourceUrls.includes(url.toString().replace(/\/$/, '') === embed.url.replace(/\/$/, '')
+        ? url.toString()
+        : `${url.origin}${url.pathname}`);
+    } catch {
+      embedUrlMatches = false;
+    }
+  }
+  return exactSourceInDescription(embed.description ?? '', sourceUrls) || embedUrlMatches;
+}
+
+function embedHasMarker(embed: DiscordEmbed, event: StoreEvent): boolean {
+  return embed.url !== undefined && hasEventMarkerUrl(embed.url, event.eventKey);
 }
 
 export async function syncEventEmbed({
@@ -199,25 +259,23 @@ export async function syncEventEmbed({
   store,
   now,
 }: SyncEventEmbedOptions): Promise<string> {
-  const embed = buildEventEmbed(event, sourceUrls, now);
-  const payload = { embeds: [embed] };
+  void now;
+  const embed = buildEventEmbed(event, sourceUrls);
+  const components = buildEventComponents(event, sourceUrls);
+  const payload = { embeds: [embed], components };
   const recent = await discord.fetchRecentBotMessages(channelId, 50);
-  const marker = embed.footer!.text;
-  const stableMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => candidate.footer?.text === marker));
-  if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Meldungen tragen dieselbe Event-ID ${marker}.`);
+  const stableMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => embedHasMarker(candidate, event)));
+  if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Meldungen tragen dieselbe Quellenmarkierung für ${event.title}.`);
   const stableMatch = stableMatches[0];
-  const legacyMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) =>
-    candidate.footer?.text === String(event.id) && candidate.title === event.title &&
-    hasExactSourceLink(candidate.description ?? '', sourceUrls),
-  ));
-  if (legacyMatches.length > 1) throw new Error(`Mehrere ältere Discord-Meldungen passen zu Event-ID ${event.id}.`);
+  const legacyMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => hasLegacyMarker(candidate, event, sourceUrls)));
+  if (legacyMatches.length > 1) throw new Error(`Mehrere ältere Discord-Meldungen passen zu ${event.title}.`);
   const legacyMatch = legacyMatches[0];
   const object = getGuildEventObject(store, guildId, event.eventKey);
   let stored: DiscordMessageSnapshot | null = null;
   if (object?.messageId && object.messageChannelId === channelId) {
     try {
       const fetched = await discord.fetchMessage(channelId, object.messageId);
-      if (fetched?.authorIsBot && fetched.embeds.some((candidate) => candidate.footer?.text === marker)) stored = fetched;
+      if (fetched?.authorIsBot && fetched.embeds.some((candidate) => embedHasMarker(candidate, event) || hasLegacyMarker(candidate, event, sourceUrls))) stored = fetched;
     } catch {
       // A deleted message is treated as missing; the marker search below can still recover it.
     }
@@ -226,11 +284,8 @@ export async function syncEventEmbed({
 
   if (existing) {
     setGuildDiscordIds(store, guildId, event.eventKey, { messageId: existing.id, messageChannelId: channelId });
-    const currentEmbed = existing.embeds.find((candidate) => candidate.footer?.text === marker) ?? existing.embeds.find((candidate) =>
-      candidate.footer?.text === String(event.id) && candidate.title === event.title &&
-      hasExactSourceLink(candidate.description ?? '', sourceUrls),
-    );
-    if (!currentEmbed || !samePayload(currentEmbed, embed)) {
+    const currentEmbed = existing.embeds.find((candidate) => embedHasMarker(candidate, event) || hasLegacyMarker(candidate, event, sourceUrls));
+    if (!currentEmbed || !samePayload(currentEmbed, embed) || JSON.stringify(existing.components ?? []) !== JSON.stringify(components)) {
       await discord.editMessage(channelId, existing.id, payload);
     }
     return existing.id;

@@ -47,6 +47,8 @@ test('creates the storage tables and enforces one event per source URL', () => {
       .all() as Array<{ name: string }>;
     assert.deepEqual(rows.map((row) => row.name).sort(), [
       'checklist_entries',
+      'checklist_items',
+      'checklist_reminder_preferences',
       'event_sources',
       'events',
       'field_provenance',
@@ -54,6 +56,7 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'guilds',
       'items',
       'meta',
+      'reminder_slots',
       'reminders',
       'seen_entries',
       'warnings_sent',

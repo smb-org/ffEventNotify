@@ -48,6 +48,7 @@ test('All Saints uses Berlin DST labels and resolves all eight rewards from item
     status: 'ok',
     value: [expectedPage.period],
   });
+  assert.equal(result.imageUrl, 'https://lds-img.finalfantasyxiv.com/h/J/qNnMt1AmuNtGhu9r3FN_noNwRs.jpg');
   assert.equal(result.rewards.status, 'ok');
   if (result.rewards.status === 'ok') {
     assert.deepEqual(result.rewards.value, expectedPage.rewards.map(({ section, itemId, name }: any) => ({ section, itemId, name })));

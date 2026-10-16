@@ -46,6 +46,7 @@ export interface ExtractResult {
 export interface SeasonalExtractResult extends ExtractResult {
   periods: FieldStatus<SeasonalPeriod[]>;
   eventState: FieldStatus<SeasonalEventState>;
+  imageUrl?: string;
 }
 
 export interface GenericExtractResult extends ExtractResult {
@@ -106,14 +107,54 @@ export interface DiscordEmbedField {
 
 export interface DiscordEmbed {
   title?: string;
+  url?: string;
   description?: string;
+  color?: number;
+  author?: { name: string };
+  image?: { url: string };
   fields?: DiscordEmbedField[];
   footer?: { text: string };
+}
+
+export interface DiscordButtonComponent {
+  type: 'button';
+  style: 'primary' | 'secondary' | 'link';
+  label: string;
+  customId?: string;
+  url?: string;
+  disabled?: boolean;
+}
+
+export interface DiscordStringSelectOption {
+  label: string;
+  value: string;
+  description?: string;
+  default?: boolean;
+}
+
+export interface DiscordStringSelectComponent {
+  type: 'string-select';
+  customId: string;
+  placeholder?: string;
+  minValues: number;
+  maxValues: number;
+  options: DiscordStringSelectOption[];
+}
+
+export interface DiscordActionRow {
+  components: Array<DiscordButtonComponent | DiscordStringSelectComponent>;
+}
+
+export interface DiscordAllowedMentions {
+  parse: [];
+  users: string[];
 }
 
 export interface DiscordMessagePayload {
   content?: string;
   embeds?: DiscordEmbed[];
+  components?: DiscordActionRow[];
+  allowedMentions?: DiscordAllowedMentions;
 }
 
 export interface DiscordMessageSnapshot extends DiscordMessagePayload {
@@ -123,6 +164,7 @@ export interface DiscordMessageSnapshot extends DiscordMessagePayload {
   pinned: boolean;
   content: string;
   embeds: DiscordEmbed[];
+  components?: DiscordActionRow[];
 }
 
 export type ScheduledEventStatus = 'SCHEDULED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED' | 'UNKNOWN';

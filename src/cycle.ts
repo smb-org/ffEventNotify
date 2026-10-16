@@ -22,6 +22,7 @@ import {
   markSeen,
   setMetaValue,
   setGuildEventSyncStatus,
+  setEventImageUrl,
   type Store,
   type StoreEvent,
   type StoreEventSource,
@@ -49,6 +50,7 @@ import { runDailyWikiCrossCheck } from './sources/wiki.ts';
 import { syncEventEmbed } from './sync/embed.ts';
 import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
+import { syncEventReminders } from './sync/reminders.ts';
 import { SourceHealthMonitor } from './health.ts';
 import type {
   Classification,
@@ -428,6 +430,7 @@ async function applySeasonalPage(
     ? result.title.value
     : fallbackTitle.trim() || existingEvent?.title || titleFromUrl(normalizedSpecialUrl);
   const eventId = eventForType(context, key, 'seasonal-special', suggestedTitle, normalizedSpecialUrl, preferredEventId);
+  setEventImageUrl(context.store, eventId, result.imageUrl);
 
   if (topicEntry) {
     attachSource(context.store, {
@@ -1060,6 +1063,19 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     const guildPosted = await syncGuildEvents(context, guild, health.isBlind);
     postedEvents += guildPosted;
     await syncGuildStatus(context, guild, health.isBlind);
+    try {
+      await syncEventReminders({
+        guildId: guild.guildId,
+        channelId: guild.eventChannelId,
+        events: getAllEvents(options.store),
+        store: options.store,
+        discord: options.discord,
+        now: context.currentTime,
+      });
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      await logWarning(context, 'reminders:sync-failed', `Erinnerungen konnten nicht synchronisiert werden: ${details}`, guild.guildId);
+    }
     if (guild.firstRun && lists.succeeded && !health.isBlind) {
       try {
         await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'first-run:summary',

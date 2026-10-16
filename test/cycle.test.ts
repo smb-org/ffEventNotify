@@ -27,11 +27,24 @@ const fixture = (path: string): string => readFileSync(new URL(path, import.meta
 function discordEmbedSnapshots(embeds: readonly DiscordEmbed[] = []): DiscordEmbed[] {
   return embeds.map((embed) => ({
     ...(embed.title === undefined ? {} : { title: embed.title }),
+    ...(embed.url === undefined ? {} : { url: embed.url }),
     ...(embed.description === undefined ? {} : { description: embed.description }),
+    ...(embed.color === undefined ? {} : { color: embed.color }),
+    ...(embed.author === undefined ? {} : { author: { ...embed.author } }),
+    ...(embed.image === undefined ? {} : { image: { ...embed.image } }),
     ...(embed.fields === undefined ? {} : {
       fields: embed.fields.map((field) => ({ name: field.name, value: field.value, inline: field.inline ?? false })),
     }),
     ...(embed.footer === undefined ? {} : { footer: { text: embed.footer.text } }),
+  }));
+}
+
+function componentSnapshots(rows: DiscordMessagePayload['components'] = []) {
+  return rows.map((row) => ({
+    components: row.components.map((component) => component.type === 'button' ? { ...component } : {
+      ...component,
+      options: component.options.map((option) => ({ ...option })),
+    }),
   }));
 }
 
@@ -58,7 +71,13 @@ class FakeDiscordPort implements DiscordPort {
     this.editMessageCount += 1;
     const index = this.messages.findIndex((message) => message.id === messageId && message.channelId === channelId);
     assert.notEqual(index, -1);
-    const message = { ...this.messages[index]!, content: payload.content ?? '', embeds: discordEmbedSnapshots(payload.embeds) };
+    const old = this.messages[index]!;
+    const message = {
+      ...old,
+      content: payload.content ?? '',
+      embeds: discordEmbedSnapshots(payload.embeds),
+      components: payload.components === undefined ? old.components : componentSnapshots(payload.components),
+    };
     this.messages[index] = message;
     return message;
   }
@@ -129,6 +148,7 @@ class FakeDiscordPort implements DiscordPort {
       pinned: false,
       content: payload.content ?? '',
       embeds: discordEmbedSnapshots(payload.embeds),
+      components: componentSnapshots(payload.components),
     };
   }
 }
@@ -235,8 +255,8 @@ function fixtureFetcher(): FetchText {
 
 function eventEmbeds(discord: FakeDiscordPort): Array<{ eventId: string; embed: DiscordEmbed }> {
   return discord.messages.flatMap((message) => message.embeds
-    .filter((embed) => embed.footer?.text !== undefined && embed.title !== 'Läuft gerade')
-    .map((embed) => ({ eventId: embed.footer!.text, embed })));
+    .filter((embed) => embed.url !== undefined && embed.title !== 'Läuft gerade')
+    .map((embed) => ({ eventId: new URL(embed.url!).hash.slice(1), embed })));
 }
 
 function cycleOptions(store: Store, discord: FakeDiscordPort, health = new SourceHealthMonitor(store)) {
@@ -986,7 +1006,7 @@ test('banner specials without a verified title do not publish their URL fragment
     await runCycle({ ...cycleOptions(db, discord), fetchText });
     const event = getAllEvents(db).find((candidate) => candidate.eventKey === 'seasonal-special:/lodestone/special/opaque123/');
     assert.ok(event);
-    const posted = eventEmbeds(discord).find((entry) => entry.eventId === `Event-ID: ${stableEventIdentity(event.eventKey)}`);
+    const posted = eventEmbeds(discord).find((entry) => entry.eventId === `ffe-${stableEventIdentity(event.eventKey)}`);
 
     assert.ok(posted);
     assert.equal(event.title, 'opaque123');
