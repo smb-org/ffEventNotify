@@ -268,6 +268,69 @@ test('scheduled event uses a short preferred source URL and moves a running star
   }
 });
 
+test('scheduled event is skipped when the two-minute running-start offset would reach its end', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'ending-soon', 'Endet gleich', '2026-10-16T11:00:00.000Z', '2026-10-16T12:01:00.000Z');
+    const scheduledId = await syncScheduledEvent({
+      event,
+      sourceUrls: ['https://de.finalfantasyxiv.com/lodestone/special/ending-soon/'],
+      guildId: 'guild',
+      discord,
+      store: db,
+      now: NOW,
+    });
+
+    assert.equal(scheduledId, undefined);
+    assert.equal(discord.createScheduledCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('generic embeds display a verified start when the end is uncertain', () => {
+  const db = openDb(':memory:');
+  try {
+    const id = createEvent(db, { eventKey: 'generic-start', eventType: 'topic-generic', title: 'Live-Letter' });
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/generic-start';
+    attachSource(db, { eventId: id, url: sourceUrl, kind: 'topic' });
+    applyField(db, id, 'start', { status: 'ok', value: '2026-10-20T12:00:00.000Z' }, sourceUrl);
+    applyField(db, id, 'end', { status: 'unsicher', reason: 'No end date in announcement.' }, sourceUrl);
+    const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
+    const updated = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
+    const embed = buildEventEmbed(updated, [`https://de.finalfantasyxiv.com/lodestone/special/generic-start/`], NOW);
+
+    assert.match(embed.description ?? '', /Beginn: Di\., 20\.10\.2026, 14:00 Uhr/);
+    assert.match(embed.description ?? '', /<t:1792497600:F>/);
+    assert.doesNotMatch(embed.description ?? '', /20\.10\.2026, 14:00 Uhr –/);
+    assert.match(embed.description ?? '', /Ende: siehe Lodestone/);
+  } finally {
+    db.close();
+  }
+});
+
+test('uncertain events without a verified title omit the embed title', () => {
+  const db = openDb(':memory:');
+  try {
+    const id = createEvent(db, {
+      eventKey: 'seasonal-special:/lodestone/special/opaque123/',
+      eventType: 'seasonal-special',
+      title: 'opaque123',
+    });
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/special/opaque123/';
+    attachSource(db, { eventId: id, url: sourceUrl, kind: 'special' });
+    applyField(db, id, 'title', { status: 'unsicher', reason: 'No Lodestone title.' }, sourceUrl);
+    applyField(db, id, 'start', { status: 'ok', value: '2026-10-16T08:00:00.000Z' }, sourceUrl);
+    applyField(db, id, 'end', { status: 'ok', value: '2026-10-20T12:00:00.000Z' }, sourceUrl);
+    const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
+
+    assert.equal(buildEventEmbed(event, [sourceUrl], NOW).title, undefined);
+  } finally {
+    db.close();
+  }
+});
+
 test('scheduled event falls back when the preferred source URL is longer than one hundred characters', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();

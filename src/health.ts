@@ -41,7 +41,10 @@ export class SourceHealthMonitor {
   ): SourceHealth {
     const consecutiveFailedCycles = cycleSucceeded ? 0 : this.current.consecutiveFailedCycles + 1;
     const emptyListPage = listEntryCounts.some((count) => count === 0);
-    const isBlind = emptyListPage || consecutiveFailedCycles >= 3;
+    const allRequiredListsRecovered = cycleSucceeded && listEntryCounts.length > 0 && listEntryCounts.every((count) => count > 0);
+    const isBlind = this.current.isBlind
+      ? !allRequiredListsRecovered
+      : emptyListPage || consecutiveFailedCycles >= 3;
     const nowUtc = now.toISOString();
     const transition: HealthTransition | undefined = !this.current.isBlind && isBlind
       ? { type: 'blind', atUtc: nowUtc }

@@ -58,6 +58,11 @@ function eventDescription(event: StoreEvent, link?: string): string {
     const localPeriod = `${berlinDateTime(event.startUtc)} – ${berlinDateTime(event.endUtc)}`;
     return `${localPeriod}\n${timestamp(event.startUtc, 'F')} (${timestamp(event.startUtc, 'R')}) – ${timestamp(event.endUtc, 'F')} (${timestamp(event.endUtc, 'R')})`;
   }
+  if (event.startStatus === 'ok' && event.startUtc) {
+    const verifiedStart = `Beginn: ${berlinDateTime(event.startUtc)}\n${timestamp(event.startUtc, 'F')} (${timestamp(event.startUtc, 'R')})`;
+    const sourceLink = link ? `\n[Zur Ankündigung](${link})` : '';
+    return `${verifiedStart}\nEnde: siehe Lodestone${sourceLink}`;
+  }
   return link ? `Zeitraum: siehe Lodestone\n[Zur Ankündigung](${link})` : 'Zeitraum: siehe Lodestone';
 }
 
@@ -127,14 +132,21 @@ function fieldsWithOverflow(
   return undefined;
 }
 
+function isUnverifiedPathFragment(event: StoreEvent): boolean {
+  const prefix = 'seasonal-special:';
+  if (event.titleStatus !== 'unsicher' || !event.eventKey.startsWith(prefix)) return false;
+  const fragment = event.eventKey.slice(prefix.length).split('/').filter(Boolean).at(-1);
+  return fragment !== undefined && event.title === fragment.replace(/[_-]+/g, ' ');
+}
+
 export function buildEventEmbed(event: StoreEvent, sourceUrls: readonly string[], now = new Date()): DiscordEmbed {
   void now;
   const link = sourceUrl(sourceUrls);
   const embed: DiscordEmbed = {
-    title: event.title.slice(0, 256),
     description: eventDescription(event, link),
     footer: { text: String(event.id) },
   };
+  if (event.title.length > 0 && !isUnverifiedPathFragment(event)) embed.title = event.title.slice(0, 256);
 
   if (event.rewardsStatus === 'unsicher') {
     const value = link

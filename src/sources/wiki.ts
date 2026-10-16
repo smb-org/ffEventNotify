@@ -136,7 +136,7 @@ function overlapsWithOneDayTolerance(wikiEvent: WikiEvent, known: KnownEventTitl
   const knownEnd = Date.parse(known.endUtc);
   if (![wikiStart, wikiEnd, knownStart, knownEnd].every(Number.isFinite)) return false;
   const tolerance = 86_400_000;
-  return wikiStart <= knownEnd + tolerance && wikiEnd >= knownStart - tolerance;
+  return Math.abs(wikiStart - knownStart) <= tolerance && Math.abs(wikiEnd - knownEnd) <= tolerance;
 }
 
 export function compareWithKnown(

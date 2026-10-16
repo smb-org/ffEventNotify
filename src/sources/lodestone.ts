@@ -103,6 +103,16 @@ export function articleBodyLinks(html: string): string[] {
   return links;
 }
 
+export function articleRelatedLinks(html: string): string[] {
+  const $ = load(html);
+  const links: string[] = [];
+  $('article.news__detail > div.news__footer li.news__list a.news__list--link[href]').each((_, element) => {
+    const href = $(element).attr('href');
+    if (href !== undefined) links.push(href);
+  });
+  return links;
+}
+
 export function normalizeLodestoneUrl(value: string): string {
   const url = new URL(value, LODESTONE_BASE_URL);
   if (/^(?:de|eu|na|fr)\.finalfantasyxiv\.com$/i.test(url.hostname)) {

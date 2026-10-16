@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { load } from 'cheerio';
 import test from 'node:test';
 import { SourceHealthMonitor } from '../src/health.ts';
-import { getAllEvents, getOpenEvents, isSeen, markFirstRunDone, openDb, type Store } from '../src/store.ts';
+import { getAllEvents, getEventSources, getOpenEvents, isSeen, markFirstRunDone, openDb, type Store } from '../src/store.ts';
 import type {
   DiscordEmbed,
   DiscordMessagePayload,
@@ -229,6 +230,51 @@ function cycleOptions(store: Store, discord: FakeDiscordPort, health = new Sourc
   };
 }
 
+type FetchResult = Awaited<ReturnType<FetchText>>;
+
+function topicListHtml(entries: Array<{ title: string; url: string }>, bannerUrls: string[] = []): string {
+  const list = entries.map(({ title, url }) =>
+    `<li class="news__list--topics"><header class="news__list--header"><p class="news__list--title"><a href="${url}">${title}</a></p></header></li>`,
+  ).join('');
+  const banners = bannerUrls.map((url) => `<div class="mb10"><a href="${url}">Banner</a></div>`).join('');
+  return `<html><body><ul>${list}</ul><div class="ldst__side">${banners}</div></body></html>`;
+}
+
+function maintenanceListHtml(entries: Array<{
+  tag: 'Wartung' | 'Folge-News';
+  title: string;
+  url: string;
+  publishedEpoch?: number;
+}>): string {
+  const list = entries.map(({ tag, title, url, publishedEpoch }) =>
+    `<li class="news__list"><a class="news__list--link" href="${url}"><p class="news__list--title"><span class="news__list--tag">[${tag}]</span>${title}</p></a>${publishedEpoch === undefined ? '' : `<time><span data-epoch="${publishedEpoch}"></span></time>`}</li>`,
+  ).join('');
+  return `<html><body><ul>${list}</ul></body></html>`;
+}
+
+function controlledFetcher(options: {
+  topicList?: string;
+  maintenanceList?: string;
+  feedBody?: string;
+  intercept?: (url: string, fetchOptions: { priority: 'list' | 'detail' | 'item' | 'wiki' }) => Promise<FetchResult | undefined>;
+}): FetchText {
+  const base = fixtureFetcher();
+  return async (url, fetchOptions) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/lodestone/topics/' && parsed.searchParams.get('page') === null && options.topicList !== undefined) {
+      return { status: 200, body: options.topicList, finalUrl: url };
+    }
+    if (parsed.pathname === '/lodestone/news/category/2' && parsed.searchParams.get('page') === null && options.maintenanceList !== undefined) {
+      return { status: 200, body: options.maintenanceList, finalUrl: url };
+    }
+    if (parsed.pathname === '/lodestone/news/news.xml' && options.feedBody !== undefined) {
+      return { status: 200, body: options.feedBody, finalUrl: url };
+    }
+    const intercepted = await options.intercept?.(url, fetchOptions);
+    return intercepted ?? base(url, fetchOptions);
+  };
+}
+
 test('first-run replay of live list fixtures posts only All Saints, Fall Guys, and Mog Mog and logs the summary', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
@@ -379,6 +425,348 @@ test('an unresolved sqex.to topic stays unseen and is retried successfully next 
     assert.equal(isSeen(db, topicUrl), true);
     assert.equal(discord.logs.filter((message) => message.includes('short link unresolved')).length, 1);
     assert.equal(getAllEvents(db).filter((event) => event.eventKey === 'seasonal-special:/lodestone/special/fallguys/').length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('cycle reads the clock again at scheduling time after discovery and extraction', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  let clockReads = 0;
+  try {
+    await runCycle({
+      ...cycleOptions(db, discord),
+      now: () => new Date(clockReads++ === 0 ? '2026-10-16T12:00:00.000Z' : '2026-10-16T12:03:00.000Z'),
+    });
+
+    assert.ok(clockReads > 1);
+    assert.equal(discord.scheduledEvents.length, 3);
+    assert.ok(discord.scheduledEvents.every((event) => event.startUtc === '2026-10-16T12:05:00.000Z'));
+  } finally {
+    db.close();
+  }
+});
+
+test('maintenance originals for different worlds keep distinct identities despite the same stem', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const original = 'https://de.finalfantasyxiv.com/lodestone/news/detail/aether-original';
+  const crystal = 'https://de.finalfantasyxiv.com/lodestone/news/detail/crystal-original';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }]),
+    maintenanceList: maintenanceListHtml([
+      { tag: 'Wartung', title: '[Aether] Notwartung (17. Okt.)', url: original, publishedEpoch: 1792152000 },
+      { tag: 'Wartung', title: '[Crystal] Notwartung (17. Okt.)', url: crystal, publishedEpoch: 1792152060 },
+    ]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === '/lodestone/topics/detail/filler') {
+        return { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url };
+      }
+      if (path === '/lodestone/news/detail/aether-original' || path === '/lodestone/news/detail/crystal-original') {
+        return { status: 200, body: fixture('./fixtures/maintenance/all-worlds-original.html'), finalUrl: url };
+      }
+      return undefined;
+    },
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+    const maintenance = getAllEvents(db).filter((event) => event.eventType === 'maintenance');
+
+    assert.equal(maintenance.length, 2);
+    assert.notEqual(maintenance[0]?.eventKey, maintenance[1]?.eventKey);
+  } finally {
+    db.close();
+  }
+});
+
+test('an explicit original link joins a follow-up whose title stem changed', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const original = 'https://de.finalfantasyxiv.com/lodestone/news/detail/937bc8f7dda7fe51008b7ea77d65548fcd4e5ebe';
+  const followup = 'https://de.finalfantasyxiv.com/lodestone/news/detail/e06c2ed28cd282761a0204f7c0af613bb873cb3e';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }]),
+    maintenanceList: maintenanceListHtml([
+      { tag: 'Wartung', title: 'Wartung aller Welten (12-13. Okt.)', url: original, publishedEpoch: 1791882900 },
+      { tag: 'Folge-News', title: 'Notwartung aller Welten (12-13. Okt.): Folgenews', url: followup, publishedEpoch: 1791882960 },
+    ]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === '/lodestone/topics/detail/filler'
+      ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+      : undefined,
+  });
+  try {
+    await runCycle({
+      ...cycleOptions(db, discord),
+      now: () => new Date('2026-10-12T09:00:00.000Z'),
+      fetchText,
+    });
+    const maintenance = getAllEvents(db).filter((event) => event.eventType === 'maintenance');
+
+    assert.equal(maintenance.length, 1);
+    assert.deepEqual(getEventSources(db, maintenance[0]!.id).map((source) => source.url).sort(), [original, followup].sort());
+    assert.equal(eventEmbeds(discord).length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('cycle stores follow-up source kind so its extended period wins over a later original timestamp', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const original = 'https://de.finalfantasyxiv.com/lodestone/news/detail/937bc8f7dda7fe51008b7ea77d65548fcd4e5ebe';
+  const followup = 'https://de.finalfantasyxiv.com/lodestone/news/detail/e06c2ed28cd282761a0204f7c0af613bb873cb3e';
+  const followupHtml = fixture('./fixtures/maintenance/all-worlds-followup.html')
+    .replace('bis zum 13. Okt. 2026 um 11:25 (MESZ)', 'bis zum 14. Okt. 2026 um 13:00 (MESZ)');
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }]),
+    maintenanceList: maintenanceListHtml([
+      { tag: 'Wartung', title: 'Wartung aller Welten (12-13. Okt.)', url: original, publishedEpoch: 1792152000 },
+      { tag: 'Folge-News', title: 'Wartung aller Welten (12-13. Okt.): Folgenews', url: followup, publishedEpoch: 1792130400 },
+    ]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === '/lodestone/topics/detail/filler') {
+        return { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url };
+      }
+      if (path === '/lodestone/news/detail/e06c2ed28cd282761a0204f7c0af613bb873cb3e') {
+        return { status: 200, body: followupHtml, finalUrl: url };
+      }
+      return undefined;
+    },
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), now: () => new Date('2026-10-12T09:00:00.000Z'), fetchText });
+    const maintenance = getAllEvents(db).find((event) => event.eventType === 'maintenance');
+    assert.ok(maintenance);
+    const sources = getEventSources(db, maintenance.id);
+    assert.equal(sources.find((source) => source.url === followup)?.kind, 'followup');
+    assert.equal(maintenance.endUtc, '2026-10-14T11:00:00Z');
+  } finally {
+    db.close();
+  }
+});
+
+test('topic discovery normalizes direct relative special links before fetching the special page', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const topicUrl = '/lodestone/topics/detail/relative-special';
+  const specialUrl = '/lodestone/special/relative-event/';
+  const page = '<html><head><meta property="og:title" content="Relatives Sonderereignis"><meta name="description" content="Von Freitag, den 16. Oktober 2026 um 10:00 Uhr (MESZ) bis Dienstag, den 20. Oktober 2026 um 15:00 Uhr (MESZ)"></head><body><main class="content"><p>Von Freitag, den 16. Oktober 2026 um 10:00 Uhr (MESZ) bis Dienstag, den 20. Oktober 2026 um 15:00 Uhr (MESZ)</p></main></body></html>';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Rückkehr eines Spiels', url: topicUrl }]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === topicUrl) {
+        return { status: 200, body: `<article class="news__detail"><div class="news__detail__wrapper"><a href="${specialUrl}">Sonderseite</a></div></article>`, finalUrl: url };
+      }
+      if (path === specialUrl) return { status: 200, body: page, finalUrl: url };
+      return undefined;
+    },
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+    const event = getAllEvents(db).find((candidate) => candidate.eventKey === 'seasonal-special:/lodestone/special/relative-event/');
+
+    assert.ok(event);
+    assert.ok(getEventSources(db, event.id).some((source) => source.url === 'https://de.finalfantasyxiv.com/lodestone/topics/detail/relative-special'));
+  } finally {
+    db.close();
+  }
+});
+
+test('unavailable special evidence stays pending and later banner and topic discovery produce one seasonal event', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const topicUrl = '/lodestone/topics/detail/pending-special';
+  const specialUrl = '/lodestone/special/pending-event/';
+  let specialAttempts = 0;
+  let topicUnavailable = false;
+  const page = '<html><head><meta property="og:title" content="Verifiziertes Sonderereignis"><meta name="description" content="Von Freitag, den 16. Oktober 2026 um 10:00 Uhr (MESZ) bis Dienstag, den 20. Oktober 2026 um 15:00 Uhr (MESZ)"></head><body><main class="content"><p>Von Freitag, den 16. Oktober 2026 um 10:00 Uhr (MESZ) bis Dienstag, den 20. Oktober 2026 um 15:00 Uhr (MESZ)</p></main></body></html>';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Kampagne mit Sonderseite', url: topicUrl }], [specialUrl]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === topicUrl) {
+        if (topicUnavailable) return { status: 503, body: '', finalUrl: url };
+        return { status: 200, body: `<article class="news__detail"><div class="news__detail__wrapper"><a href="${specialUrl}">Sonderseite</a></div></article>`, finalUrl: url };
+      }
+      if (path === specialUrl && specialAttempts++ === 0) return { status: 503, body: '', finalUrl: url };
+      if (path === specialUrl) return { status: 200, body: page, finalUrl: url };
+      return undefined;
+    },
+  });
+  try {
+    const options = { ...cycleOptions(db, discord), fetchText };
+    await runCycle(options);
+    assert.equal(getAllEvents(db).length, 0);
+    assert.equal(isSeen(db, 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pending-special'), false);
+
+    topicUnavailable = true;
+    await runCycle(options);
+    assert.equal(getAllEvents(db).filter((event) => event.eventType === 'seasonal-special').length, 1);
+
+    topicUnavailable = false;
+    await runCycle(options);
+    const events = getAllEvents(db).filter((event) => event.eventType === 'seasonal-special');
+    assert.equal(events.length, 1);
+    assert.ok(getEventSources(db, events[0]!.id).some((source) => source.url === 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pending-special'));
+    assert.ok(getEventSources(db, events[0]!.id).some((source) => source.url === 'https://de.finalfantasyxiv.com/lodestone/special/pending-event/'));
+    assert.equal(eventEmbeds(discord).length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('a first-run topic detail failure persists its URL and suppression after it leaves the list', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-pending-'));
+  const dbPath = join(directory, 'events.sqlite');
+  let db = openDb(dbPath);
+  const discord = new FakeDiscordPort();
+  const targetUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/02288c94ccfb267ca6df2a31770cd164a4ceb2ce';
+  const base = fixtureFetcher();
+  let unavailable = true;
+  let omitFromList = false;
+  const fetchText: FetchText = async (url, options) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/lodestone/topics/' && parsed.searchParams.get('page') === null && omitFromList) {
+      const response = await base(url, options);
+      const $ = load(response.body);
+      $('a[href="/lodestone/topics/detail/02288c94ccfb267ca6df2a31770cd164a4ceb2ce"]').closest('li.news__list--topics').remove();
+      return { ...response, body: $.html() };
+    }
+    if (parsed.pathname === new URL(targetUrl).pathname && unavailable) return { status: 503, body: '', finalUrl: url };
+    return base(url, options);
+  };
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+    assert.equal(isSeen(db, targetUrl), false);
+    const messagesAfterBootstrap = discord.createMessageCount;
+    db.close();
+
+    db = openDb(dbPath);
+    unavailable = false;
+    omitFromList = true;
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+    const event = getAllEvents(db).find((candidate) => getEventSources(db, candidate.id).some((source) => source.url === targetUrl));
+
+    assert.ok(event);
+    assert.equal(event.endStatus, 'unsicher');
+    assert.equal(event.discordMessageId, null);
+    assert.equal(discord.createMessageCount, messagesAfterBootstrap);
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('an expired seasonal banner stores its verified terminal period and is not posted', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const specialUrl = '/lodestone/special/ended-season/';
+  const expired = '<html><body><main class="content"><p>Von Mittwoch, den 7. Oktober 2026 um 10:00 Uhr (MESZ) bis Dienstag, den 13. Oktober 2026 um 10:00 Uhr (MESZ).</p></main></body></html>';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }], [specialUrl]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === specialUrl
+      ? { status: 200, body: expired, finalUrl: url }
+      : new URL(url).pathname === '/lodestone/topics/detail/filler'
+        ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+        : undefined,
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+    const event = getAllEvents(db).find((candidate) => candidate.eventKey === 'seasonal-special:/lodestone/special/ended-season/');
+
+    assert.ok(event);
+    assert.equal(event.startUtc, '2026-10-07T08:00:00Z');
+    assert.equal(event.endUtc, '2026-10-13T08:00:00Z');
+    assert.equal(event.endStatus, 'ok');
+    assert.equal(discord.messages.some((message) => message.embeds.some((embed) => embed.footer?.text === String(event.id))), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('banner specials without a verified title do not publish their URL fragment', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const specialUrl = '/lodestone/special/opaque123/';
+  const page = '<html><body><main class="content"><p>Von Freitag, den 16. Oktober 2026 um 10:00 Uhr (MESZ) bis Dienstag, den 20. Oktober 2026 um 15:00 Uhr (MESZ).</p></main></body></html>';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }], [specialUrl]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === specialUrl
+      ? { status: 200, body: page, finalUrl: url }
+      : new URL(url).pathname === '/lodestone/topics/detail/filler'
+        ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+        : undefined,
+  });
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+    const event = getAllEvents(db).find((candidate) => candidate.eventKey === 'seasonal-special:/lodestone/special/opaque123/');
+    assert.ok(event);
+    const posted = eventEmbeds(discord).find((entry) => entry.eventId === String(event.id));
+
+    assert.ok(posted);
+    assert.equal(event.titleStatus, 'unsicher');
+    assert.equal(posted.embed.title, undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('an existing seasonal event keeps its verified terminal period after expiration', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const specialUrl = '/lodestone/special/seasonal-expiration/';
+  const page = '<html><head><meta property="og:title" content="Sonderaktion mit Ablauf"></head><body><main class="content"><p>Von Freitag, den 16. Oktober 2026 um 10:00 Uhr (MESZ) bis Freitag, den 16. Oktober 2026 um 15:00 Uhr (MESZ).</p></main></body></html>';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unrelated announcement', url: '/lodestone/topics/detail/filler' }], [specialUrl]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === specialUrl
+      ? { status: 200, body: page, finalUrl: url }
+      : new URL(url).pathname === '/lodestone/topics/detail/filler'
+        ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+        : undefined,
+  });
+  let cycleTime = new Date('2026-10-16T12:00:00.000Z');
+  try {
+    const options = { ...cycleOptions(db, discord), now: () => new Date(cycleTime), fetchText };
+    await runCycle(options);
+    const event = getAllEvents(db).find((candidate) => candidate.eventKey === 'seasonal-special:/lodestone/special/seasonal-expiration/');
+    assert.ok(event);
+    assert.equal(event.endUtc, '2026-10-16T13:00:00Z');
+    assert.equal(event.endStatus, 'ok');
+    const messageCount = eventEmbeds(discord).length;
+
+    cycleTime = new Date('2026-10-16T14:00:00.000Z');
+    await runCycle(options);
+    const refreshed = getAllEvents(db).find((candidate) => candidate.id === event.id)!;
+
+    assert.equal(refreshed.startUtc, '2026-10-16T08:00:00Z');
+    assert.equal(refreshed.endUtc, '2026-10-16T13:00:00Z');
+    assert.equal(refreshed.endStatus, 'ok');
+    assert.equal(eventEmbeds(discord).length, messageCount);
   } finally {
     db.close();
   }

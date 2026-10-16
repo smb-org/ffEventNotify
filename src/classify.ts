@@ -118,3 +118,16 @@ export function maintenanceStem(title: string): string {
     .trim();
 }
 
+export function maintenanceTarget(title: string): string | undefined {
+  const withoutType = title.replace(/^\[(?:Wartung|Folge-News)\]\s*/i, '');
+  const bracketed = /^\[([^\]]+)\]/.exec(withoutType)?.[1];
+  if (bracketed && maintenanceNamesLower.has(bracketed.toLocaleLowerCase('en'))) {
+    return bracketed.toLocaleLowerCase('en');
+  }
+  if (/aller\s+welten/i.test(withoutType)) return 'all-worlds';
+  return [...maintenanceNames].find((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu').test(withoutType);
+  })?.toLocaleLowerCase('en');
+}
+

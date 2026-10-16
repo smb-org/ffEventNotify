@@ -19,13 +19,14 @@ import {
   type StoreEvent,
   type StoreEventSource,
 } from './store.ts';
-import { classifyEntry, maintenanceStem } from './classify.ts';
+import { classifyEntry, maintenanceStem, maintenanceTarget } from './classify.ts';
 import { extractGenericTopic, deriveGenericEventKey } from './extractors/generic.ts';
 import { extractMaintenance } from './extractors/maintenance.ts';
 import { extractSeasonal, hasPeriod } from './extractors/seasonal.ts';
 import { fetchNewsFeed, parseNewsFeed } from './sources/feed.ts';
 import {
   articleBodyLinks,
+  articleRelatedLinks,
   fetchDetailPage,
   fetchMaintenanceListPage,
   fetchSpecialPage,
@@ -73,10 +74,18 @@ export interface CycleResult {
 
 interface CycleContext extends Omit<CycleOptions, 'health'> {
   health: SourceHealthMonitor;
+  clock: () => Date;
   currentTime: Date;
+  firstRun: boolean;
   processedSources: Set<string>;
   capturedEventIds: Set<number>;
   specialPages: Map<string, Promise<string | undefined>>;
+  pendingDiscoveries: Map<string, PendingDiscovery>;
+}
+
+interface PendingDiscovery {
+  entry: ListEntry;
+  firstRun: boolean;
 }
 
 interface LoadedLists {
@@ -88,9 +97,62 @@ interface LoadedLists {
   succeeded: boolean;
 }
 
+const PENDING_DISCOVERIES_META = 'pending_discoveries';
+
+function loadPendingDiscoveries(store: Store): Map<string, PendingDiscovery> {
+  const pending = new Map<string, PendingDiscovery>();
+  const raw = getMetaValue(store, PENDING_DISCOVERIES_META);
+  if (!raw) return pending;
+  try {
+    const records = JSON.parse(raw) as unknown;
+    if (!Array.isArray(records)) return pending;
+    for (const value of records) {
+      if (typeof value !== 'object' || value === null || !('entry' in value) || !('firstRun' in value)) continue;
+      const record = value as PendingDiscovery;
+      if (typeof record.firstRun !== 'boolean' || !record.entry || typeof record.entry.url !== 'string'
+        || typeof record.entry.title !== 'string'
+        || !['topic', 'maintenance', 'feed', 'banner'].includes(record.entry.source)) continue;
+      const entry = { ...record.entry, url: normalizeLodestoneUrl(record.entry.url) };
+      pending.set(entry.url, { entry, firstRun: record.firstRun });
+    }
+  } catch {
+    return pending;
+  }
+  return pending;
+}
+
+function persistPendingDiscoveries(context: CycleContext): void {
+  setMetaValue(context.store, PENDING_DISCOVERIES_META, JSON.stringify([...context.pendingDiscoveries.values()]));
+}
+
+function rememberPendingDiscovery(context: CycleContext, entry: ListEntry): void {
+  const normalizedEntry = { ...entry, url: normalizeLodestoneUrl(entry.url) };
+  const previous = context.pendingDiscoveries.get(normalizedEntry.url);
+  context.pendingDiscoveries.set(normalizedEntry.url, {
+    entry: normalizedEntry,
+    firstRun: previous?.firstRun ?? context.firstRun,
+  });
+  persistPendingDiscoveries(context);
+}
+
+function finishPendingDiscovery(context: CycleContext, url: string, eventId?: number): void {
+  const normalizedUrl = normalizeLodestoneUrl(url);
+  const pending = context.pendingDiscoveries.get(normalizedUrl);
+  if (!pending) return;
+  context.pendingDiscoveries.delete(normalizedUrl);
+  persistPendingDiscoveries(context);
+
+  if (!pending.firstRun || eventId === undefined) return;
+  const event = getAllEvents(context.store).find((candidate) => candidate.id === eventId);
+  if (!event || (event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > context.currentTime.getTime())) return;
+  const suppressed = new Set<number>(JSON.parse(getMetaValue(context.store, 'first_run_suppressed_event_ids') ?? '[]') as number[]);
+  suppressed.add(eventId);
+  setMetaValue(context.store, 'first_run_suppressed_event_ids', JSON.stringify([...suppressed]));
+}
+
 function sourceKind(entry: ListEntry): StoreEventSource['kind'] {
-  if (entry.source === 'maintenance' || entry.source === 'topic') return entry.source;
   if (/^\[Folge-News\]/i.test(entry.title)) return 'followup';
+  if (entry.source === 'maintenance' || entry.source === 'topic') return entry.source;
   return 'feed';
 }
 
@@ -104,7 +166,7 @@ function publishedAt(entry: ListEntry, now: Date): string {
 
 function isSpecialUrl(value: string): boolean {
   try {
-    return new URL(value).pathname.startsWith('/lodestone/special/');
+    return new URL(normalizeLodestoneUrl(value)).pathname.startsWith('/lodestone/special/');
   } catch {
     return false;
   }
@@ -263,7 +325,14 @@ async function applySeasonalPage(
   const key = `seasonal-special:${specialPath}`;
   const sourceMoment = topicEntry ? publishedAt(topicEntry, context.currentTime) : context.currentTime.toISOString();
   const result = await extractSeasonal(html, context.currentTime, { fetchText: context.fetchText, store: context.store });
-  const suggestedTitle = result.title.status === 'ok' ? result.title.value : fallbackTitle;
+  const eventSourceId = findEventBySourceUrl(context.store, normalizedSpecialUrl);
+  const keyedEventId = findEventByKey(context.store, key);
+  const existingEvent = getAllEvents(context.store).find((event) =>
+    event.id === (eventSourceId ?? keyedEventId ?? preferredEventId),
+  );
+  const suggestedTitle = result.title.status === 'ok'
+    ? result.title.value
+    : fallbackTitle || existingEvent?.title || '';
   const eventId = eventForType(context, key, 'seasonal-special', suggestedTitle, normalizedSpecialUrl, preferredEventId);
 
   if (topicEntry) {
@@ -283,8 +352,18 @@ async function applySeasonalPage(
     firstSeenAt: context.currentTime.toISOString(),
   });
   context.processedSources.add(normalizedSpecialUrl);
-  applyExtract(context, eventId, normalizedSpecialUrl, sourceMoment, result);
+  const terminalPeriod = result.eventState.status === 'ok' && result.eventState.value === 'ended'
+    && result.periods.status === 'ok'
+    ? [...result.periods.value]
+      .filter((period) => period.endUtc !== null && Date.parse(period.endUtc) <= context.currentTime.getTime())
+      .sort((left, right) => Date.parse(right.endUtc!) - Date.parse(left.endUtc!))[0]
+    : undefined;
+  const persistedResult = terminalPeriod
+    ? { ...result, period: { status: 'ok' as const, value: { startUtc: terminalPeriod.startUtc, endUtc: terminalPeriod.endUtc! } } }
+    : result;
+  applyExtract(context, eventId, normalizedSpecialUrl, sourceMoment, persistedResult);
   rememberEvent(context, eventId);
+  finishPendingDiscovery(context, normalizedSpecialUrl, eventId);
   return eventId;
 }
 
@@ -311,11 +390,31 @@ async function classifyAndLog(
 
 function findMaintenanceMatch(context: CycleContext, entry: ListEntry): { eventId?: number; ambiguity?: 'missing' | 'multiple' } {
   const stem = maintenanceStem(entry.title);
+  const target = maintenanceTarget(entry.title) ?? 'unknown';
   const matches = getOpenEvents(context.store, context.currentTime)
-    .filter((event) => event.eventType === 'maintenance' && maintenanceStem(event.title) === stem);
+    .filter((event) => {
+      if (event.eventType !== 'maintenance' || maintenanceStem(event.title) !== stem) return false;
+      const eventTarget = /^maintenance:([^:]+):/.exec(event.eventKey)?.[1]
+        ?? maintenanceTarget(event.title)
+        ?? 'unknown';
+      return eventTarget === target;
+    });
   if (matches.length === 1) return { eventId: matches[0]!.id };
   if (matches.length > 1) return { ambiguity: 'multiple' };
   return { ambiguity: 'missing' };
+}
+
+async function explicitMaintenanceTarget(context: CycleContext, html: string): Promise<number | undefined> {
+  const resolution = await resolveShortLinks([...articleBodyLinks(html), ...articleRelatedLinks(html)], context.fetchText);
+  const targets = new Set<number>();
+  for (const link of resolution.links) {
+    if (link === undefined) continue;
+    const targetId = findEventBySourceUrl(context.store, normalizeLodestoneUrl(link));
+    if (targetId === undefined) continue;
+    const targetEvent = getAllEvents(context.store).find((event) => event.id === targetId);
+    if (targetEvent?.eventType === 'maintenance') targets.add(targetId);
+  }
+  return targets.size === 1 ? [...targets][0] : undefined;
 }
 
 async function processMaintenance(
@@ -323,14 +422,27 @@ async function processMaintenance(
   entry: ListEntry,
   preferredEventId?: number,
 ): Promise<number | undefined> {
+  const sourceUrl = normalizeLodestoneUrl(entry.url);
   const classification = await classifyEntry(entry, undefined, { hasPeriod: () => 'no' });
   await classifyAndLog(context, entry, classification);
   context.processedSources.add(entry.url);
-  if (classification.status !== 'classified') return undefined;
+  if (classification.status !== 'classified') {
+    finishPendingDiscovery(context, sourceUrl);
+    return undefined;
+  }
 
+  let detailHtml: string | undefined;
+  let detailError: unknown;
+  try {
+    detailHtml = await fetchDetailPage(sourceUrl, context.fetchText);
+  } catch (error) {
+    detailError = error;
+    await logSourceFailure(context, sourceUrl, error);
+  }
   const isFollowup = /^\[Folge-News\]/i.test(entry.title);
+  const linkedTargetId = detailHtml === undefined ? undefined : await explicitMaintenanceTarget(context, detailHtml);
   const match = findMaintenanceMatch(context, entry);
-  let targetId = preferredEventId ?? findEventBySourceUrl(context.store, entry.url) ?? match.eventId;
+  let targetId = preferredEventId ?? findEventBySourceUrl(context.store, sourceUrl) ?? linkedTargetId ?? match.eventId;
   if (isFollowup && targetId === undefined && match.ambiguity) {
     const key = match.ambiguity === 'multiple' ? `maintenance:followup:ambiguous:${entry.url}` : `maintenance:followup:${entry.url}`;
     await logWarning(
@@ -344,8 +456,8 @@ async function processMaintenance(
   }
 
   const stem = maintenanceStem(entry.title);
-  const eventKey = isFollowup ? `maintenance:followup:${entry.url}` : `maintenance:${stem}`;
-  const sourceUrl = normalizeLodestoneUrl(entry.url);
+  const target = maintenanceTarget(entry.title) ?? 'unknown';
+  const eventKey = isFollowup ? `maintenance:followup:${sourceUrl}` : `maintenance:${target}:${stem}`;
   const alreadyKnown = findEventBySourceUrl(context.store, sourceUrl) !== undefined ||
     targetId !== undefined || findEventByKey(context.store, eventKey) !== undefined;
   const eventId = eventForType(context, eventKey, 'maintenance', entry.title, sourceUrl, targetId);
@@ -358,17 +470,17 @@ async function processMaintenance(
     firstSeenAt: context.currentTime.toISOString(),
   });
 
-  try {
-    const html = await fetchDetailPage(sourceUrl, context.fetchText);
-    const result = extractMaintenance(html, entry.title);
+  if (detailHtml !== undefined) {
+    const result = extractMaintenance(detailHtml, entry.title);
     applyExtract(context, eventId, sourceUrl, publishedAt(entry, context.currentTime), result);
-  } catch (error) {
-    await logSourceFailure(context, sourceUrl, error);
+    finishPendingDiscovery(context, sourceUrl, eventId);
+  } else {
     if (!alreadyKnown) {
-      const reason = `Detailseite nicht lesbar: ${error instanceof Error ? error.message : String(error)}`;
+      const reason = `Detailseite nicht lesbar: ${detailError instanceof Error ? detailError.message : String(detailError)}`;
       applyField(context.store, eventId, 'start', { status: 'unsicher', reason }, sourceUrl, publishedAt(entry, context.currentTime));
       applyField(context.store, eventId, 'end', { status: 'unsicher', reason }, sourceUrl, publishedAt(entry, context.currentTime));
     }
+    rememberPendingDiscovery(context, entry);
   }
   rememberEvent(context, eventId);
   return eventId;
@@ -379,25 +491,33 @@ async function processTopic(
   entry: ListEntry,
   preferredEventId?: number,
 ): Promise<number | undefined> {
+  const sourceUrl = normalizeLodestoneUrl(entry.url);
   let detailHtml: string;
   try {
-    detailHtml = await fetchDetailPage(entry.url, context.fetchText);
+    detailHtml = await fetchDetailPage(sourceUrl, context.fetchText);
   } catch (error) {
     context.processedSources.add(entry.url);
-    await logSourceFailure(context, entry.url, error);
-    markSeen(context.store, entry.url, 'detail-unavailable', context.currentTime.toISOString());
+    await logSourceFailure(context, sourceUrl, error);
+    rememberPendingDiscovery(context, entry);
     return undefined;
   }
 
   const articleLinks = articleBodyLinks(detailHtml);
   const linkResolution = await resolveShortLinks(articleLinks, context.fetchText);
   const specialUrls = [...new Set(linkResolution.links
-    .filter((link): link is string => link !== undefined && isSpecialUrl(link))
-    .map(normalizeLodestoneUrl))];
+    .filter((link): link is string => link !== undefined)
+    .map(normalizeLodestoneUrl)
+    .filter(isSpecialUrl))];
   const specialHtmlByPath = new Map<string, string>();
   for (const url of specialUrls) {
     const html = await getSpecialPage(context, url);
     if (html !== undefined) specialHtmlByPath.set(new URL(url).pathname, html);
+  }
+
+  if (specialUrls.some((url) => !specialHtmlByPath.has(new URL(url).pathname))) {
+    context.processedSources.add(entry.url);
+    rememberPendingDiscovery(context, entry);
+    return undefined;
   }
 
   const classification = await classifyEntry(entry, detailHtml, {
@@ -409,15 +529,25 @@ async function processTopic(
   });
   await classifyAndLog(context, entry, classification);
   context.processedSources.add(entry.url);
-  if (classification.status !== 'classified') return undefined;
+  if (classification.status !== 'classified') {
+    if (classification.status === 'unclassified' && classification.reason === 'short link unresolved') {
+      rememberPendingDiscovery(context, entry);
+    } else {
+      finishPendingDiscovery(context, sourceUrl);
+    }
+    return undefined;
+  }
 
   if (classification.eventType === 'seasonal-special') {
     const specialUrl = specialUrls.find((url) => {
       const html = specialHtmlByPath.get(new URL(url).pathname);
       return html !== undefined && hasPeriod(html, context.currentTime) !== 'no';
     });
-    if (specialUrl === undefined) return undefined;
-    return applySeasonalPage(
+    if (specialUrl === undefined) {
+      rememberPendingDiscovery(context, entry);
+      return undefined;
+    }
+    const eventId = await applySeasonalPage(
       context,
       specialUrl,
       specialHtmlByPath.get(new URL(specialUrl).pathname)!,
@@ -425,11 +555,12 @@ async function processTopic(
       entry,
       preferredEventId ?? findEventBySourceUrl(context.store, entry.url),
     );
+    finishPendingDiscovery(context, sourceUrl, eventId);
+    return eventId;
   }
 
   const keyText = deriveGenericEventKey(entry, detailHtml);
   const eventKey = 'generic:' + keyText;
-  const sourceUrl = normalizeLodestoneUrl(entry.url);
   const initialResult = extractGenericTopic(entry, detailHtml);
   const proposedTitle = initialResult.title.status === 'ok' ? initialResult.title.value : entry.title;
   const eventId = eventForType(
@@ -449,6 +580,7 @@ async function processTopic(
   });
   applyGeneric(context, eventId, sourceUrl, publishedAt(entry, context.currentTime), initialResult);
   rememberEvent(context, eventId);
+  finishPendingDiscovery(context, sourceUrl, eventId);
   return eventId;
 }
 
@@ -460,6 +592,7 @@ async function processEntry(context: CycleContext, entry: ListEntry, preferredEv
   const classification = await classifyEntry(entry, undefined, { hasPeriod: () => 'no' });
   await classifyAndLog(context, entry, classification);
   context.processedSources.add(entry.url);
+  finishPendingDiscovery(context, entry.url);
   return undefined;
 }
 
@@ -486,25 +619,37 @@ function combinedEntries(lists: LoadedLists): ListEntry[] {
 }
 
 async function processBannerRail(context: CycleContext, html: string | undefined): Promise<void> {
-  if (!html) return;
-  for (const path of parseBannerRail(html)) {
+  const entries = new Map<string, ListEntry>();
+  for (const pending of context.pendingDiscoveries.values()) {
+    if (pending.entry.source === 'banner') entries.set(pending.entry.url, pending.entry);
+  }
+  for (const path of html ? parseBannerRail(html) : []) {
     const specialUrl = normalizeLodestoneUrl(path);
+    entries.set(specialUrl, { title: '', url: specialUrl, source: 'banner' });
+  }
+  for (const entry of entries.values()) {
+    const specialUrl = normalizeLodestoneUrl(entry.url);
+    if (context.processedSources.has(specialUrl)) {
+      finishPendingDiscovery(context, specialUrl);
+      continue;
+    }
     const page = await getSpecialPage(context, specialUrl);
-    if (page === undefined) continue;
-    const entry: ListEntry = { title: specialTitleFromPath(specialUrl), url: specialUrl, source: 'banner' };
+    if (page === undefined) {
+      rememberPendingDiscovery(context, entry);
+      continue;
+    }
+    context.processedSources.add(specialUrl);
     const classification = await classifyEntry(entry, undefined, {
       hasPeriod: () => hasPeriod(page, context.currentTime),
     });
     await classifyAndLog(context, entry, classification);
     if (classification.status === 'classified' && classification.eventType === 'seasonal-special') {
-      await applySeasonalPage(context, specialUrl, page, entry.title);
+      const eventId = await applySeasonalPage(context, specialUrl, page, entry.title);
+      finishPendingDiscovery(context, specialUrl, eventId);
+    } else {
+      finishPendingDiscovery(context, specialUrl);
     }
   }
-}
-
-function specialTitleFromPath(url: string): string {
-  const last = new URL(url).pathname.split('/').filter(Boolean).at(-1) ?? 'Sonderaktion';
-  return last.replace(/[_-]+/g, ' ');
 }
 
 async function refreshStoredSource(context: CycleContext, event: StoreEvent, source: StoreEventSource): Promise<void> {
@@ -634,6 +779,7 @@ async function syncEvents(
       discord: context.discord,
       store: context.store,
       now: context.currentTime,
+      clock: context.clock,
     });
     posted += 1;
   }
@@ -641,22 +787,32 @@ async function syncEvents(
 }
 
 export async function runCycle(options: CycleOptions): Promise<CycleResult> {
-  const currentTime = options.now?.() ?? new Date();
+  const clock = options.now ?? (() => new Date());
+  const currentTime = clock();
+  const firstRun = isFirstRun(options.store);
   const context: CycleContext = {
     ...options,
     health: options.health ?? new SourceHealthMonitor(options.store),
+    clock,
     currentTime,
+    firstRun,
     processedSources: new Set(),
     capturedEventIds: new Set(),
     specialPages: new Map(),
+    pendingDiscoveries: loadPendingDiscoveries(options.store),
   };
-  const firstRun = isFirstRun(context.store);
   const lists = await readLists(context, firstRun);
   const health = context.health.recordCycleHealth(lists.counts, lists.succeeded, currentTime);
   await logHealthTransition(context);
 
   if (!health.isBlind) {
-    for (const entry of combinedEntries(lists)) await processEntry(context, entry);
+    const entries = new Map(combinedEntries(lists).map((entry) => [normalizeLodestoneUrl(entry.url), entry]));
+    for (const pending of context.pendingDiscoveries.values()) {
+      if (pending.entry.source !== 'banner' && !entries.has(pending.entry.url)) {
+        entries.set(pending.entry.url, pending.entry);
+      }
+    }
+    for (const entry of entries.values()) await processEntry(context, entry);
     await processBannerRail(context, lists.bannerHtml);
     await refreshOpenEvents(context);
   }

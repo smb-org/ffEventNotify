@@ -11,6 +11,7 @@ export interface SyncScheduledEventOptions {
   discord: DiscordPort;
   store: Store;
   now?: Date;
+  clock?: () => Date;
 }
 
 const LOCATION_FALLBACK = 'Lodestone – Link in der Beschreibung';
@@ -39,7 +40,6 @@ function payloadFor(
   event: StoreEvent,
   sourceUrls: readonly string[],
   now: Date,
-  existing?: ScheduledEventSnapshot,
 ): ScheduledEventPayload | undefined {
   if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
   const nowMs = now.getTime();
@@ -53,12 +53,8 @@ function payloadFor(
   const descriptionUrl = urls.find((url) => url.length <= 980) ?? chosenUrl ?? '';
   const description = `${eventMarker(event.id)}${descriptionUrl ? `\n${descriptionUrl}` : ''}`;
 
-  let scheduledStart = startMs;
-  if (existing && startMs < nowMs) {
-    scheduledStart = Date.parse(existing.startUtc);
-  } else if (startMs < nowMs) {
-    scheduledStart = nowMs + 2 * 60_000;
-  }
+  const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
+  if (!(nowMs < scheduledStart && scheduledStart < endMs)) return undefined;
 
   return {
     name: event.title.slice(0, 100),
@@ -86,8 +82,9 @@ async function createReplacement(
   discord: DiscordPort,
   store: Store,
   now: Date,
+  clock?: () => Date,
 ): Promise<string | undefined> {
-  const payload = payloadFor(event, sourceUrls, now);
+  const payload = payloadFor(event, sourceUrls, clock?.() ?? now);
   if (!payload) return undefined;
   const created = await discord.createScheduledEvent(guildId, payload);
   setDiscordIds(store, event.id, { scheduledEventId: created.id });
@@ -101,13 +98,16 @@ export async function syncScheduledEvent({
   discord,
   store,
   now = new Date(),
+  clock,
 }: SyncScheduledEventOptions): Promise<string | undefined> {
-  const initialPayload = payloadFor(event, sourceUrls, now);
-  if (!initialPayload) return undefined;
+  if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
 
   const schedules = await discord.listScheduledEvents(guildId);
   const stored = event.scheduledEventId === null ? undefined : schedules.find((candidate) => candidate.id === event.scheduledEventId);
   const matched = stored ?? findByMarker(schedules, event.id);
+  const currentTime = clock?.() ?? now;
+  const initialPayload = payloadFor(event, sourceUrls, currentTime);
+  if (!initialPayload) return undefined;
   if (!matched) {
     const created = await discord.createScheduledEvent(guildId, initialPayload);
     setDiscordIds(store, event.id, { scheduledEventId: created.id });
@@ -116,10 +116,11 @@ export async function syncScheduledEvent({
 
   setDiscordIds(store, event.id, { scheduledEventId: matched.id });
   if (matched.status === 'COMPLETED' || matched.status === 'CANCELED') {
-    return createReplacement(event, sourceUrls, guildId, discord, store, now);
+    return createReplacement(event, sourceUrls, guildId, discord, store, currentTime, clock);
   }
 
-  const payload = payloadFor(event, sourceUrls, now, matched);
+  const editTime = clock?.() ?? currentTime;
+  const payload = payloadFor(event, sourceUrls, editTime);
   if (!payload || sameSchedule(matched, payload)) return matched.id;
 
   try {
@@ -130,7 +131,7 @@ export async function syncScheduledEvent({
     const refreshed = await discord.listScheduledEvents(guildId);
     const current = refreshed.find((candidate) => candidate.id === matched.id);
     if (current && (current.status === 'COMPLETED' || current.status === 'CANCELED')) {
-      return createReplacement(event, sourceUrls, guildId, discord, store, now);
+      return createReplacement(event, sourceUrls, guildId, discord, store, editTime, clock);
     }
     throw error;
   }

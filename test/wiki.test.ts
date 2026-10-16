@@ -40,7 +40,7 @@ test('wiki parser reports an unexpected page structure without throwing', () => 
   });
 });
 
-test('wiki comparison uses event dates with a one-day tolerance rather than English names', () => {
+test('wiki comparison requires both event boundaries to agree within one day', () => {
   const wikiEvents: WikiEvent[] = [{
     name: 'Moogle Treasure Trove: The First Hunt for Astronomy',
     startUtc: '2026-09-09T00:00:00.000Z',
@@ -51,7 +51,12 @@ test('wiki comparison uses event dates with a one-day tolerance rather than Engl
     startUtc: '2026-10-20T00:00:00.000Z',
     endUtc: '2026-10-25T00:00:00.000Z',
   }];
-  assert.deepEqual(compareWithKnown(wikiEvents, known), []);
+  assert.deepEqual(compareWithKnown(wikiEvents, known), wikiEvents);
+  assert.deepEqual(compareWithKnown(wikiEvents, [{
+    title: 'Mogry-Schatzkammer',
+    startUtc: '2026-09-10T00:00:00.000Z',
+    endUtc: '2026-10-19T23:59:59.999Z',
+  }]), []);
   assert.deepEqual(compareWithKnown(wikiEvents, [{
     title: 'Andere deutsche Meldung',
     startUtc: '2026-11-01T00:00:00.000Z',

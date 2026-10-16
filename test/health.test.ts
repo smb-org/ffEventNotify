@@ -46,6 +46,29 @@ test('an empty parsed list enters blind state immediately and recovery emits onc
   }
 });
 
+test('blind state stays latched through a failed probe and clears only after all required lists recover', () => {
+  const db = openDb(':memory:');
+  try {
+    const health = new SourceHealthMonitor(db);
+    const now = new Date('2026-10-16T10:00:00.000Z');
+
+    health.recordCycleHealth([0, 4], true, now);
+    const failedProbe = health.recordCycleHealth([], false, new Date('2026-10-16T11:00:00.000Z'));
+    assert.equal(failedProbe.isBlind, true);
+    assert.equal(failedProbe.transition, undefined);
+
+    const partialRecovery = health.recordCycleHealth([4, 0], true, new Date('2026-10-16T12:00:00.000Z'));
+    assert.equal(partialRecovery.isBlind, true);
+    assert.equal(partialRecovery.transition, undefined);
+
+    const recovered = health.recordCycleHealth([4, 3], true, new Date('2026-10-16T13:00:00.000Z'));
+    assert.equal(recovered.isBlind, false);
+    assert.deepEqual(recovered.transition, { type: 'recovered', atUtc: '2026-10-16T13:00:00.000Z' });
+  } finally {
+    db.close();
+  }
+});
+
 test('a successful cycle resets the consecutive failure count', () => {
   const db = openDb(':memory:');
   try {
