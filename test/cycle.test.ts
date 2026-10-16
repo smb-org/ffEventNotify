@@ -18,6 +18,7 @@ import type {
   ScheduledEventSnapshot,
 } from '../src/types.ts';
 import { runCycle } from '../src/cycle.ts';
+import { runDryRunCycle } from '../src/dry-run.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 const fixture = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -302,6 +303,38 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.equal(discord.logs.some((message) => message.includes("All Saints' Wake") && message.includes('Wiki')), false);
     assert.ok(discord.logs.some((message) => message.includes('Unsicheres Feld')));
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => event.discordMessageId !== null).length, 3);
+  } finally {
+    db.close();
+  }
+});
+
+test('dry-run reports fixture events and records Discord effects without contacting Discord', async () => {
+  const db = openDb(':memory:');
+  try {
+    const result = await runDryRunCycle({
+      store: db,
+      fetchText: fixtureFetcher(),
+      now: () => new Date(NOW),
+    });
+
+    assert.equal(result.cycle.firstRun, true);
+    assert.match(result.report, /Allerschutzheiligen/);
+    assert.match(result.report, /Fall Guys/);
+    assert.match(result.report, /Mog Mog-Kollektion/);
+    assert.match(result.report, /Belohnungen/);
+    assert.match(result.report, /Belohnungen nach Abschnitt/);
+    assert.match(result.report, /Quellen/);
+    assert.match(result.report, /Discord-Event/);
+    assert.match(result.report, /Status je Feld/);
+    assert.match(result.report, /UTC:/);
+    assert.match(result.report, /MESZ|MEZ/);
+    assert.match(result.report, /Gespeichert, aber nicht gepostet/);
+    assert.match(result.report, /beim Erststart unterdrückt|Event beendet/);
+    assert.match(result.report, /Log-Kanal-Meldungen/);
+    assert.match(result.report, /Abrufstatistik/);
+    assert.match(result.report, /Lodestone blind/);
+    assert.ok(result.discord.recordedActions.length > 0);
+    assert.equal(result.discord.connected, false);
   } finally {
     db.close();
   }

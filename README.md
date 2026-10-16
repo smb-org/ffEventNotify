@@ -10,6 +10,10 @@ Ein Discord-Bot für deutsche FINAL FANTASY XIV-Events. Er soll Lodestone-Meldun
 
 Bot-Token und Berechtigungen einrichten: siehe [docs/discord-setup.md](docs/discord-setup.md).
 
+## Trockenlauf
+
+Mit `pnpm dry-run` wird ein einzelner Lodestone-Abgleich ohne Discord-Verbindung ausgeführt; mit `pnpm dry-run -- --db ./data/dry-run.sqlite --dump ./lodestone-dump` bleiben die SQLite-Daten erhalten und die abgerufenen HTML/XML-Seiten werden gespeichert.
+
 Benötigte Bot-Rechte:
 
 - Kanäle ansehen

@@ -1,0 +1,256 @@
+Lodestone-Trockenlauf
+Zyklus: Erststart; erfasst: 38; würde posten: 3
+Lodestone blind: nein
+
+Würde als Event-Beitrag veröffentlicht (3)
+
+## Allerschutzheiligen 2026 - Schaurig, kostümiert und ... bärenstark?!
+Typ: Sonderseite
+Zeitraum: Do., 15.10.2026, 10:00 MESZ – Mo., 02.11.2026, 15:59 MEZ
+  UTC: 2026-10-15T08:00:00Z – 2026-11-02T14:59:00Z
+Status je Feld:
+  Titel: ok
+  Start: ok
+  Ende: ok
+  Belohnungen: ok
+  Beschreibung: ok
+Belohnungen nach Abschnitt:
+  Ausrüstung: Grizzlybär-Kopf, Grizzlybär-Anzug
+  Möbel: Grinse-Spukpilz, Starrblick-Spukpilz, Wachseelen-Kinderwagen, Allerschutzheiligen-Plakat 2025, Allerschutzheiligen-Tischgemälde 2025, Allerschutzheiligen-Plakat 2016
+Quellen:
+  https://de.finalfantasyxiv.com/lodestone/special/2026/All_Saints_Wake/tfrx2rkv52
+  https://de.finalfantasyxiv.com/lodestone/topics/detail/969680f04eaf5428962bff28f3f8962848e2c125
+Discord-Event: würde erstellt: Start Fr., 16.10.2026, 22:52 MESZ (2026-10-16T20:52:22.202Z), Ende Mo., 02.11.2026, 15:59 MEZ (2026-11-02T14:59:00Z), Ort: https://de.finalfantasyxiv.com/lodestone/special/2026/All_Saints_Wake/tfrx2rkv52
+
+## Kollabo-Event: FINAL FANTASY XIV x Fall Guys
+Typ: Sonderseite
+Zeitraum: Mi., 07.10.2026, 10:00 MESZ – Di., 27.10.2026, 15:59 MEZ
+  UTC: 2026-10-07T08:00:00Z – 2026-10-27T14:59:00Z
+Status je Feld:
+  Titel: ok
+  Start: ok
+  Ende: ok
+  Belohnungen: ok
+  Beschreibung: ok
+Belohnungen nach Abschnitt:
+  Spezielle Belohnungen: Bohnen-Strickmütze, Bohnen-Pullover, Bohnen-Hose, Bohnen-Schuhe, Matte Siegeskrone, Glänzende Siegeskrone, Rhiyes-Kennschlüssel, Ballsaal-Etikette: Bohnensieg, Pinke Bohne, Pegwin, Stolperville-Siegeskrone, Stolperville-Fahne, Elastische Stolperville-Donuts, Gepolsterte Stolperville-Wand, Stolperville-Regenbogen, Stolperville-Hammer, Notenrolle von „Everybody Falls“, Portraitmaterial (Stolperville 1), Portraitmaterial (Stolperville 2), Portraitmaterial (Stolperville 3), Zivil-Leitfaden „Ernährung“, Teleport-Ticket des Gold Saucers, Zusatzfarbstoff 1
+Quellen:
+  https://de.finalfantasyxiv.com/lodestone/special/fallguys/
+  https://de.finalfantasyxiv.com/lodestone/topics/detail/67df2c10d0b7467e5a006dbadd025c629dbfe8bc
+Discord-Event: würde erstellt: Start Fr., 16.10.2026, 22:52 MESZ (2026-10-16T20:52:22.203Z), Ende Di., 27.10.2026, 15:59 MEZ (2026-10-27T14:59:00Z), Ort: https://de.finalfantasyxiv.com/lodestone/special/fallguys/
+
+## Mog Mog-Kollektion Astronomische Abenteuer - Teil 1
+Typ: Sonderseite
+Zeitraum: Mi., 09.09.2026, 10:00 MESZ – Mo., 19.10.2026, 16:59 MESZ
+  UTC: 2026-09-09T08:00:00Z – 2026-10-19T14:59:00Z
+Status je Feld:
+  Titel: ok
+  Start: ok
+  Ende: ok
+  Belohnungen: ok
+  Beschreibung: ok
+Belohnungen nach Abschnitt:
+  Eintausch: Uolon-Horn
+  Eintauschbare Gegenstände: Mameshiba-Halstuch, Ramuh-Kristall, Notenrolle von „The Legendary Beast“, Himmelsänger-Unterhemd, Schürze des Facharbeiters, Froschkopf, Froschanzug, Ballsaal-Etikette: Taktvolle Belehrung, Tugendhafter Begleiter, Leichter Ishgarder Rossharnisch, Blauer-Kamuy-Pfeife, MGP-Platinkarte, Käsefondue-Set, Korpokkur-Chronometer, Bambus-Paravent, Mantel des trotzigen Duellanten, Mantel des roten Diebes, Mantel des Geisterdiebes, Notenrolle von „What Is Love?“, Vergilbte Sagenleder-Karte, Vergilbte Epenleder-Karten, Ananta-Karte, Kotokaze-Karte, Chocomoppel-Karte, Magazin „Moderne Ästhetik - Lange Haare“, Domakin, Dhalmel-Horn, Smaragd-Rossharnisch, Holo-Prisma „Jobmeisterschaft“
+Quellen:
+  https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/lsekubsk45
+  https://de.finalfantasyxiv.com/lodestone/topics/detail/62cea9ac15920b5fab2ba123100b2f95e5d3c244
+Discord-Event: würde erstellt: Start Fr., 16.10.2026, 22:52 MESZ (2026-10-16T20:52:22.203Z), Ende Mo., 19.10.2026, 16:59 MESZ (2026-10-19T14:59:00Z), Ort: https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/lsekubsk45
+
+Gespeichert, aber nicht gepostet (35)
+- Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Veröffentlichung der Details zu Patch 7.57! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Veröffentlichung der Details zu Patch 7.56! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Die Sonderseite zu Patch 7.5 „Trail to the Heavens“ wurde aktualisiert! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Fest der Wiedergeburt 2026 - Was am Ende des Weges wartet ... — beim Erststart unterdrückt: Event bereits beendet.
+- Runde 3 des Merchandises fürs Fan Festival 2026 ist jetzt zur Vorbestellung erhältlich! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Feuermondreigen 2026 - ... Und erst im Morgenrot kommen wir nach Haus! — beim Erststart unterdrückt: Event bereits beendet.
+- Die Yo-kai sind los! 2026 — beim Erststart unterdrückt: Event bereits beendet.
+- Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Veröffentlichung der Details zu Patch 7.55! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Lasst euch die Livekonzerte des Fan Festivals 2026 in Berlin nicht entgehen! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Am 25. Juli wird es endlich Zeit fürs Fan Festival 2026 in Berlin! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Der Brief des Produzenten LIVE Teil 93 wird am Samstag, den 25. Juli vom Fan Festival in Berlin übertragen! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung des „Fit fürs Fan Festival“-Gewinnspiels — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Der Ticketverkauf für die kostenpflichtigen Konzert-Livestreams zum Fan Festival 2026 in Berlin ist eröffnet! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Runde 2 für neue Gegenstände zum Fan Festival 2026 & Rabattaktion! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung der Künstler der Fan Festival-Konzerte in Berlin! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Berlin — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- [Folge-News]Wartung aller Welten (12-13. Okt.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News]Notwartung aller Welten (17. Sep.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News][Aether] Notwartung der Welt Gilgamesh (14. Sep.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News][Crystal] Notwartung der Welt Diabolos (11. Sep.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Wartung][Crystal] Notwartung der Welt Diabolos (11. Sep.) — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- [Folge-News]Notwartung aller Welten (9. Sep.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News]Wartung aller Welten (8. Sep.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News]Notwartung aller Welten (14. Aug.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News]Notwartung aller Welten (7. Aug.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News]Wartung aller Welten (28. Jul.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News][Crystal] Notwartung der Welt Balmung (21. Jul.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Folge-News]Wartung aller Welten (23. Jun.): Folgenews — beim Erststart unterdrückt: Event bereits beendet.
+- [Wartung]Notwartung aller Welten (12. Jun.) — beim Erststart unterdrückt: Event bereits beendet.
+- [Wartung]Wartung aller Welten (2. Jun.) — beim Erststart unterdrückt: Event bereits beendet.
+
+Log-Kanal-Meldungen, die gesendet würden (155)
+- Nicht klassifiziert: Neue optionale Gegenstände erhältlich! (https://de.finalfantasyxiv.com/lodestone/topics/detail/ac72281cca93b18d1b3a53bd6aac33404cfb76b1)
+- Nicht klassifiziert: Zwei neue Alben sind ab jetzt digital und zur Vorbestellung erhältlich! (https://de.finalfantasyxiv.com/lodestone/topics/detail/253d040d29212dc0b82a378916bc22a1cfbd9c74)
+- Nicht klassifiziert: Startdatum für Saison 1 auf dem Brett der Bestie (https://de.finalfantasyxiv.com/lodestone/topics/detail/7bf7d30ca5cd6a070407c97c2cd3c04f57430c40)
+- Nicht klassifiziert: Der TRAIL TO THE HEAVENS: FINAL FANTASY XIV Original Soundtrack ist jetzt digital erhältlich! (https://de.finalfantasyxiv.com/lodestone/topics/detail/f1eed4cf9e512b944fc466d3355aebd38348c654)
+- Nicht klassifiziert: The Unending Journey – Der englische Community-Stream (https://de.finalfantasyxiv.com/lodestone/topics/detail/0ee4d2f03ee6f3d99a89b95eb52735ce9b3ebed9)
+- Nicht klassifiziert: FINAL FANTASY XIV kehrt zur PAX Australia 2026 zurück! (https://de.finalfantasyxiv.com/lodestone/topics/detail/94f2fd5a8a08543963a99f3bb35738ad08b8b8b4)
+- Nicht klassifiziert: Veröffentlichung der achten Kurzgeschichte aus der Serie „Im Schein der Goldenen Sonne“! (https://de.finalfantasyxiv.com/lodestone/topics/detail/119a967548450b1019e155e205c95f429ad5983b)
+- Nicht klassifiziert: Into the Ring: FINAL FANTASY XIV Themes from the Arcadion ist zur Vorbestellung erhältlich! (https://de.finalfantasyxiv.com/lodestone/topics/detail/62fae76210df93a75cdc2cab62572bc0c59eeeb1)
+- Nicht klassifiziert: Zum Start der 1. Saison auf dem Brett der Bestie (https://de.finalfantasyxiv.com/lodestone/topics/detail/53d4157970ebb40da02ab46190cfb3ab27e31c45)
+- Nicht klassifiziert: Matching innerhalb derselben Region mit Vorab-Implementierung in Japan (https://de.finalfantasyxiv.com/lodestone/topics/detail/3465b7968cd8beb82980fdeb811be124b305105b)
+- Nicht klassifiziert: 50 % Rabatt auf die digitalen Collector's Edition Upgrades! (https://de.finalfantasyxiv.com/lodestone/topics/detail/4247abc2a3a67465587024a1bf5ff7c704bb7212)
+- Nicht klassifiziert: Veröffentlichung der siebten Kurzgeschichte aus der Serie „Im Schein der Goldenen Sonne“! (https://de.finalfantasyxiv.com/lodestone/topics/detail/f743d9e5add9e342b37ca25e0fb5d988c1de396f)
+- Nicht klassifiziert: Ankündigung der instax™-Fotokampagne auf X (https://de.finalfantasyxiv.com/lodestone/topics/detail/989bd2cb4d5ec404139a2406990aeb017594facf)
+- Nicht klassifiziert: Die PvP-Serie 11 ist zu Ende und Serie 12 hat begonnen (https://de.finalfantasyxiv.com/lodestone/topics/detail/0aa579530ee986a480f0e48688a64bf791deb09d)
+- Nicht klassifiziert: Veröffentlichung der sechsten Kurzgeschichte aus der Serie „Im Schein der Goldenen Sonne“! (https://de.finalfantasyxiv.com/lodestone/topics/detail/1f53f6e2fc3f551729164e21c67246a6d419afa5)
+- Nicht klassifiziert: Der DAWNTRAIL: FINAL FANTASY XIV Original Soundtrack ist jetzt bei Streaming-Diensten verfügbar! (https://de.finalfantasyxiv.com/lodestone/topics/detail/c1deddd6a67ca4242fe83a68f97eedd8ce497567)
+- Nicht klassifiziert: Kommt mit zur Tokyo Game Show 2026! (https://de.finalfantasyxiv.com/lodestone/topics/detail/8702eb665cf2f026a42733e2179972a66f4a0007)
+- Nicht klassifiziert: Informationen zu den Abonnementgebühren der Nintendo Switch™ 2-Version von FFXIV (https://de.finalfantasyxiv.com/lodestone/topics/detail/c6e5e72ab7519d515e3289a79f5e9a01ec95e804)
+- Nicht klassifiziert: Neuer optionaler Gegenstand erhältlich! (https://de.finalfantasyxiv.com/lodestone/topics/detail/a5c85851d0a7a6ba63fc27bbac994e6eef733466)
+- Nicht klassifiziert: Veröffentlichung der fünften Kurzgeschichte aus der Serie „Im Schein der Goldenen Sonne“! (https://de.finalfantasyxiv.com/lodestone/topics/detail/38864f817ccba8f8f983d8958b11962f62a93abf)
+- Nicht klassifiziert: Neuer optionaler Gegenstand & Jubiläumsrabatte! (https://de.finalfantasyxiv.com/lodestone/topics/detail/9a3e43727a695514ad6636c1d096804539433810)
+- Nicht klassifiziert: FFXIV kommt zur gamescom 2026! (https://de.finalfantasyxiv.com/lodestone/topics/detail/b86e5a188e3221be8b21204801b4e1ec4372ac40)
+- Nicht klassifiziert: Veröffentlichung der Zusammenfassung des Briefs des Produzenten LIVE - Teil 93 (https://de.finalfantasyxiv.com/lodestone/topics/detail/741873f1f41c83004b693f1d18842462f2ff84e5)
+- Nicht klassifiziert: Ankündigung des Viertelfinales der Crystalline Conflict Regional Championship 2026 Japan Powered by Logicool G™! (https://de.finalfantasyxiv.com/lodestone/topics/detail/5a96ba40c2e31cbaeb154e2a1de2c5ce2bcb6706)
+- Nicht klassifiziert: Neue optionale Gegenstände und Rabatte! (https://de.finalfantasyxiv.com/lodestone/topics/detail/d504b9e767b9fb8888b066804907ffe3720e51bc)
+- Nicht klassifiziert: Einführung zur Nutzung der Nintendo Switch™ 2-Version von FFXIV (https://de.finalfantasyxiv.com/lodestone/topics/detail/1a302aa28dfeb483ff19a279f5c3ec8400c460dc)
+- Nicht klassifiziert: Die 20. Saison von Crystalline Conflict ist abgeschlossen, Ring frei für die 21. Saison! (https://de.finalfantasyxiv.com/lodestone/topics/detail/fcc352bde94a3d42acebce5cd8233bca09bcc716)
+- Nicht klassifiziert: FFXIV für Nintendo Switch™ 2 erscheint am 4. August! Jetzt vorbestellen und 30 % Rabatt sichern! (https://de.finalfantasyxiv.com/lodestone/topics/detail/faabe23f6fec1450b6da4917be9e8df6abf82e6c)
+- Nicht klassifiziert: Die Teaser-Seite zu FINAL FANTASY XIV: Evercold wurde aktualisiert! (https://de.finalfantasyxiv.com/lodestone/topics/detail/55ca91c7dea7c0444d4bdc662a4dccff39cefa41)
+- Kurzlink nicht aufgelöst (short link unresolved): Ankündigung des Stream-Kits zum FFXIV Fan Festival 2026 in Berlin (https://de.finalfantasyxiv.com/lodestone/topics/detail/69ae194dcc0f72b30a3c2d40bd176d19b654c8f0)
+- Nicht klassifiziert: FINAL FANTASY XIV reist zur Otakon 2026! (https://de.finalfantasyxiv.com/lodestone/topics/detail/9dc7d411eebcbe85a6fde044961d41030b33db43)
+- Nicht klassifiziert: Trotzt mit coolen 50 % Rabatt auf Dawntrail der Sommerhitze – jetzt mit neuen Angeboten! (https://de.finalfantasyxiv.com/lodestone/topics/detail/8fbe169730ccf334fa2029fbe9f0df014ea556a3)
+- Nicht klassifiziert: Auf in die letzte Phase der 20. Saison von Crystalline Conflict! (https://de.finalfantasyxiv.com/lodestone/topics/detail/e0aabd6871cdda42b7edbd07b4543e61172feb9c)
+- Nicht berücksichtigt: [Folge-News]Wartung der Mogry-Station / des Online-Shops (15. Okt.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/3d3cdb7b8fe1d9b73cf7f35bdfd499e113ae7133)
+- Nicht berücksichtigt: [Wartung]Notwartung weltenübergreifender Funktionen des japanischen Datenzentrums (15. Okt.) (https://de.finalfantasyxiv.com/lodestone/news/detail/a2528f52279b87319a3f8c07c48b33ca0852100d)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (15. Okt.) (https://de.finalfantasyxiv.com/lodestone/news/detail/5d1809b76f6c2577fb2c64939438e6c15ce79eac)
+- Nicht berücksichtigt: [Folge-News]Notwartung des Online-Shops (13. Okt.):  Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/f66e34c262fa4a7871f1b9279e084b95b36a5f34)
+- Nicht berücksichtigt: [Folge-News]Wartung des Lodestone (12.-13. Okt.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/cb7e55ce22266d72546471ae1aaa2f3a294d719c)
+- Nicht berücksichtigt: [Folge-News]Wartung der Companion-App (12.-13. Okt.) : Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/60c43a88d89fd460958d02bc6beb5890c55597d8)
+- Folge-News ohne Original: [Folge-News]Wartung aller Welten (12-13. Okt.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/e06c2ed28cd282761a0204f7c0af613bb873cb3e)
+- Nicht berücksichtigt: [Wartung]Notwartung des Online-Shops (13. Okt.) (https://de.finalfantasyxiv.com/lodestone/news/detail/ed193e8d04ef91bbcf85eccc8ecf08c7fea04d9a)
+- Nicht berücksichtigt: [Wartung]Wartung des Lodestone (12-13. Okt.) (https://de.finalfantasyxiv.com/lodestone/news/detail/1fd1715ecf982e5186d38e923533de76aa1bfb0e)
+- Nicht berücksichtigt: [Wartung]Wartung der Companion-App (12-13. Okt.) (https://de.finalfantasyxiv.com/lodestone/news/detail/cf070057693847adecda0e123fd680a3b5c20ffe)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station (30. Sep.) (https://de.finalfantasyxiv.com/lodestone/news/detail/c5bcedf3e13add05775b67771c874229c41db075)
+- Nicht berücksichtigt: [Wartung]Notwartung der Server-Backup-Funktion (25. Sep.) (https://de.finalfantasyxiv.com/lodestone/news/detail/07a16b33c557c56b90cb1f96ecd03917487b5041)
+- Folge-News ohne Original: [Folge-News]Notwartung aller Welten (17. Sep.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/94eef6076e571326f2bc1de1929626755ed8b0e9)
+- Folge-News ohne Original: [Folge-News][Aether] Notwartung der Welt Gilgamesh (14. Sep.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/be2443eb4e4fc1df75a455dbac1e007069676fdb)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station (14. Sep.) (https://de.finalfantasyxiv.com/lodestone/news/detail/80028c5859413ae0afa22c809acdb03ec7e3bdad)
+- Folge-News ohne Original: [Folge-News][Crystal] Notwartung der Welt Diabolos (11. Sep.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/20fcc2aff470d1a1b6e7db223c0653eceb2c1d97)
+- Folge-News ohne Original: [Folge-News]Notwartung aller Welten (9. Sep.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/2e6791fde8fe1ef06581c72017b60784b8282f78)
+- Nicht berücksichtigt: [Folge-News]Wartung der Companion-App (8. Sep.) : Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/94aa13907b48d932c2c65f2aca81a8c8bf938173)
+- Nicht berücksichtigt: [Folge-News]Wartung des Lodestone (8. Sep.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/135b42ae56cc7f9c49b87fbc5584d84fb698dc0f)
+- Folge-News ohne Original: [Folge-News]Wartung aller Welten (8. Sep.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/d3b87ccc77b83e75fc152f3a80b6c8eba3349ff8)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (10. Sep.) (https://de.finalfantasyxiv.com/lodestone/news/detail/759b4710cbe5bc12ce92d0f40d5fb7a35bb8ef65)
+- Nicht berücksichtigt: [Wartung]Wartung des Lodestone (8. Sep.) (https://de.finalfantasyxiv.com/lodestone/news/detail/62d4ee52886e93afba3c84c9d31444e0ac19a812)
+- Nicht berücksichtigt: [Wartung]Wartung der Companion-App (8. Sep.) (https://de.finalfantasyxiv.com/lodestone/news/detail/d52ea3661bf504df29420f6d060390b8782adeeb)
+- Nicht berücksichtigt: [Folge-News]Wartung der Mogry-Station / des Online-Shops (27. Aug.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/f2b24c40f3da43e257acdf77180ac0a269ac6897)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (27. Aug.) (https://de.finalfantasyxiv.com/lodestone/news/detail/86d3e078babb8042db7bc7e9624dfb3beee73a5c)
+- Folge-News ohne Original: [Folge-News]Notwartung aller Welten (14. Aug.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/cbfa140f2f171b38e19006e0afcd6ca2bb1b38dd)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (12. Aug.) (https://de.finalfantasyxiv.com/lodestone/news/detail/ddbcd1ba752d3dd3ebe6b83103e43453ca3f1d1b)
+- Folge-News ohne Original: [Folge-News]Notwartung aller Welten (7. Aug.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/6f29434fa3daf0f28ae851e8c58c13d591b61a86)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station (31. Jul.) (https://de.finalfantasyxiv.com/lodestone/news/detail/930bf4f629b54ef5186eaba075787f19b1bf7da4)
+- Nicht berücksichtigt: [Folge-News]Wartung der Companion-App (28. Jul.): Änderung der Dauer (https://de.finalfantasyxiv.com/lodestone/news/detail/00df9763585dec003e5831e3ece7589140edbcec)
+- Nicht berücksichtigt: [Folge-News]Wartung des Lodestone (28. Jul.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/d5f9e70b92bcd55eec18dfec6cf849f80a1b11ee)
+- Folge-News ohne Original: [Folge-News]Wartung aller Welten (28. Jul.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/ccd0b8d86d012c9046f474bf89c592b7429164e6)
+- Nicht berücksichtigt: [Wartung]Wartung des Lodestone (28. Jul.) (https://de.finalfantasyxiv.com/lodestone/news/detail/e238b3115a47380079cc703f5dc142551ea1fcdb)
+- Nicht berücksichtigt: [Wartung]Wartung der Companion-App (28. Jul.) (https://de.finalfantasyxiv.com/lodestone/news/detail/70d217a3d23c033f936c7d6635081865c4527cbc)
+- Nicht berücksichtigt: [Wartung]Wartung der Anmeldeseite für Spieler-Events (27. Jul.) (https://de.finalfantasyxiv.com/lodestone/news/detail/5e107ea332590e78baddcdd44f103ff87f020767)
+- Folge-News ohne Original: [Folge-News][Crystal] Notwartung der Welt Balmung (21. Jul.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/52aa5d7e5009fcec618e8ddf8cbbd1dbd73a6d79)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (17. Jul.) (https://de.finalfantasyxiv.com/lodestone/news/detail/1abf9fad6a962df5c48fd26cf3c1ae583b631231)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station (9. Jul.) (https://de.finalfantasyxiv.com/lodestone/news/detail/8098aabb7b871e981ecb40ea4b06c9475aaf89e3)
+- Folge-News ohne Original: [Folge-News]Wartung aller Welten (23. Jun.): Folgenews (https://de.finalfantasyxiv.com/lodestone/news/detail/70302b2f1c4f9da68e33409f28abdb87507c1647)
+- Nicht berücksichtigt: [Wartung]Wartung der Kontoverwaltung (22. Juni) (https://de.finalfantasyxiv.com/lodestone/news/detail/9e7c19b999a7dddbe5086fde46cfd3205e5f0754)
+- Nicht berücksichtigt: [Wartung]Wartung der Companion-App (22. Jun.) (https://de.finalfantasyxiv.com/lodestone/news/detail/770aa580e72ed68a34b87840367cccde1a902564)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (19. Jun.) (https://de.finalfantasyxiv.com/lodestone/news/detail/b66d34eb3f4ad629ecbedaba781a993504da85a4)
+- Nicht berücksichtigt: [Wartung]Notwartung der Companion-App (12. Jun.) (https://de.finalfantasyxiv.com/lodestone/news/detail/4dcd2a05d60d0b270870220808b264ef3feacdb2)
+- Nicht berücksichtigt: [Wartung]Notwartung der Server-Backup-Funktion (9. Jun.) (https://de.finalfantasyxiv.com/lodestone/news/detail/69b90236ef4007b8fe9eea8fb660510790662e6f)
+- Nicht berücksichtigt: [Wartung]Wartung des Lodestone (2. Jun.) (https://de.finalfantasyxiv.com/lodestone/news/detail/e601e21678252efc9128a60f811d70b35c1ae500)
+- Nicht berücksichtigt: [Wartung]Wartung der Companion-App (2. Jun.) (https://de.finalfantasyxiv.com/lodestone/news/detail/2be4587255a8a862593bdaf004d80f6e887bff9f)
+- Nicht berücksichtigt: [Wartung]Wartung der Mogry-Station / des Online-Shops (29. Mai) (https://de.finalfantasyxiv.com/lodestone/news/detail/097fdd8bfa2c41fc6041ff6170f19bfe58bf6446)
+- Nicht berücksichtigt:  (https://de.finalfantasyxiv.com/lodestone/special/friend_recruit/)
+- Unsicheres Feld „Start“ bei „Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Veröffentlichung der Details zu Patch 7.57!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Veröffentlichung der Details zu Patch 7.57!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Veröffentlichung der Details zu Patch 7.57!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Veröffentlichung der Details zu Patch 7.56!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Veröffentlichung der Details zu Patch 7.56!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Veröffentlichung der Details zu Patch 7.56!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Die Sonderseite zu Patch 7.5 „Trail to the Heavens“ wurde aktualisiert!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Die Sonderseite zu Patch 7.5 „Trail to the Heavens“ wurde aktualisiert!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Die Sonderseite zu Patch 7.5 „Trail to the Heavens“ wurde aktualisiert!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Belohnungen“ bei „Fest der Wiedergeburt 2026 - Was am Ende des Weges wartet ...“: No recognized reward section headings were found.
+- Unsicheres Feld „Start“ bei „Runde 3 des Merchandises fürs Fan Festival 2026 ist jetzt zur Vorbestellung erhältlich!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Runde 3 des Merchandises fürs Fan Festival 2026 ist jetzt zur Vorbestellung erhältlich!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Runde 3 des Merchandises fürs Fan Festival 2026 ist jetzt zur Vorbestellung erhältlich!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Belohnungen“ bei „Feuermondreigen 2026 - ... Und erst im Morgenrot kommen wir nach Haus!“: No recognized reward section headings were found.
+- Unsicheres Feld „Belohnungen“ bei „Die Yo-kai sind los! 2026“: No recognized reward section headings were found.
+- Unsicheres Feld „Start“ bei „Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Veröffentlichung der Details zu Patch 7.55!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Veröffentlichung der Details zu Patch 7.55!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Veröffentlichung der Details zu Patch 7.55!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Lasst euch die Livekonzerte des Fan Festivals 2026 in Berlin nicht entgehen!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Lasst euch die Livekonzerte des Fan Festivals 2026 in Berlin nicht entgehen!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Lasst euch die Livekonzerte des Fan Festivals 2026 in Berlin nicht entgehen!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Am 25. Juli wird es endlich Zeit fürs Fan Festival 2026 in Berlin!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Am 25. Juli wird es endlich Zeit fürs Fan Festival 2026 in Berlin!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Am 25. Juli wird es endlich Zeit fürs Fan Festival 2026 in Berlin!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Ende“ bei „Der Brief des Produzenten LIVE Teil 93 wird am Samstag, den 25. Juli vom Fan Festival in Berlin übertragen!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Der Brief des Produzenten LIVE Teil 93 wird am Samstag, den 25. Juli vom Fan Festival in Berlin übertragen!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Ankündigung des „Fit fürs Fan Festival“-Gewinnspiels“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Ankündigung des „Fit fürs Fan Festival“-Gewinnspiels“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Ankündigung des „Fit fürs Fan Festival“-Gewinnspiels“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Der Ticketverkauf für die kostenpflichtigen Konzert-Livestreams zum Fan Festival 2026 in Berlin ist eröffnet!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Der Ticketverkauf für die kostenpflichtigen Konzert-Livestreams zum Fan Festival 2026 in Berlin ist eröffnet!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Der Ticketverkauf für die kostenpflichtigen Konzert-Livestreams zum Fan Festival 2026 in Berlin ist eröffnet!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Runde 2 für neue Gegenstände zum Fan Festival 2026 & Rabattaktion!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Runde 2 für neue Gegenstände zum Fan Festival 2026 & Rabattaktion!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Runde 2 für neue Gegenstände zum Fan Festival 2026 & Rabattaktion!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Ankündigung der Künstler der Fan Festival-Konzerte in Berlin!“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Ankündigung der Künstler der Fan Festival-Konzerte in Berlin!“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Ankündigung der Künstler der Fan Festival-Konzerte in Berlin!“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Start“ bei „Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Berlin“: No labeled event date and time was found in the article body.
+- Unsicheres Feld „Ende“ bei „Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Berlin“: Der Beitrag nennt keinen verlässlichen Endzeitpunkt.
+- Unsicheres Feld „Belohnungen“ bei „Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Berlin“: Rewards are not extracted from generic topics.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Wartung aller Welten (12-13. Okt.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Notwartung aller Welten (17. Sep.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News][Aether] Notwartung der Welt Gilgamesh (14. Sep.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News][Crystal] Notwartung der Welt Diabolos (11. Sep.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Start“ bei „[Wartung][Crystal] Notwartung der Welt Diabolos (11. Sep.)“: The article has no [Datum & Uhrzeit] block.
+- Unsicheres Feld „Ende“ bei „[Wartung][Crystal] Notwartung der Welt Diabolos (11. Sep.)“: The article has no [Datum & Uhrzeit] block.
+- Unsicheres Feld „Belohnungen“ bei „[Wartung][Crystal] Notwartung der Welt Diabolos (11. Sep.)“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Notwartung aller Welten (9. Sep.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Wartung aller Welten (8. Sep.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Notwartung aller Welten (14. Aug.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Notwartung aller Welten (7. Aug.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Wartung aller Welten (28. Jul.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News][Crystal] Notwartung der Welt Balmung (21. Jul.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Folge-News]Wartung aller Welten (23. Jun.): Folgenews“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Wartung]Notwartung aller Welten (12. Jun.)“: Rewards are not extracted from maintenance notices.
+- Unsicheres Feld „Belohnungen“ bei „[Wartung]Wartung aller Welten (2. Jun.)“: Rewards are not extracted from maintenance notices.
+- Die Statusmeldung „Läuft gerade“ wurde neu erstellt und angeheftet.
+- Erststart: 38 erfasst, 3 gepostet
+
+Abrufstatistik:
+- Anfragen: 335; 304: 9; Fehler: 0
+- Dauer: 367.79 s gesamt; 227.30 s kumulierte Anfragezeit

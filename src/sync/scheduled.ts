@@ -36,7 +36,7 @@ function eventMarker(eventId: number): string {
   return `Event-ID: ${eventId}`;
 }
 
-function payloadFor(
+export function scheduledEventPayloadFor(
   event: StoreEvent,
   sourceUrls: readonly string[],
   now: Date,
@@ -65,6 +65,26 @@ function payloadFor(
   };
 }
 
+export function scheduledEventUnavailableReason(event: StoreEvent, now: Date): string {
+  if (event.startStatus !== 'ok' || !event.startUtc) {
+    return `Start ist unsicher${event.startReason ? `: ${event.startReason}` : '.'}`;
+  }
+  if (event.endStatus !== 'ok' || !event.endUtc) {
+    return `Ende ist unsicher${event.endReason ? `: ${event.endReason}` : '.'}`;
+  }
+  const nowMs = now.getTime();
+  const startMs = Date.parse(event.startUtc);
+  const endMs = Date.parse(event.endUtc);
+  if (!Number.isFinite(nowMs) || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return 'Start- oder Endzeit ist kein gültiges Datum.';
+  }
+  if (endMs <= nowMs) return 'Das Event ist bereits beendet.';
+  if (endMs <= startMs) return 'Das Ende liegt nicht nach dem Start.';
+  const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
+  if (!(nowMs < scheduledStart && scheduledStart < endMs)) return 'Der gültige Start läge nicht vor dem Ende.';
+  return 'Es konnte kein passender Discord-Event-Zeitraum berechnet werden.';
+}
+
 function sameSchedule(event: ScheduledEventSnapshot, payload: ScheduledEventPayload): boolean {
   return event.name === payload.name && event.startUtc === payload.startUtc && event.endUtc === payload.endUtc &&
     event.location === payload.location && event.description === payload.description;
@@ -84,7 +104,7 @@ async function createReplacement(
   now: Date,
   clock?: () => Date,
 ): Promise<string | undefined> {
-  const payload = payloadFor(event, sourceUrls, clock?.() ?? now);
+  const payload = scheduledEventPayloadFor(event, sourceUrls, clock?.() ?? now);
   if (!payload) return undefined;
   const created = await discord.createScheduledEvent(guildId, payload);
   setDiscordIds(store, event.id, { scheduledEventId: created.id });
@@ -106,7 +126,7 @@ export async function syncScheduledEvent({
   const stored = event.scheduledEventId === null ? undefined : schedules.find((candidate) => candidate.id === event.scheduledEventId);
   const matched = stored ?? findByMarker(schedules, event.id);
   const currentTime = clock?.() ?? now;
-  const initialPayload = payloadFor(event, sourceUrls, currentTime);
+  const initialPayload = scheduledEventPayloadFor(event, sourceUrls, currentTime);
   if (!initialPayload) return undefined;
   if (!matched) {
     const created = await discord.createScheduledEvent(guildId, initialPayload);
@@ -120,7 +140,7 @@ export async function syncScheduledEvent({
   }
 
   const editTime = clock?.() ?? currentTime;
-  const payload = payloadFor(event, sourceUrls, editTime);
+  const payload = scheduledEventPayloadFor(event, sourceUrls, editTime);
   if (!payload || sameSchedule(matched, payload)) return matched.id;
 
   try {

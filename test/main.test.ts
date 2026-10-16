@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CYCLE_INTERVAL_MS, startHourlyScheduler } from '../src/main.ts';
+import { readConfig } from '../src/config.ts';
+import { CYCLE_INTERVAL_MS, parseCliArgs, startHourlyScheduler } from '../src/main.ts';
 
 class FakeClock {
   private time = 0;
@@ -74,4 +75,20 @@ test('hourly scheduler logs a skipped tick and never overlaps a long cycle', asy
   await scheduler;
 
   assert.equal(maximumActive, 1);
+});
+
+test('dry-run config works without environment while production still requires Discord credentials', () => {
+  const dryRunConfig = readConfig({ dryRun: true, env: {} });
+
+  assert.equal(dryRunConfig.dbPath, ':memory:');
+  assert.throws(() => readConfig({ env: {} }), /DISCORD_TOKEN/);
+});
+
+test('dry-run CLI accepts an optional database and dump directory', () => {
+  assert.deepEqual(parseCliArgs(['--dry-run', '--db', './dry-run.sqlite', '--dump', './lodestone-dump']), {
+    dryRun: true,
+    dbPath: './dry-run.sqlite',
+    dumpDir: './lodestone-dump',
+  });
+  assert.throws(() => parseCliArgs(['--dry-run', '--db']), /Missing path/);
 });

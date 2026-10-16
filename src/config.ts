@@ -11,14 +11,37 @@ export interface AppConfig {
   fixtureDumpDir: string;
 }
 
-export function readConfig(): AppConfig {
-  if (existsSync('.env')) {
+export interface DryRunConfig {
+  dbPath: string;
+  fixtureDumpDir?: string;
+}
+
+export interface ReadConfigOptions {
+  dryRun?: boolean;
+  dbPath?: string;
+  dumpDir?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export function readConfig(options: ReadConfigOptions & { dryRun: true }): DryRunConfig;
+export function readConfig(options?: ReadConfigOptions & { dryRun?: false }): AppConfig;
+export function readConfig(options: ReadConfigOptions = {}): AppConfig | DryRunConfig {
+  if (options.dryRun) {
+    return {
+      dbPath: options.dbPath ?? ':memory:',
+      ...(options.dumpDir ? { fixtureDumpDir: options.dumpDir } : {}),
+    };
+  }
+
+  if (options.env === undefined && existsSync('.env')) {
     process.loadEnvFile('.env');
   }
 
+  const environment = options.env ?? process.env;
+
   const missing: string[] = [];
   const readRequired = (name: string): string => {
-    const value = process.env[name]?.trim();
+    const value = environment[name]?.trim();
     if (!value) {
       missing.push(name);
       return '';

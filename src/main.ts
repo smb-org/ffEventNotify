@@ -15,6 +15,7 @@ import {
   type TextChannel,
 } from 'discord.js';
 import { readConfig } from './config.ts';
+import { createTrackedFetch, FetchMetrics, runDryRunCycle } from './dry-run.ts';
 import { SourceHealthMonitor } from './health.ts';
 import { runCycle } from './cycle.ts';
 import { openDb } from './store.ts';
@@ -239,7 +240,7 @@ export async function startHourlyScheduler(
   await activeCycle;
 }
 
-function createQueuedFetchText(queue: LodestoneRequestQueue): FetchText {
+export function createQueuedFetchText(queue: LodestoneRequestQueue): FetchText {
   const cache = new Map<string, { body: string; finalUrl: string; etag?: string; lastModified?: string }>();
   return async (url, options) => {
     const previous = cache.get(url);
@@ -266,6 +267,59 @@ function createQueuedFetchText(queue: LodestoneRequestQueue): FetchText {
     });
     return { status: result.status, body, finalUrl };
   };
+}
+
+export interface CliOptions {
+  dryRun: boolean;
+  dbPath?: string;
+  dumpDir?: string;
+}
+
+export function parseCliArgs(args: readonly string[]): CliOptions {
+  let dryRun = false;
+  let dbPath: string | undefined;
+  let dumpDir: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--dry-run') {
+      dryRun = true;
+    } else if (argument === '--db' || argument === '--dump') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('--')) throw new Error(`Missing path after ${argument}.`);
+      if (argument === '--db') dbPath = value;
+      else dumpDir = value;
+      index += 1;
+    } else {
+      throw new Error(`Unknown argument: ${argument}`);
+    }
+  }
+  if (!dryRun && (dbPath !== undefined || dumpDir !== undefined)) {
+    throw new Error('--db und --dump sind nur mit --dry-run verfügbar.');
+  }
+  return {
+    dryRun,
+    ...(dbPath === undefined ? {} : { dbPath }),
+    ...(dumpDir === undefined ? {} : { dumpDir }),
+  };
+}
+
+async function startDryRun(options: CliOptions): Promise<void> {
+  const config = readConfig({
+    dryRun: true,
+    ...(options.dbPath ? { dbPath: options.dbPath } : {}),
+    ...(options.dumpDir ? { dumpDir: options.dumpDir } : {}),
+  });
+  const store = openDb(config.dbPath);
+  const metrics = new FetchMetrics(config.fixtureDumpDir);
+  const queue = new LodestoneRequestQueue({ fetch: createTrackedFetch(metrics) });
+  const fetchText = createQueuedFetchText(queue);
+  try {
+    const result = await runDryRunCycle({ store, fetchText, fetchMetrics: metrics });
+    process.stdout.write(`${result.report}\n`);
+    if (result.cycle.blind) process.exitCode = 1;
+  } finally {
+    store.close();
+  }
 }
 
 export async function startBot(): Promise<void> {
@@ -311,9 +365,17 @@ export async function main(cycleBody?: CycleBody, options: HourlySchedulerOption
     await startHourlyScheduler(cycleBody, options);
     return;
   }
-  await startBot();
+  const cliOptions = parseCliArgs(process.argv.slice(2));
+  if (cliOptions.dryRun) {
+    await startDryRun(cliOptions);
+  } else {
+    await startBot();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  void main().catch((error: unknown) => console.error('Bot stopped:', error));
+  void main().catch((error: unknown) => {
+    console.error('Bot stopped:', error);
+    process.exitCode = 1;
+  });
 }
