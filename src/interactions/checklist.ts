@@ -39,7 +39,7 @@ export function saveChecklistSelection(store: Store, selection: ChecklistSelecti
 export type ChecklistCustomId =
   | { action: 'open'; eventHash: string }
   | { action: 'select'; eventHash: string; panelToken: string; page: number }
-  | { action: 'page'; eventHash: string; panelToken: string; page: number }
+  | { action: 'page'; eventHash: string; panelToken: string; role: 'prev' | 'cur' | 'next'; page: number }
   | { action: 'save'; eventHash: string; panelToken: string }
   | { action: 'reminder'; eventHash: string; panelToken: string };
 
@@ -54,9 +54,16 @@ export function parseChecklistCustomId(customId: string): ChecklistCustomId | un
   if (!panelToken) return undefined;
   if (action === 'save' && parts.length === 4) return { action, eventHash, panelToken };
   if (action === 'reminder' && parts.length === 4) return { action, eventHash, panelToken };
-  if (action === 'select' || action === 'page') {
+  if (action === 'select' && parts.length === 5) {
     const page = Number(parts[4]);
-    if (parts.length === 5 && Number.isSafeInteger(page) && page >= 1) return { action, eventHash, panelToken, page };
+    if (Number.isSafeInteger(page) && page >= 1) return { action, eventHash, panelToken, page };
+  }
+  if (action === 'page' && parts.length === 6) {
+    const role = parts[4];
+    const page = Number(parts[5]);
+    if ((role === 'prev' || role === 'cur' || role === 'next') && Number.isSafeInteger(page) && page >= 1) {
+      return { action, eventHash, panelToken, role, page };
+    }
   }
   return undefined;
 }
@@ -148,22 +155,24 @@ function checklistRows(session: ChecklistSession, event: StoreEvent): ChecklistR
     }));
   const rows: ChecklistRow[] = [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)];
 
-  const previous = new ButtonBuilder()
-    .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:${Math.max(1, session.page)}`)
-    .setLabel('Zurück')
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(session.page === 0);
-  const indicator = new ButtonBuilder()
-    .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:${session.page + 1}`)
-    .setLabel(`Seite ${session.page + 1}/${pageCount}`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(true);
-  const next = new ButtonBuilder()
-    .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:${Math.min(pageCount, session.page + 2)}`)
-    .setLabel('Weiter')
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(session.page + 1 >= pageCount);
-  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(previous, indicator, next));
+  if (pageCount > 1) {
+    const previous = new ButtonBuilder()
+      .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:prev:${Math.max(1, session.page)}`)
+      .setLabel('Zurück')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(session.page === 0);
+    const indicator = new ButtonBuilder()
+      .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:cur:${session.page + 1}`)
+      .setLabel(`Seite ${session.page + 1}/${pageCount}`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true);
+    const next = new ButtonBuilder()
+      .setCustomId(`ffe:page:${session.eventHash}:${session.panelToken}:next:${Math.min(pageCount, session.page + 2)}`)
+      .setLabel('Weiter')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(session.page + 1 >= pageCount);
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(previous, indicator, next));
+  }
 
   const reminder = new ButtonBuilder()
     .setCustomId(`ffe:reminder:${session.eventHash}:${session.panelToken}`)
@@ -312,7 +321,8 @@ export async function handleChecklistInteraction(
       await interaction.update(interactionOptions(session, event,
         `Gespeichert: ${session.doneItemIds.size} von ${session.itemIds.length} erledigt.`));
     }
-  } catch {
+  } catch (error) {
+    console.error('Checkliste fehlgeschlagen:', error);
     await replyError(interaction, 'Die Checkliste konnte gerade nicht gespeichert werden. Bitte versuche es erneut.', interaction.isStringSelectMenu());
   }
 }

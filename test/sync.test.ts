@@ -27,6 +27,7 @@ import { syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { syncLiveStatusPost } from '../src/sync/status.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
 import { collectRecentBotMessages } from '../src/discord-history.ts';
+import { assertDiscordActionRows } from './component-invariants.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 
@@ -46,6 +47,7 @@ function discordEmbedSnapshots(embeds: readonly DiscordEmbed[] = []): DiscordEmb
 }
 
 function componentSnapshots(rows: DiscordMessagePayload['components'] = []) {
+  assertDiscordActionRows(rows);
   return rows.map((row) => ({
     components: row.components.map((component) => component.type === 'button' ? { ...component } : {
       ...component,

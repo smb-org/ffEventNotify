@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { handleChecklistInteraction, parseChecklistCustomId } from '../src/interactions/checklist.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
+import { assertDiscordComponentPayload } from './component-invariants.ts';
 import {
   applyField,
   createEvent,
@@ -37,6 +38,7 @@ class FakeInteraction {
   customId: string;
   values: string[];
   private kind: 'button' | 'select';
+  failNextUpdate: Error | undefined;
 
   constructor(kind: 'button' | 'select', customId: string, values: string[] = []) {
     this.kind = kind;
@@ -47,13 +49,24 @@ class FakeInteraction {
   isButton(): boolean { return this.kind === 'button'; }
   isStringSelectMenu(): boolean { return this.kind === 'select'; }
   inGuild(): boolean { return true; }
-  async reply(options: Record<string, unknown>): Promise<void> { this.replies.push(options); }
-  async update(options: Record<string, unknown>): Promise<void> { this.updates.push(options); }
+  async reply(options: Record<string, unknown>): Promise<void> {
+    this.replies.push(options);
+    if (Array.isArray(options.components)) assertDiscordComponentPayload(options.components as never);
+  }
+  async update(options: Record<string, unknown>): Promise<void> {
+    if (this.failNextUpdate) {
+      const error = this.failNextUpdate;
+      this.failNextUpdate = undefined;
+      throw error;
+    }
+    this.updates.push(options);
+    if (Array.isArray(options.components)) assertDiscordComponentPayload(options.components as never);
+  }
 }
 
 function componentJson(reply: Record<string, unknown>): Array<Record<string, any>> {
   const components = reply.components as Array<{ toJSON?: () => Record<string, any> }>;
-  return components.map((component) => component.toJSON?.() ?? component);
+  return assertDiscordComponentPayload(components as never) as Array<Record<string, any>>;
 }
 
 test('checklist button custom id round-trips event keys with colons and slashes', () => {
@@ -61,6 +74,70 @@ test('checklist button custom id round-trips event keys with colons and slashes'
   assert.deepEqual(parseChecklistCustomId(`ffe:cl:${stableEventIdentity(eventKey).slice(0, 32)}`), {
     action: 'open', eventHash: stableEventIdentity(eventKey).slice(0, 32),
   });
+});
+
+test('pagination component ids encode their distinct roles', () => {
+  const eventHash = 'a'.repeat(32);
+  const panelToken = 'b'.repeat(32);
+  for (const role of ['prev', 'cur', 'next'] as const) {
+    assert.deepEqual(parseChecklistCustomId(`ffe:page:${eventHash}:${panelToken}:${role}:2`), {
+      action: 'page', eventHash, panelToken, role, page: 2,
+    });
+  }
+});
+
+test('checklist panels satisfy Discord component constraints for one, two, and three pages', async () => {
+  for (const [count, pageCount] of [[1, 1], [26, 2], [51, 3]] as const) {
+    const db = openDb(':memory:');
+    const { eventKey } = rewardEvent(db, count);
+    const now = new Date('2026-10-16T12:00:00.000Z');
+    try {
+      const opened = new FakeInteraction('button', `ffe:cl:${stableEventIdentity(eventKey).slice(0, 32)}`);
+      await handleChecklistInteraction(opened as never, db, now);
+      const firstPage = componentJson(opened.replies[0]!);
+      const rows = firstPage as Array<{ components: Array<Record<string, any>> }>;
+      const pageRow = rows.find((row) => row.components.some((component) => component.label?.startsWith('Seite ')));
+
+      if (pageCount === 1) {
+        assert.equal(rows.length, 2);
+        assert.equal(pageRow, undefined);
+        assert.deepEqual(rows.flatMap((row) => row.components).map((component) => component.label).filter(Boolean), [
+          'Erinnerungen an/aus', 'Speichern',
+        ]);
+      } else {
+        assert.equal(rows.length, 3);
+        assert.ok(pageRow);
+        const [previous, indicator, next] = pageRow.components;
+        assert.equal(previous?.disabled, true);
+        assert.equal(indicator?.disabled, true);
+        assert.equal(next?.disabled, false);
+        assert.equal(indicator?.label, `Seite 1/${pageCount}`);
+        const parsedPrevious = parseChecklistCustomId(previous!.custom_id);
+        assert.equal(parsedPrevious?.action, 'page');
+        if (parsedPrevious?.action === 'page') {
+          assert.equal(parsedPrevious.role, 'prev');
+          assert.equal(parsedPrevious.page, 1);
+        }
+
+        let nextButton = next!;
+        for (let page = 2; page <= pageCount; page += 1) {
+          const nextInteraction = new FakeInteraction('button', nextButton.custom_id);
+          await handleChecklistInteraction(nextInteraction as never, db, now);
+          const rendered = componentJson(nextInteraction.updates[0]!);
+          const renderedRows = rendered as Array<{ components: Array<Record<string, any>> }>;
+          const renderedPageRow = renderedRows.find((row) => row.components.some((component) => component.label?.startsWith('Seite ')))!;
+          const [renderedPrevious, renderedIndicator, renderedNext] = renderedPageRow.components;
+          assert.equal(renderedPrevious?.disabled, page === 1);
+          assert.equal(renderedIndicator?.disabled, true);
+          assert.equal(renderedNext?.disabled, page === pageCount);
+          assert.equal(renderedIndicator?.label, `Seite ${page}/${pageCount}`);
+          nextButton = renderedNext!;
+        }
+      }
+    } finally {
+      db.close();
+    }
+  }
 });
 
 test('checklist opens with 25 options per page and persists selections across pages on save', async () => {
@@ -217,6 +294,33 @@ test('checklist panel sessions expire after one hour', async () => {
     await handleChecklistInteraction(expired as never, db, new Date(openedAt.getTime() + 60 * 60 * 1_000 + 1));
     assert.match(String(expired.updates[0]?.content), /abgelaufen/i);
   } finally {
+    db.close();
+  }
+});
+
+test('checklist failures are logged and only return a generic player-facing error', async () => {
+  const db = openDb(':memory:');
+  const { eventKey } = rewardEvent(db, 1);
+  const now = new Date('2026-10-16T12:00:00.000Z');
+  const originalError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    const opened = new FakeInteraction('button', `ffe:cl:${stableEventIdentity(eventKey).slice(0, 32)}`);
+    await handleChecklistInteraction(opened as never, db, now);
+    const saveId = componentJson(opened.replies[0]!).flatMap((row) => row.components)
+      .find((component) => component.label === 'Speichern')!.custom_id as string;
+    const failure = new Error('private database detail');
+    const save = new FakeInteraction('button', saveId);
+    save.failNextUpdate = failure;
+    await handleChecklistInteraction(save as never, db, now);
+
+    assert.deepEqual(logged, [['Checkliste fehlgeschlagen:', failure]]);
+    assert.equal(save.replies.length, 1);
+    assert.match(String(save.replies[0]?.content), /konnte gerade nicht gespeichert werden/i);
+    assert.doesNotMatch(String(save.replies[0]?.content), /private database detail/);
+  } finally {
+    console.error = originalError;
     db.close();
   }
 });

@@ -21,6 +21,7 @@ import type {
 import { runCycle, runGuildSyncFromStoredData } from '../src/cycle.ts';
 import { runDryRunCycle } from '../src/dry-run.ts';
 import { stableEventIdentity } from '../src/event-identity.ts';
+import { assertDiscordActionRows } from './component-invariants.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 const fixture = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -41,6 +42,7 @@ function discordEmbedSnapshots(embeds: readonly DiscordEmbed[] = []): DiscordEmb
 }
 
 function componentSnapshots(rows: DiscordMessagePayload['components'] = []) {
+  assertDiscordActionRows(rows);
   return rows.map((row) => ({
     components: row.components.map((component) => component.type === 'button' ? { ...component } : {
       ...component,
