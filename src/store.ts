@@ -41,9 +41,34 @@ export interface StoreEvent {
   description: string | null;
   descriptionStatus: 'ok' | 'unsicher';
   descriptionReason: string | null;
-  discordMessageId: string | null;
-  scheduledEventId: string | null;
   createdAt: string;
+}
+
+export interface StoredGuild {
+  guildId: string;
+  eventChannelId: string | null;
+  logChannelId: string | null;
+  setupAt: string | null;
+  firstRunDone: boolean;
+  needsSetup: boolean;
+  statusMessageId: string | null;
+}
+
+export interface GuildEventObject {
+  guildId: string;
+  eventKey: string;
+  messageId: string | null;
+  messageChannelId: string | null;
+  scheduledEventId: string | null;
+  status: 'pending' | 'synced' | 'failed';
+  lastError: string | null;
+  firstRunSuppressed: boolean;
+}
+
+export interface PendingWarning {
+  guildId: string;
+  key: string;
+  content: string;
 }
 
 export interface StoreEventSource {
@@ -81,9 +106,30 @@ const SCHEMA = `
     description TEXT,
     description_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (description_status IN ('ok', 'unsicher')),
     description_reason TEXT DEFAULT 'Nicht extrahiert',
-    discord_message_id TEXT,
-    scheduled_event_id TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS guilds (
+    guild_id TEXT PRIMARY KEY,
+    event_channel_id TEXT,
+    log_channel_id TEXT,
+    setup_at TEXT,
+    first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0, 1)),
+    needs_setup INTEGER NOT NULL DEFAULT 0 CHECK (needs_setup IN (0, 1)),
+    status_message_id TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS guild_event_objects (
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    message_id TEXT,
+    message_channel_id TEXT,
+    scheduled_event_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'synced', 'failed')),
+    last_error TEXT,
+    first_run_suppressed INTEGER NOT NULL DEFAULT 0 CHECK (first_run_suppressed IN (0, 1)),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (guild_id, event_key)
   );
 
   CREATE TABLE IF NOT EXISTS event_sources (
@@ -116,7 +162,13 @@ const SCHEMA = `
   );
 
   CREATE TABLE IF NOT EXISTS warnings_sent (
-    key TEXT PRIMARY KEY
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    sent_at TEXT,
+    PRIMARY KEY (guild_id, key)
   );
 
   CREATE TABLE IF NOT EXISTS meta (
@@ -176,6 +228,172 @@ export function isFirstRun(db: Store): boolean {
 
 export function markFirstRunDone(db: Store): void {
   db.prepare("INSERT INTO meta (key, value) VALUES ('first_run_done', '1') ON CONFLICT(key) DO NOTHING").run();
+}
+
+export function getGuild(db: Store, guildId: string): StoredGuild | undefined {
+  const row = db.prepare(`
+    SELECT guild_id AS guildId, event_channel_id AS eventChannelId,
+           log_channel_id AS logChannelId, setup_at AS setupAt,
+           first_run_done AS firstRunDone, needs_setup AS needsSetup,
+           status_message_id AS statusMessageId
+    FROM guilds WHERE guild_id = ?
+  `).get(guildId) as Omit<StoredGuild, 'firstRunDone' | 'needsSetup'> & {
+    firstRunDone: number; needsSetup: number;
+  } | undefined;
+  return row ? { ...row, firstRunDone: row.firstRunDone === 1, needsSetup: row.needsSetup === 1 } : undefined;
+}
+
+export function getConfiguredGuilds(db: Store): StoredGuild[] {
+  const ids = db.prepare(`
+    SELECT guild_id AS guildId FROM guilds
+    WHERE setup_at IS NOT NULL AND needs_setup = 0
+      AND event_channel_id IS NOT NULL AND log_channel_id IS NOT NULL
+    ORDER BY guild_id
+  `).all() as Array<{ guildId: string }>;
+  return ids.map(({ guildId }) => getGuild(db, guildId)!).filter(Boolean);
+}
+
+export function upsertGuildSetup(
+  db: Store,
+  input: { guildId: string; eventChannelId: string; logChannelId: string; setupAt?: string },
+): { created: boolean; channelsChanged: boolean } {
+  const existing = getGuild(db, input.guildId);
+  const eventChannelChanged = existing !== undefined && existing.eventChannelId !== input.eventChannelId;
+  const channelsChanged = existing !== undefined && (
+    eventChannelChanged || existing.logChannelId !== input.logChannelId
+  );
+  db.prepare(`
+    INSERT INTO guilds (guild_id, event_channel_id, log_channel_id, setup_at, first_run_done, needs_setup)
+    VALUES (?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), 0, 0)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      event_channel_id = excluded.event_channel_id,
+      log_channel_id = excluded.log_channel_id,
+      setup_at = excluded.setup_at,
+      needs_setup = 0,
+      status_message_id = CASE
+        WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN NULL
+        ELSE guilds.status_message_id
+      END
+  `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
+  if (eventChannelChanged) {
+    db.prepare(`UPDATE guild_event_objects
+      SET message_id = NULL, message_channel_id = NULL, status = 'pending', last_error = NULL
+      WHERE guild_id = ?`).run(input.guildId);
+  }
+  return { created: existing === undefined, channelsChanged };
+}
+
+export function markGuildNeedsSetup(db: Store, guildId: string): void {
+  db.prepare('UPDATE guilds SET needs_setup = 1 WHERE guild_id = ?').run(guildId);
+}
+
+export function markGuildFirstRunDone(db: Store, guildId: string): void {
+  db.prepare('UPDATE guilds SET first_run_done = 1 WHERE guild_id = ?').run(guildId);
+}
+
+export function setGuildStatusMessage(db: Store, guildId: string, messageId: string | null): void {
+  db.prepare(`INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING`).run(guildId);
+  db.prepare('UPDATE guilds SET status_message_id = ? WHERE guild_id = ?').run(messageId, guildId);
+}
+
+export function deleteGuild(db: Store, guildId: string): void {
+  db.prepare('DELETE FROM guilds WHERE guild_id = ?').run(guildId);
+}
+
+function ensureGuildObject(db: Store, guildId: string, eventKey: string): void {
+  db.prepare(`INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING`).run(guildId);
+  db.prepare(`INSERT INTO guild_event_objects (guild_id, event_key) VALUES (?, ?)
+    ON CONFLICT(guild_id, event_key) DO NOTHING`).run(guildId, eventKey);
+}
+
+export function getGuildEventObject(db: Store, guildId: string, eventKey: string): GuildEventObject | undefined {
+  const row = db.prepare(`
+    SELECT guild_id AS guildId, event_key AS eventKey, message_id AS messageId,
+           message_channel_id AS messageChannelId, scheduled_event_id AS scheduledEventId,
+           status, last_error AS lastError, first_run_suppressed AS firstRunSuppressed
+    FROM guild_event_objects WHERE guild_id = ? AND event_key = ?
+  `).get(guildId, eventKey) as (Omit<GuildEventObject, 'firstRunSuppressed'> & { firstRunSuppressed: number }) | undefined;
+  return row ? { ...row, firstRunSuppressed: row.firstRunSuppressed === 1 } : undefined;
+}
+
+export function markGuildEventFirstRunSuppressed(db: Store, guildId: string, eventKey: string): void {
+  ensureGuildObject(db, guildId, eventKey);
+  db.prepare(`UPDATE guild_event_objects SET first_run_suppressed = 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
+    .run(guildId, eventKey);
+}
+
+export function setGuildDiscordIds(
+  db: Store,
+  guildId: string,
+  eventKey: string,
+  ids: { messageId?: string | null; messageChannelId?: string | null; scheduledEventId?: string | null },
+): void {
+  ensureGuildObject(db, guildId, eventKey);
+  const assignments: string[] = [];
+  const values: Array<string | null> = [];
+  for (const [key, column] of [
+    ['messageId', 'message_id'], ['messageChannelId', 'message_channel_id'], ['scheduledEventId', 'scheduled_event_id'],
+  ] as const) {
+    if (ids[key] !== undefined) {
+      assignments.push(`${column} = ?`);
+      values.push(ids[key]!);
+    }
+  }
+  if (assignments.length === 0) return;
+  assignments.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
+  db.prepare(`UPDATE guild_event_objects SET ${assignments.join(', ')} WHERE guild_id = ? AND event_key = ?`)
+    .run(...values, guildId, eventKey);
+}
+
+export function setGuildEventSyncStatus(
+  db: Store,
+  guildId: string,
+  eventKey: string,
+  status: GuildEventObject['status'],
+  lastError: string | null = null,
+): void {
+  ensureGuildObject(db, guildId, eventKey);
+  db.prepare(`UPDATE guild_event_objects SET status = ?, last_error = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
+    .run(status, lastError, guildId, eventKey);
+}
+
+export function queueWarning(db: Store, guildId: string, key: string, content: string): void {
+  db.prepare(`INSERT INTO guilds (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING`).run(guildId);
+  db.prepare(`INSERT INTO warnings_sent (guild_id, key, content, status)
+    VALUES (?, ?, ?, 'pending') ON CONFLICT(guild_id, key) DO NOTHING`).run(guildId, key, content);
+}
+
+export function getPendingWarning(db: Store, guildId: string, key: string): PendingWarning | undefined {
+  return db.prepare(`SELECT guild_id AS guildId, key, content FROM warnings_sent
+    WHERE guild_id = ? AND key = ? AND status = 'pending'`).get(guildId, key) as PendingWarning | undefined;
+}
+
+export function getPendingWarnings(db: Store, guildId: string): PendingWarning[] {
+  return db.prepare(`SELECT guild_id AS guildId, key, content FROM warnings_sent
+    WHERE guild_id = ? AND status = 'pending' ORDER BY created_at, key`).all(guildId) as unknown as PendingWarning[];
+}
+
+export function markWarningSent(db: Store, guildId: string, key: string): void {
+  db.prepare(`UPDATE warnings_sent SET status = 'sent', sent_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE guild_id = ? AND key = ? AND status = 'pending'`).run(guildId, key);
+}
+
+export async function deliverWarning(
+  db: Store,
+  guildId: string,
+  channelId: string,
+  key: string,
+  content: string,
+  send: (channelId: string, content: string) => Promise<void>,
+): Promise<boolean> {
+  queueWarning(db, guildId, key, content);
+  const pending = getPendingWarning(db, guildId, key);
+  if (!pending) return false;
+  await send(channelId, pending.content);
+  markWarningSent(db, guildId, key);
+  return true;
 }
 
 export function findEventBySourceUrl(db: Store, url: string): number | undefined {
@@ -272,7 +490,9 @@ function candidateWins(
   if (timeDifference !== 0) return timeDifference > 0;
   if (candidate.sourceUrl === current.sourceUrl) return true;
   const key = ['source-time-tie', eventId, field, candidate.sourceTime].join(':');
-  if (warnOnce(db, key)) {
+  const firstOccurrence = db.prepare(`INSERT INTO meta (key, value) VALUES (?, '1')
+    ON CONFLICT(key) DO NOTHING`).run(`warned:${key}`).changes > 0;
+  if (firstOccurrence) {
     console.warn(`Für Ereignis ${eventId} und Feld „${field}“ gilt dieselbe Quellenzeit; die erste Quelle ${current.sourceUrl} bleibt erhalten.`);
   }
   return false;
@@ -384,8 +604,6 @@ export function getOpenEvents(db: Store, now: Date | string = new Date()): Store
            description,
            description_status AS descriptionStatus,
            description_reason AS descriptionReason,
-           discord_message_id AS discordMessageId,
-           scheduled_event_id AS scheduledEventId,
            created_at AS createdAt
     FROM events
     WHERE end_status = 'unsicher'
@@ -416,8 +634,6 @@ export function getAllEvents(db: Store): StoreEvent[] {
            description,
            description_status AS descriptionStatus,
            description_reason AS descriptionReason,
-           discord_message_id AS discordMessageId,
-           scheduled_event_id AS scheduledEventId,
            created_at AS createdAt
     FROM events
     ORDER BY created_at, id
@@ -452,38 +668,6 @@ export function setMetaValue(db: Store, key: string, value: string): boolean {
   `).run(key, value).changes > 0;
 }
 
-export function setDiscordIds(
-  db: Store,
-  eventId: number,
-  ids: { discordMessageId?: string | null; scheduledEventId?: string | null },
-): boolean {
-  const assignments: string[] = [];
-  const values: Array<string | null | number> = [];
-  if (ids.discordMessageId !== undefined) {
-    assignments.push('discord_message_id = ?');
-    values.push(ids.discordMessageId);
-  }
-  if (ids.scheduledEventId !== undefined) {
-    assignments.push('scheduled_event_id = ?');
-    values.push(ids.scheduledEventId);
-  }
-  if (assignments.length === 0) return false;
-
-  const differences: string[] = [];
-  const differenceValues: Array<string | null> = [];
-  if (ids.discordMessageId !== undefined) {
-    differences.push('discord_message_id IS NOT ?');
-    differenceValues.push(ids.discordMessageId);
-  }
-  if (ids.scheduledEventId !== undefined) {
-    differences.push('scheduled_event_id IS NOT ?');
-    differenceValues.push(ids.scheduledEventId);
-  }
-  values.push(eventId);
-  const result = db.prepare(`UPDATE events SET ${assignments.join(', ')} WHERE id = ? AND (${differences.join(' OR ')})`).run(...values, ...differenceValues);
-  return result.changes > 0;
-}
-
 export function markSeen(db: Store, url: string, classification: string, firstSeenAt?: string): boolean {
   const result = db.prepare(`
     INSERT INTO seen_entries (url, first_seen_at, classification)
@@ -496,10 +680,6 @@ export function markSeen(db: Store, url: string, classification: string, firstSe
 
 export function isSeen(db: Store, url: string): boolean {
   return db.prepare('SELECT 1 FROM seen_entries WHERE url = ?').get(url) !== undefined;
-}
-
-export function warnOnce(db: Store, key: string): boolean {
-  return db.prepare('INSERT INTO warnings_sent (key) VALUES (?) ON CONFLICT(key) DO NOTHING').run(key).changes > 0;
 }
 
 export function cacheItem(

@@ -9,9 +9,11 @@ import {
   getAllEvents,
   getEventSources,
   getMetaValue,
+  isFirstRun,
   type Store,
   type StoreEvent,
 } from './store.ts';
+import { stableEventIdentity } from './event-identity.ts';
 import { scheduledEventPayloadFor, scheduledEventUnavailableReason } from './sync/scheduled.ts';
 import type {
   DiscordEmbed,
@@ -178,6 +180,21 @@ export class RecordingDiscordPort implements DiscordPort {
       .map((message) => ({ ...message, embeds: message.embeds.map(copyEmbed) }));
   }
 
+  async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
+    return [...this.messages.values()]
+      .filter((message) => message.channelId === channelId && message.pinned)
+      .map((message) => ({ ...message, embeds: message.embeds.map(copyEmbed) }));
+  }
+
+  async fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null> {
+    const message = this.messages.get(messageId);
+    return message?.channelId === channelId ? { ...message, embeds: message.embeds.map(copyEmbed) } : null;
+  }
+
+  async isTextChannel(_channelId: string): Promise<boolean> {
+    return true;
+  }
+
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
     const eventId = `dry-scheduled-${++this.scheduledSequence}`;
     const event = { ...payload, id: eventId, guildId, status: 'SCHEDULED' as const };
@@ -275,24 +292,23 @@ function eventTypeName(event: StoreEvent): string {
   }
 }
 
-function eventIdFromMessageAction(action: RecordingDiscordAction): number | undefined {
+function eventIdentityFromMessageAction(action: RecordingDiscordAction): string | undefined {
   if (action.type !== 'create-message' && action.type !== 'edit-message') return undefined;
   const footer = action.payload.embeds?.flatMap((embed) => embed.footer ? [embed.footer.text] : [])[0];
-  if (!footer || !/^\d+$/.test(footer)) return undefined;
-  return Number(footer);
+  return /^Event-ID: ([a-f0-9]{64})$/.exec(footer ?? '')?.[1];
 }
 
-function eventIdFromScheduledAction(action: RecordingDiscordAction): number | undefined {
+function eventIdentityFromScheduledAction(action: RecordingDiscordAction): string | undefined {
   if (action.type !== 'create-scheduled-event' && action.type !== 'edit-scheduled-event') return undefined;
-  const match = /^Event-ID: (\d+)/.exec(action.payload.description);
-  return match ? Number(match[1]) : undefined;
+  const marker = action.payload.description.split(/\r?\n/).find((line) => /^Event-ID: [a-f0-9]{64}$/.test(line));
+  return marker?.slice('Event-ID: '.length);
 }
 
 function scheduledActionFor(
-  eventId: number,
+  eventIdentity: string,
   actions: readonly RecordingDiscordAction[],
 ): RecordingDiscordAction | undefined {
-  return actions.find((action) => eventIdFromScheduledAction(action) === eventId);
+  return actions.find((action) => eventIdentityFromScheduledAction(action) === eventIdentity);
 }
 
 function eventPeriod(event: StoreEvent): string {
@@ -305,7 +321,7 @@ function eventPeriod(event: StoreEvent): string {
 
 function rewardSections(event: StoreEvent): string[] {
   if (event.rewardsStatus === 'n/a') return [];
-  if (event.rewardsStatus === 'unsicher') return [`  unsicher — ${event.rewardsReason ?? 'kein Grund hinterlegt'}`];
+  if (event.rewardsStatus === 'unsicher' && event.rewards.length === 0) return [`  unsicher — ${event.rewardsReason ?? 'kein Grund hinterlegt'}`];
   if (event.rewards.length === 0) return ['  Keine Belohnungen erkannt.'];
   const groups = new Map<string, string[]>();
   for (const reward of event.rewards) {
@@ -358,10 +374,10 @@ function buildReport(
   now: Date,
 ): string {
   const events = getAllEvents(store);
-  const postedIds = new Set(discord.recordedActions.map(eventIdFromMessageAction).filter((id): id is number => id !== undefined));
+  const postedIdentities = new Set(discord.recordedActions.map(eventIdentityFromMessageAction).filter((identity): identity is string => identity !== undefined));
   const suppressed = suppressedIds(store);
-  const posted = events.filter((event) => postedIds.has(event.id));
-  const omitted = events.filter((event) => !postedIds.has(event.id));
+  const posted = events.filter((event) => postedIdentities.has(stableEventIdentity(event.eventKey)));
+  const omitted = events.filter((event) => !postedIdentities.has(stableEventIdentity(event.eventKey)));
   const sections = [
     'Lodestone-Trockenlauf',
     `Zyklus: ${cycle.firstRun ? 'Erststart' : 'Folgelauf'}; erfasst: ${cycle.capturedEvents}; würde posten: ${cycle.postedEvents}`,
@@ -372,7 +388,7 @@ function buildReport(
 
   for (const event of posted) {
     const sources = getEventSources(store, event.id).map((source) => source.url);
-    const scheduledAction = scheduledActionFor(event.id, discord.recordedActions);
+    const scheduledAction = scheduledActionFor(stableEventIdentity(event.eventKey), discord.recordedActions);
     sections.push(
       '',
       `## ${event.title}`,
@@ -430,9 +446,12 @@ export async function runDryRunCycle(options: DryRunCycleOptions): Promise<DryRu
     store: options.store,
     discord,
     fetchText,
-    guildId: 'dry-run-guild',
-    eventChannelId: 'dry-run-events',
-    logChannelId: 'dry-run-logs',
+    guilds: [{
+      guildId: 'dry-run-guild',
+      eventChannelId: 'dry-run-events',
+      logChannelId: 'dry-run-logs',
+      firstRun: isFirstRun(options.store),
+    }],
     ...(options.now ? { now: options.now } : {}),
   });
   const fetchStatistics = metrics.snapshot();

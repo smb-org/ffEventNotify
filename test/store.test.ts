@@ -11,14 +11,23 @@ import {
   findEventByKey,
   findEventBySourceUrl,
   getCachedItem,
+  getConfiguredGuilds,
+  getGuildEventObject,
+  getGuild,
   getOpenEvents,
   isFirstRun,
   isSeen,
   markFirstRunDone,
   markSeen,
   openDb,
-  setDiscordIds,
-  warnOnce,
+  setGuildDiscordIds,
+  setGuildStatusMessage,
+  upsertGuildSetup,
+  deliverWarning,
+  getPendingWarning,
+  deleteGuild,
+  markGuildFirstRunDone,
+  markGuildNeedsSetup,
 } from '../src/store.ts';
 
 function newEvent(db: ReturnType<typeof openDb>, eventKey: string, eventType: 'seasonal-special' | 'maintenance' | 'topic-generic' = 'maintenance'): number {
@@ -41,6 +50,8 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'event_sources',
       'events',
       'field_provenance',
+      'guild_event_objects',
+      'guilds',
       'items',
       'meta',
       'reminders',
@@ -252,7 +263,7 @@ test('open events include future ends and ends less than 48 hours ago, but exclu
   }
 });
 
-test('first-run state and warning keys are stored once', () => {
+test('first-run state is stored once', () => {
   const db = openDb(':memory:');
   try {
     assert.equal(isFirstRun(db), true);
@@ -261,8 +272,6 @@ test('first-run state and warning keys are stored once', () => {
     markFirstRunDone(db);
     assert.equal(isFirstRun(db), false);
 
-    assert.equal(warnOnce(db, 'event-1:end'), true);
-    assert.equal(warnOnce(db, 'event-1:end'), false);
   } finally {
     db.close();
   }
@@ -281,10 +290,14 @@ test('seen entries, merge keys, Discord IDs, and item cache survive repeated cal
     assert.equal(markSeen(db, 'https://example.test/seen', 'unclassified'), false);
     assert.equal(isSeen(db, 'https://example.test/seen'), true);
 
-    assert.equal(setDiscordIds(db, eventId, { discordMessageId: 'message-1', scheduledEventId: 'scheduled-1' }), true);
-    assert.equal(setDiscordIds(db, eventId, { discordMessageId: 'message-1', scheduledEventId: 'scheduled-1' }), false);
-    const saved = db.prepare('SELECT discord_message_id AS messageId, scheduled_event_id AS scheduledId FROM events WHERE id = ?').get(eventId) as { messageId: string; scheduledId: string };
-    assert.deepEqual({ ...saved }, { messageId: 'message-1', scheduledId: 'scheduled-1' });
+    upsertGuildSetup(db, { guildId: 'guild-1', eventChannelId: 'events-1', logChannelId: 'logs-1' });
+    setGuildDiscordIds(db, 'guild-1', 'generic:producer-live:93', {
+      messageId: 'message-1', messageChannelId: 'events-1', scheduledEventId: 'scheduled-1',
+    });
+    const saved = getGuildEventObject(db, 'guild-1', 'generic:producer-live:93');
+    assert.deepEqual(saved && { messageId: saved.messageId, messageChannelId: saved.messageChannelId, scheduledEventId: saved.scheduledEventId }, {
+      messageId: 'message-1', messageChannelId: 'events-1', scheduledEventId: 'scheduled-1',
+    });
 
     cacheItem(db, { itemId: '1234', name: 'Testitem', iconUrl: 'https://example.test/icon.png', fetchedAt: '2026-01-01T00:00:00.000Z' });
     const cachedItem = getCachedItem(db, '1234');
@@ -294,6 +307,92 @@ test('seen entries, merge keys, Discord IDs, and item cache survive repeated cal
       iconUrl: 'https://example.test/icon.png',
       fetchedAt: '2026-01-01T00:00:00.000Z',
     });
+  } finally {
+    db.close();
+  }
+});
+
+test('event data is shared while Discord objects and warning delivery state stay isolated per guild', async () => {
+  const db = openDb(':memory:');
+  try {
+    const eventId = newEvent(db, 'shared-event');
+    upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'logs-a' });
+    upsertGuildSetup(db, { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b' });
+    setGuildDiscordIds(db, 'guild-a', 'shared-event', { messageId: 'message-a', scheduledEventId: 'schedule-a' });
+    setGuildDiscordIds(db, 'guild-b', 'shared-event', { messageId: 'message-b', scheduledEventId: 'schedule-b' });
+
+    assert.equal(getOpenEvents(db, new Date())[0]?.id, eventId);
+    assert.equal(getGuildEventObject(db, 'guild-a', 'shared-event')?.messageId, 'message-a');
+    assert.equal(getGuildEventObject(db, 'guild-b', 'shared-event')?.messageId, 'message-b');
+
+    let sends = 0;
+    await assert.rejects(deliverWarning(db, 'guild-a', 'logs-a', 'uncertain:event', 'Belohnungen unsicher', async () => {
+      sends += 1;
+      throw new Error('temporary Discord failure');
+    }), /temporary Discord failure/);
+    assert.equal(getPendingWarning(db, 'guild-a', 'uncertain:event')?.content, 'Belohnungen unsicher');
+    assert.equal(getPendingWarning(db, 'guild-b', 'uncertain:event'), undefined);
+    assert.equal(await deliverWarning(db, 'guild-a', 'logs-a', 'uncertain:event', 'Belohnungen unsicher', async () => { sends += 1; }), true);
+    assert.equal(await deliverWarning(db, 'guild-a', 'logs-a', 'uncertain:event', 'Belohnungen unsicher', async () => { sends += 1; }), false);
+    assert.equal(sends, 2);
+
+    deleteGuild(db, 'guild-a');
+    assert.equal(getGuildEventObject(db, 'guild-a', 'shared-event'), undefined);
+    assert.equal(getGuildEventObject(db, 'guild-b', 'shared-event')?.messageId, 'message-b');
+  } finally {
+    db.close();
+  }
+});
+
+test('setup channel changes clear only that guild message and status references and preserve its schedule', () => {
+  const db = openDb(':memory:');
+  try {
+    const eventId = newEvent(db, 'channel-change');
+    upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'old-events', logChannelId: 'old-logs' });
+    markGuildFirstRunDone(db, 'guild-a');
+    setGuildDiscordIds(db, 'guild-a', 'channel-change', {
+      messageId: 'old-message', messageChannelId: 'old-events', scheduledEventId: 'existing-schedule',
+    });
+    setGuildStatusMessage(db, 'guild-a', 'old-status');
+    markGuildNeedsSetup(db, 'guild-a');
+
+    const updated = upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'new-events', logChannelId: 'new-logs' });
+
+    assert.deepEqual(updated, { created: false, channelsChanged: true });
+    assert.deepEqual(getGuild(db, 'guild-a') && {
+      eventChannelId: getGuild(db, 'guild-a')!.eventChannelId,
+      logChannelId: getGuild(db, 'guild-a')!.logChannelId,
+      firstRunDone: getGuild(db, 'guild-a')!.firstRunDone,
+      needsSetup: getGuild(db, 'guild-a')!.needsSetup,
+      statusMessageId: getGuild(db, 'guild-a')!.statusMessageId,
+    }, {
+      eventChannelId: 'new-events', logChannelId: 'new-logs', firstRunDone: true, needsSetup: false, statusMessageId: null,
+    });
+    assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.messageId, null);
+    assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.scheduledEventId, 'existing-schedule');
+    assert.equal(getConfiguredGuilds(db).some((guild) => guild.guildId === 'guild-a'), true);
+    assert.equal(getOpenEvents(db).some((event) => event.id === eventId), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('changing only the log channel preserves event posts and the pinned status reference', () => {
+  const db = openDb(':memory:');
+  try {
+    newEvent(db, 'shared-event');
+    upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'old-logs' });
+    setGuildDiscordIds(db, 'guild-a', 'shared-event', {
+      messageId: 'event-message', messageChannelId: 'events-a', scheduledEventId: 'schedule',
+    });
+    setGuildStatusMessage(db, 'guild-a', 'status-message');
+
+    const result = upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'new-logs' });
+
+    assert.deepEqual(result, { created: false, channelsChanged: true });
+    assert.equal(getGuildEventObject(db, 'guild-a', 'shared-event')?.messageId, 'event-message');
+    assert.equal(getGuildEventObject(db, 'guild-a', 'shared-event')?.scheduledEventId, 'schedule');
+    assert.equal(getGuild(db, 'guild-a')?.statusMessageId, 'status-message');
   } finally {
     db.close();
   }

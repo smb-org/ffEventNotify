@@ -4,12 +4,15 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   Client,
+  ChannelType,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
+  PermissionFlagsBits,
+  type ChatInputCommandInteraction,
   type GuildScheduledEvent,
   type Message,
   type TextChannel,
@@ -20,6 +23,14 @@ import { SourceHealthMonitor } from './health.ts';
 import { runCycle } from './cycle.ts';
 import { openDb } from './store.ts';
 import { LodestoneRequestQueue } from './sources/queue.ts';
+import { collectRecentBotMessages } from './discord-history.ts';
+import { missingSetupPermissions, registerGlobalFfEventsCommand } from './commands.ts';
+import {
+  deleteGuild,
+  getGuild,
+  markGuildNeedsSetup,
+  upsertGuildSetup,
+} from './store.ts';
 import type {
   DiscordEmbed,
   DiscordMessagePayload,
@@ -155,11 +166,42 @@ export class DiscordJsPort implements DiscordPort {
 
   async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]> {
     const channel = await this.textChannel(channelId);
-    const messages = await channel.messages.fetch({ limit: Math.max(1, Math.min(100, Math.trunc(limit))) });
     const botId = this.client.user?.id;
+    if (!botId) return [];
+    return collectRecentBotMessages(async (pageSize, before) => {
+      const messages = await channel.messages.fetch({ limit: pageSize, ...(before ? { before } : {}) });
+      return [...messages.values()].map((message) => ({
+        id: message.id,
+        authorId: message.author.id,
+        snapshot: messageSnapshot(message, botId),
+      }));
+    }, botId, limit).then((messages) => messages.map(({ snapshot }) => snapshot));
+  }
+
+  async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
+    const channel = await this.textChannel(channelId);
+    const botId = this.client.user?.id;
+    if (!botId) return [];
+    const messages = await channel.messages.fetchPinned();
     return [...messages.values()]
-      .filter((message) => botId !== undefined && message.author.id === botId)
+      .filter((message) => message.author.id === botId)
       .map((message) => messageSnapshot(message, botId));
+  }
+
+  async fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null> {
+    const channel = await this.textChannel(channelId);
+    try {
+      const message = await channel.messages.fetch(messageId);
+      return messageSnapshot(message, this.client.user?.id);
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 10008) return null;
+      throw error;
+    }
+  }
+
+  async isTextChannel(channelId: string): Promise<boolean> {
+    const channel = await this.client.channels.fetch(channelId);
+    return Boolean(channel && channel.isTextBased() && 'messages' in channel);
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
@@ -341,23 +383,103 @@ export async function startBot(): Promise<void> {
     });
     await client.login(config.discordToken);
     await ready;
-    await startHourlyScheduler(async () => {
-      await runCycle({
+    const application = client.application;
+    if (!application) throw new Error('Discord application is unavailable after login.');
+    await registerGlobalFfEventsCommand(application.commands);
+
+    const cycleOptions = {
         store,
         discord,
         fetchText,
-        guildId: config.guildId,
-        eventChannelId: config.eventChannelId,
-        logChannelId: config.logChannelId,
         health,
+      };
+    let cycleQueue: Promise<void> = Promise.resolve();
+    const runSerializedCycle = (): Promise<void> => {
+      const run = cycleQueue.then(async () => { await runCycle(cycleOptions); });
+      cycleQueue = run.catch((error: unknown) => {
+        console.error('Der Stundenzyklus ist fehlgeschlagen.', error);
       });
-    }, { signal: controller.signal });
+      return run;
+    };
+
+    client.on(Events.InteractionCreate, (interaction) => {
+      if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
+        void handleFfEventsSetup(interaction, store, runSerializedCycle);
+      }
+    });
+    client.on(Events.GuildDelete, (guild) => deleteGuild(store, guild.id));
+    client.on(Events.ChannelDelete, (channel) => {
+      const guildId = 'guildId' in channel ? channel.guildId : null;
+      if (!guildId) return;
+      const guild = getGuild(store, guildId);
+      if (guild && (guild.eventChannelId === channel.id || guild.logChannelId === channel.id)) {
+        markGuildNeedsSetup(store, guildId);
+      }
+    });
+
+    await startHourlyScheduler(runSerializedCycle, {
+      signal: controller.signal,
+      onCycleError: (error) => console.error('Der Stundenzyklus ist fehlgeschlagen.', error),
+    });
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     store.close();
     client.destroy();
   }
+}
+
+export async function handleFfEventsSetup(
+  interaction: ChatInputCommandInteraction,
+  store: ReturnType<typeof openDb>,
+  runImmediateCycle: () => Promise<void>,
+): Promise<void> {
+  if (!interaction.inGuild() || !interaction.guild) {
+    await interaction.reply({ content: 'Dieser Befehl funktioniert nur auf einem Server.', ephemeral: true });
+    return;
+  }
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({ content: 'Dafür brauchst du die Berechtigung „Server verwalten“.', ephemeral: true });
+    return;
+  }
+  if (interaction.options.getSubcommand() !== 'setup') {
+    await interaction.reply({ content: 'Dieser Unterbefehl ist noch nicht verfügbar.', ephemeral: true });
+    return;
+  }
+
+  const eventChannel = interaction.options.getChannel('event-kanal', true) as TextChannel;
+  const logChannel = interaction.options.getChannel('log-kanal', true) as TextChannel;
+  const isGuildText = (channel: TextChannel) => channel.guildId === interaction.guildId &&
+    (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement);
+  if (!isGuildText(eventChannel) || !isGuildText(logChannel)) {
+    await interaction.reply({ content: 'Bitte wähle zwei Textkanäle dieses Servers aus.', ephemeral: true });
+    return;
+  }
+
+  const botMember = await interaction.guild.members.fetchMe();
+  const missing = missingSetupPermissions(
+    botMember.permissions,
+    eventChannel.permissionsFor(botMember),
+    logChannel.permissionsFor(botMember),
+  );
+  if (missing.length > 0) {
+    await interaction.reply({
+      content: `Mir fehlen noch diese Berechtigungen:\n${missing.map((permission) => `• ${permission}`).join('\n')}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  upsertGuildSetup(store, {
+    guildId: interaction.guildId,
+    eventChannelId: eventChannel.id,
+    logChannelId: logChannel.id,
+  });
+  await interaction.reply({
+    content: `✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>. Der erste Abgleich für diesen Server startet jetzt.`,
+    ephemeral: true,
+  });
+  void runImmediateCycle().catch((error: unknown) => console.error('Der sofortige Server-Abgleich ist fehlgeschlagen.', error));
 }
 
 export async function main(cycleBody?: CycleBody, options: HourlySchedulerOptions = {}): Promise<void> {

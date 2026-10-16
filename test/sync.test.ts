@@ -13,13 +13,17 @@ import {
   attachSource,
   createEvent,
   getOpenEvents,
+  getGuild,
+  getGuildEventObject,
   openDb,
-  setDiscordIds,
+  setGuildStatusMessage,
+  setGuildDiscordIds,
 } from '../src/store.ts';
 import { buildEventEmbed, syncEventEmbed } from '../src/sync/embed.ts';
 import { scheduleEventReminders } from '../src/sync/reminders.ts';
 import { syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { syncLiveStatusPost } from '../src/sync/status.ts';
+import { stableEventIdentity } from '../src/event-identity.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 
@@ -69,12 +73,30 @@ class FakeDiscordPort implements DiscordPort {
   }
 
   async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]> {
-    return this.messages.filter((message) => message.channelId === channelId && message.authorIsBot).slice(-limit).reverse();
+    return this.messages.filter((message) => message.channelId === channelId).slice().reverse()
+      .filter((message) => message.authorIsBot).slice(0, limit);
+  }
+
+  async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
+    return this.messages.filter((message) => message.channelId === channelId && message.authorIsBot && message.pinned);
+  }
+
+  async fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null> {
+    return this.messages.find((message) => message.channelId === channelId && message.id === messageId) ?? null;
+  }
+
+  async isTextChannel(_channelId: string): Promise<boolean> {
+    return true;
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
     this.createScheduledCount += 1;
-    const event: ScheduledEventSnapshot = { ...payload, id: `scheduled-${this.createScheduledCount}`, guildId, status: 'SCHEDULED' };
+    const event: ScheduledEventSnapshot = {
+      ...payload,
+      startUtc: new Date(payload.startUtc).toISOString(),
+      endUtc: new Date(payload.endUtc).toISOString(),
+      id: `scheduled-${this.createScheduledCount}`, guildId, status: 'SCHEDULED',
+    };
     this.scheduledEvents.push(event);
     if (this.failAfterCreateScheduled) {
       this.failAfterCreateScheduled = false;
@@ -92,7 +114,11 @@ class FakeDiscordPort implements DiscordPort {
       this.scheduledEvents[index]!.status = 'COMPLETED';
       throw new Error('Discord rejects edits to completed events');
     }
-    const updated = { ...this.scheduledEvents[index]!, ...payload };
+    const updated = {
+      ...this.scheduledEvents[index]!, ...payload,
+      startUtc: new Date(payload.startUtc).toISOString(),
+      endUtc: new Date(payload.endUtc).toISOString(),
+    };
     this.scheduledEvents[index] = updated;
     return updated;
   }
@@ -191,7 +217,8 @@ test('event embeds show German local periods, Discord timestamps, linked rewards
     assert.match(embed.description ?? '', /<t:1792051200:F>.*<t:1793631540:F>/);
     assert.equal(embed.fields?.[0]?.name, 'Ausrüstung');
     assert.match(embed.fields?.[0]?.value ?? '', /\[Grizzlybär-Kopf\]\(https:\/\/de\.finalfantasyxiv\.com\/lodestone\/playguide\/db\/item\/1077b68a626\/\)/);
-    assert.equal(embed.footer?.text, String(event.id));
+    assert.notEqual(embed.footer?.text, String(event.id));
+    assert.ok(embed.footer?.text && /^Event-ID: [a-f0-9]{64}$/.test(embed.footer.text));
   } finally {
     db.close();
   }
@@ -227,6 +254,99 @@ test('uncertain rewards link to the special page without guessing names', () => 
     const updated = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
     const embed = buildEventEmbed(updated, ['https://de.finalfantasyxiv.com/lodestone/special/uncertain/'], NOW);
     assert.equal(embed.fields?.[0]?.value, 'Belohnungen: siehe Sonderseite\n[Zur Sonderseite](https://de.finalfantasyxiv.com/lodestone/special/uncertain/)');
+  } finally {
+    db.close();
+  }
+});
+
+test('uncertain refreshes keep the last verified dates and rewards in the public embed', () => {
+  const db = openDb(':memory:');
+  try {
+    const rewards = [{ itemId: 'item-1', name: 'Verifizierte Belohnung', section: 'Möbel' }];
+    const event = seedEvent(db, 'uncertain-refresh', 'Bestätigtes Event', undefined, undefined, rewards);
+    const sourceUrl = `https://de.finalfantasyxiv.com/lodestone/special/uncertain-refresh/`;
+    applyField(db, event.id, 'start', { status: 'unsicher', reason: 'Start gerade nicht lesbar' }, sourceUrl);
+    applyField(db, event.id, 'end', { status: 'unsicher', reason: 'Ende gerade nicht lesbar' }, sourceUrl);
+    applyField(db, event.id, 'rewards', { status: 'unsicher', reason: 'Belohnungen gerade nicht lesbar' }, sourceUrl);
+    const refreshed = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
+
+    const embed = buildEventEmbed(refreshed, [sourceUrl], NOW);
+
+    assert.match(embed.description ?? '', /15\.10\.2026, 10:00 Uhr – .*20\.10\.2026, 16:59 Uhr/);
+    assert.match(embed.fields?.[0]?.value ?? '', /Verifizierte Belohnung/);
+    assert.doesNotMatch(embed.fields?.[0]?.value ?? '', /siehe Sonderseite/);
+  } finally {
+    db.close();
+  }
+});
+
+test('a fresh database does not adopt a different event that reused the old numeric row ID', async () => {
+  const discord = new FakeDiscordPort();
+  const firstDb = openDb(':memory:');
+  const secondDb = openDb(':memory:');
+  try {
+    const first = seedEvent(firstDb, 'stable-source:first', 'Erstes Event');
+    const firstUrl = `https://de.finalfantasyxiv.com/lodestone/special/stable-source-first/`;
+    await syncEventEmbed({ event: first, sourceUrls: [firstUrl], guildId: 'guild', channelId: 'events', discord, store: firstDb });
+
+    const replacement = seedEvent(secondDb, 'stable-source:other', 'Anderes Event');
+    const otherUrl = `https://de.finalfantasyxiv.com/lodestone/special/stable-source-other/`;
+    await syncEventEmbed({ event: replacement, sourceUrls: [otherUrl], guildId: 'guild', channelId: 'events', discord, store: secondDb });
+
+    assert.equal(first.id, replacement.id, 'independent databases reuse the same integer row id');
+    assert.equal(discord.createMessageCount, 2);
+    assert.equal(discord.editMessageCount, 0);
+    assert.deepEqual(discord.messages.map((message) => embedOf(message).title), ['Erstes Event', 'Anderes Event']);
+  } finally {
+    firstDb.close();
+    secondDb.close();
+  }
+});
+
+test('legacy numeric message markers are not adopted without an exact source identity match', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'legacy-recovery', 'Gleichnamiges Event');
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/special/legacy-recovery/';
+    discord.messages.push({
+      id: 'legacy-message', channelId: 'events', authorIsBot: true, pinned: false, content: '',
+      embeds: [{ title: event.title, description: `[Zur Ankündigung](${sourceUrl}anderes-event)`, footer: { text: String(event.id) } }],
+    });
+    await syncEventEmbed({
+      event,
+      sourceUrls: [sourceUrl],
+      guildId: 'guild', channelId: 'events', discord, store: db,
+    });
+
+    assert.equal(discord.createMessageCount, 1);
+    assert.equal(discord.editMessageCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('legacy numeric message recovery requires an exact Lodestone source link and then upgrades the marker', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'legacy-exact-recovery', 'Legacy Event');
+    const sourceUrl = `https://de.finalfantasyxiv.com/lodestone/special/${event.eventKey}/`;
+    discord.messages.push({
+      id: 'legacy-exact-message', channelId: 'events', authorIsBot: true, pinned: false, content: '',
+      embeds: [{
+        title: event.title,
+        description: `[Zur Ankündigung](${sourceUrl})`,
+        footer: { text: String(event.id) },
+      }],
+    });
+
+    await syncEventEmbed({ event, sourceUrls: [sourceUrl], guildId: 'guild', channelId: 'events', discord, store: db });
+
+    assert.equal(discord.createMessageCount, 0);
+    assert.equal(discord.editMessageCount, 1);
+    assert.equal(discord.messages[0]?.id, 'legacy-exact-message');
+    assert.equal(embedOf(discord.messages[0]!).footer?.text, `Event-ID: ${stableEventIdentity(event.eventKey)}`);
   } finally {
     db.close();
   }
@@ -276,8 +396,104 @@ test('scheduled event uses a short preferred source URL and moves a running star
     await syncScheduledEvent({ event, sourceUrls: [topicUrl, specialUrl], guildId: 'guild', discord, store: db, now: NOW });
     assert.equal(discord.scheduledEvents[0]?.location, specialUrl);
     assert.equal(discord.scheduledEvents[0]?.startUtc, '2026-10-16T12:02:00.000Z');
-    assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(`Event-ID: ${event.id}`));
+    assert.equal(discord.scheduledEvents[0]?.description.split('\n')[0], `Event-ID: ${stableEventIdentity(event.eventKey)}`);
     assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(specialUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    db.close();
+  }
+});
+
+test('schedule recovery does not match a complete marker for a longer event key', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const target = seedEvent(db, 'identity:one', 'Event Eins');
+    let longer = seedEvent(db, 'identity:ten', 'Event Zehn');
+    for (let index = 0; index < 8; index += 1) {
+      seedEvent(db, `padding:${index}`, `Füllereignis ${index}`);
+    }
+    longer = getOpenEvents(db, NOW).find((event) => event.eventKey === 'identity:ten')!;
+    discord.scheduledEvents.push({
+      id: 'scheduled-event-10',
+      guildId: 'guild',
+      name: longer.title,
+      startUtc: '2026-10-16T12:02:00.000Z',
+      endUtc: longer.endUtc!,
+      location: 'https://de.finalfantasyxiv.com/lodestone/special/identity-ten/',
+      description: `Event-ID: 10\nhttps://de.finalfantasyxiv.com/lodestone/special/identity-ten/`,
+      status: 'SCHEDULED',
+    });
+
+    await syncScheduledEvent({
+      event: target,
+      sourceUrls: ['https://de.finalfantasyxiv.com/lodestone/special/identity-one/'],
+      guildId: 'guild', discord, store: db, now: NOW,
+    });
+
+    assert.equal(discord.editScheduledCount, 0);
+    assert.equal(discord.createScheduledCount, 1);
+    assert.equal(discord.scheduledEvents[0]?.name, longer.title);
+    assert.equal(discord.scheduledEvents[1]?.name, target.title);
+  } finally {
+    db.close();
+  }
+});
+
+test('unchanged scheduled timestamps compare by instant after Discord normalizes milliseconds', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'normalized-time', 'Unveränderter Termin', '2026-10-16T13:00:00Z', '2026-10-20T14:59:00Z');
+    const sourceUrls = ['https://de.finalfantasyxiv.com/lodestone/special/normalized-time/'];
+    await syncScheduledEvent({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+    await syncScheduledEvent({ event, sourceUrls, guildId: 'guild', discord, store: db, now: NOW });
+
+    assert.equal(discord.createScheduledCount, 1);
+    assert.equal(discord.editScheduledCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('status description stays within Discord limits and reports omitted running events', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const events = Array.from({ length: 20 }, (_, index) =>
+      seedEvent(db, `long-title-${index}`, `${String(index).padStart(2, '0')} ${'X'.repeat(256)}`),
+    );
+    await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events, discord, store: db, now: NOW });
+    const status = discord.messages.find((message) => embedOf(message).title === 'Läuft gerade');
+    const description = embedOf(status!).description ?? '';
+
+    assert.ok(description.length <= 4096);
+    assert.match(description, /Weitere Events sind im Event-Kanal aufgeführt\./);
+  } finally {
+    db.close();
+  }
+});
+
+test('status recovery finds the pinned post after it falls outside recent bot history', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const event = seedEvent(db, 'old-status', 'Alter Status');
+    await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events: [event], discord, store: db, now: NOW });
+    const pinnedStatus = discord.messages.find((message) => embedOf(message).title === 'Läuft gerade');
+    assert.ok(pinnedStatus?.pinned);
+    assert.equal(getGuild(db, 'guild')?.statusMessageId, pinnedStatus.id);
+
+    setGuildStatusMessage(db, 'guild', null);
+    for (let index = 0; index < 51; index += 1) {
+      discord.messages.push({
+        id: `newer-${index}`, channelId: 'events', authorIsBot: true, pinned: false, content: '', embeds: [],
+      });
+    }
+    await syncLiveStatusPost({ guildId: 'guild', channelId: 'events', events: [], discord, store: db, now: NOW });
+
+    assert.equal(discord.createMessageCount, 1);
+    assert.equal(discord.editMessageCount, 1);
+    assert.equal(discord.messages.find((message) => message.id === pinnedStatus!.id)?.embeds[0]?.description, 'Gerade läuft kein Event.');
   } finally {
     db.close();
   }
@@ -366,14 +582,14 @@ test('a completed scheduled event is replaced on extension while the event messa
     const event = seedEvent(db, 'maintenance', 'Wartung aller Welten');
     const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/special/maintenance/';
     await syncEventEmbed({ event, sourceUrls: [sourceUrl], channelId: 'events', discord, store: db });
-    const messageId = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.discordMessageId;
+    const messageId = getGuildEventObject(db, 'guild', event.eventKey)?.messageId;
     const oldScheduled = {
       id: 'old-scheduled', guildId: 'guild', name: event.title,
       startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-16T10:00:00.000Z',
       location: sourceUrl, description: `Event-ID: ${event.id}\n${sourceUrl}`, status: 'COMPLETED' as const,
     };
     discord.scheduledEvents.push(oldScheduled);
-    setDiscordIds(db, event.id, { scheduledEventId: oldScheduled.id });
+    setGuildDiscordIds(db, 'guild', event.eventKey, { scheduledEventId: oldScheduled.id });
     applyField(db, event.id, 'end', { status: 'ok', value: '2026-10-20T14:59:00.000Z' }, sourceUrl, '2026-10-16T11:00:00.000Z');
     const extended = getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)!;
 
@@ -382,8 +598,8 @@ test('a completed scheduled event is replaced on extension while the event messa
 
     assert.equal(discord.createMessageCount, 1);
     assert.equal(discord.createScheduledCount, 1);
-    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.discordMessageId, messageId);
-    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.scheduledEventId, 'scheduled-1');
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.messageId, messageId);
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.scheduledEventId, 'scheduled-1');
   } finally {
     db.close();
   }
@@ -406,7 +622,7 @@ test('a modify rejected after Discord completes the event creates a replacement 
     assert.equal(discord.createScheduledCount, 2);
     assert.equal(discord.scheduledEvents[0]?.status, 'COMPLETED');
     assert.equal(discord.scheduledEvents[1]?.endUtc, '2026-10-22T14:59:00.000Z');
-    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.scheduledEventId, 'scheduled-2');
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.scheduledEventId, 'scheduled-2');
   } finally {
     db.close();
   }
@@ -427,8 +643,8 @@ test('sync adopts messages and scheduled events left behind by a crash before sa
 
     assert.equal(discord.createMessageCount, 1);
     assert.equal(discord.createScheduledCount, 1);
-    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.discordMessageId, 'message-1');
-    assert.equal(getOpenEvents(db, NOW).find((candidate) => candidate.id === event.id)?.scheduledEventId, 'scheduled-1');
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.messageId, 'message-1');
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.scheduledEventId, 'scheduled-1');
   } finally {
     db.close();
   }

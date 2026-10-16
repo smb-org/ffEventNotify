@@ -1,14 +1,11 @@
-// Implements Design: single-server configuration from .env through process.env.
+// Reads process configuration shared by the public multi-server bot.
 
 import { existsSync } from 'node:fs';
 
 export interface AppConfig {
   discordToken: string;
-  guildId: string;
-  eventChannelId: string;
-  logChannelId: string;
   dbPath: string;
-  fixtureDumpDir: string;
+  fixtureDumpDir?: string;
 }
 
 export interface DryRunConfig {
@@ -51,11 +48,8 @@ export function readConfig(options: ReadConfigOptions = {}): AppConfig | DryRunC
 
   const config: AppConfig = {
     discordToken: readRequired('DISCORD_TOKEN'),
-    guildId: readRequired('GUILD_ID'),
-    eventChannelId: readRequired('EVENT_CHANNEL_ID'),
-    logChannelId: readRequired('LOG_CHANNEL_ID'),
-    dbPath: readRequired('DB_PATH'),
-    fixtureDumpDir: readRequired('FIXTURE_DUMP_DIR'),
+    dbPath: environment.DB_PATH?.trim() || './data/ffeventnotify.sqlite',
+    ...(environment.FIXTURE_DUMP_DIR?.trim() ? { fixtureDumpDir: environment.FIXTURE_DUMP_DIR.trim() } : {}),
   };
 
   if (missing.length > 0) {

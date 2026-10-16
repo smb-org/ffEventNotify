@@ -1,14 +1,15 @@
 // Renders player-facing German event embeds and synchronizes one message per event.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { setDiscordIds, warnOnce } from '../store.ts';
-import type { DiscordEmbed, DiscordPort } from '../types.ts';
+import { getGuildEventObject, setGuildDiscordIds } from '../store.ts';
+import { stableEventIdentity } from '../event-identity.ts';
+import type { DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
 
 export interface SyncEventEmbedOptions {
   event: StoreEvent;
   sourceUrls: readonly string[];
+  guildId?: string;
   channelId: string;
-  logChannelId?: string;
   discord: DiscordPort;
   store: Store;
   now?: Date;
@@ -54,11 +55,11 @@ function timestamp(utc: string, style: 'F' | 'R'): string {
 }
 
 function eventDescription(event: StoreEvent, link?: string): string {
-  if (event.startStatus === 'ok' && event.endStatus === 'ok' && event.startUtc && event.endUtc) {
+  if (event.startUtc && event.endUtc) {
     const localPeriod = `${berlinDateTime(event.startUtc)} – ${berlinDateTime(event.endUtc)}`;
     return `${localPeriod}\n${timestamp(event.startUtc, 'F')} (${timestamp(event.startUtc, 'R')}) – ${timestamp(event.endUtc, 'F')} (${timestamp(event.endUtc, 'R')})`;
   }
-  if (event.startStatus === 'ok' && event.startUtc) {
+  if (event.startUtc) {
     const verifiedStart = `Beginn: ${berlinDateTime(event.startUtc)}\n${timestamp(event.startUtc, 'F')} (${timestamp(event.startUtc, 'R')})`;
     const sourceLink = link ? `\n[Zur Ankündigung](${link})` : '';
     return `${verifiedStart}\nEnde: siehe Lodestone${sourceLink}`;
@@ -144,13 +145,13 @@ export function buildEventEmbed(event: StoreEvent, sourceUrls: readonly string[]
   const link = sourceUrl(sourceUrls);
   const embed: DiscordEmbed = {
     description: eventDescription(event, link),
-    footer: { text: String(event.id) },
+    footer: { text: `Event-ID: ${stableEventIdentity(event.eventKey)}` },
   };
   if (event.title.length > 0 && !isUnverifiedPathFragment(event)) embed.title = event.title.slice(0, 256);
 
   if (event.rewardsStatus === 'n/a') return embed;
 
-  if (event.rewardsStatus === 'unsicher') {
+  if (event.rewardsStatus === 'unsicher' && event.rewards.length === 0) {
     const value = link
       ? `Belohnungen: siehe Sonderseite\n[Zur Sonderseite](${link})`
       : 'Belohnungen: siehe Sonderseite';
@@ -184,11 +185,16 @@ function samePayload(left: DiscordEmbed, right: DiscordEmbed): boolean {
   return JSON.stringify(normalized(left)) === JSON.stringify(normalized(right));
 }
 
+function hasExactSourceLink(description: string, sourceUrls: readonly string[]): boolean {
+  const links = [...description.matchAll(/\]\((https?:\/\/[^\s)]+)\)/g)].map((match) => match[1]);
+  return links.some((link) => sourceUrls.includes(link ?? ''));
+}
+
 export async function syncEventEmbed({
   event,
   sourceUrls,
+  guildId = 'guild',
   channelId,
-  logChannelId = channelId,
   discord,
   store,
   now,
@@ -196,39 +202,41 @@ export async function syncEventEmbed({
   const embed = buildEventEmbed(event, sourceUrls, now);
   const payload = { embeds: [embed] };
   const recent = await discord.fetchRecentBotMessages(channelId, 50);
-  const matched = recent.find((message) => message.authorIsBot && message.embeds.some((candidate) => candidate.footer?.text === String(event.id)));
-  const stored = event.discordMessageId === null
-    ? undefined
-    : recent.find((message) => message.id === event.discordMessageId);
-  const existing = stored ?? matched;
+  const marker = embed.footer!.text;
+  const stableMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) => candidate.footer?.text === marker));
+  if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Meldungen tragen dieselbe Event-ID ${marker}.`);
+  const stableMatch = stableMatches[0];
+  const legacyMatches = recent.filter((message) => message.authorIsBot && message.embeds.some((candidate) =>
+    candidate.footer?.text === String(event.id) && candidate.title === event.title &&
+    hasExactSourceLink(candidate.description ?? '', sourceUrls),
+  ));
+  if (legacyMatches.length > 1) throw new Error(`Mehrere ältere Discord-Meldungen passen zu Event-ID ${event.id}.`);
+  const legacyMatch = legacyMatches[0];
+  const object = getGuildEventObject(store, guildId, event.eventKey);
+  let stored: DiscordMessageSnapshot | null = null;
+  if (object?.messageId && object.messageChannelId === channelId) {
+    try {
+      const fetched = await discord.fetchMessage(channelId, object.messageId);
+      if (fetched?.authorIsBot && fetched.embeds.some((candidate) => candidate.footer?.text === marker)) stored = fetched;
+    } catch {
+      // A deleted message is treated as missing; the marker search below can still recover it.
+    }
+  }
+  const existing = stored ?? stableMatch ?? legacyMatch;
 
   if (existing) {
-    setDiscordIds(store, event.id, { discordMessageId: existing.id });
-    const currentEmbed = existing.embeds.find((candidate) => candidate.footer?.text === String(event.id));
+    setGuildDiscordIds(store, guildId, event.eventKey, { messageId: existing.id, messageChannelId: channelId });
+    const currentEmbed = existing.embeds.find((candidate) => candidate.footer?.text === marker) ?? existing.embeds.find((candidate) =>
+      candidate.footer?.text === String(event.id) && candidate.title === event.title &&
+      hasExactSourceLink(candidate.description ?? '', sourceUrls),
+    );
     if (!currentEmbed || !samePayload(currentEmbed, embed)) {
-      try {
-        await discord.editMessage(channelId, existing.id, payload);
-      } catch (error) {
-        if (warnOnce(store, `event-message:edit-failed:${event.id}`)) {
-          await discord.sendLog(logChannelId, `Die Meldung zu „${event.title}“ konnte nicht bearbeitet werden.`);
-        }
-      }
+      await discord.editMessage(channelId, existing.id, payload);
     }
     return existing.id;
   }
 
-  if (event.discordMessageId !== null) {
-    try {
-      await discord.editMessage(channelId, event.discordMessageId, payload);
-    } catch (error) {
-      if (warnOnce(store, `event-message:edit-failed:${event.id}`)) {
-        await discord.sendLog(logChannelId, `Die Meldung zu „${event.title}“ konnte nicht bearbeitet werden.`);
-      }
-    }
-    return event.discordMessageId;
-  }
-
   const created = await discord.createMessage(channelId, payload);
-  setDiscordIds(store, event.id, { discordMessageId: created.id });
+  setGuildDiscordIds(store, guildId, event.eventKey, { messageId: created.id, messageChannelId: channelId });
   return created.id;
 }

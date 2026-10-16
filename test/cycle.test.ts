@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { load } from 'cheerio';
 import test from 'node:test';
 import { SourceHealthMonitor } from '../src/health.ts';
-import { getAllEvents, getEventSources, getOpenEvents, isSeen, markFirstRunDone, openDb, setMetaValue, type Store } from '../src/store.ts';
+import { applyField, attachSource, createEvent, getAllEvents, getEventSources, getGuildEventObject, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
   DiscordEmbed,
   DiscordMessagePayload,
@@ -19,6 +19,7 @@ import type {
 } from '../src/types.ts';
 import { runCycle } from '../src/cycle.ts';
 import { runDryRunCycle } from '../src/dry-run.ts';
+import { stableEventIdentity } from '../src/event-identity.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 const fixture = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -43,6 +44,8 @@ class FakeDiscordPort implements DiscordPort {
   createScheduledCount = 0;
   editScheduledCount = 0;
   pinCount = 0;
+  failScheduledNameOnce: string | undefined;
+  readonly logChannels: Array<{ channelId: string; content: string }> = [];
 
   async createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     this.createMessageCount += 1;
@@ -61,10 +64,27 @@ class FakeDiscordPort implements DiscordPort {
   }
 
   async fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]> {
-    return this.messages.filter((message) => message.authorIsBot && message.channelId === channelId).slice(-limit).reverse();
+    return this.messages.filter((message) => message.channelId === channelId).slice().reverse()
+      .filter((message) => message.authorIsBot).slice(0, limit);
+  }
+
+  async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
+    return this.messages.filter((message) => message.authorIsBot && message.channelId === channelId && message.pinned);
+  }
+
+  async fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null> {
+    return this.messages.find((message) => message.channelId === channelId && message.id === messageId) ?? null;
+  }
+
+  async isTextChannel(_channelId: string): Promise<boolean> {
+    return true;
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
+    if (payload.name === this.failScheduledNameOnce) {
+      this.failScheduledNameOnce = undefined;
+      throw new Error(`simulated scheduled-event failure for ${payload.name}`);
+    }
     this.createScheduledCount += 1;
     const event: ScheduledEventSnapshot = {
       ...payload,
@@ -96,8 +116,9 @@ class FakeDiscordPort implements DiscordPort {
     message.pinned = true;
   }
 
-  async sendLog(_channelId: string, content: string): Promise<void> {
+  async sendLog(channelId: string, content: string): Promise<void> {
     this.logs.push(content);
+    this.logChannels.push({ channelId, content });
   }
 
   private makeMessage(channelId: string, payload: DiscordMessagePayload): DiscordMessageSnapshot {
@@ -223,9 +244,7 @@ function cycleOptions(store: Store, discord: FakeDiscordPort, health = new Sourc
     store,
     discord,
     fetchText: fixtureFetcher(),
-    guildId: 'guild',
-    eventChannelId: 'events',
-    logChannelId: 'logs',
+    guilds: [{ guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs', firstRun: isFirstRun(store) }],
     now: () => new Date(NOW),
     health,
   };
@@ -313,7 +332,7 @@ test('FFXV period from the topic supplies the seasonal event when its special pa
         { field: 'end', sourceUrl: `https://de.finalfantasyxiv.com${topicUrl}` },
         { field: 'start', sourceUrl: `https://de.finalfantasyxiv.com${topicUrl}` },
       ]);
-      assert.equal(event.discordMessageId !== null, isUpcoming);
+      assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.messageId !== null && getGuildEventObject(db, 'guild', event.eventKey)?.messageId !== undefined, isUpcoming);
       if (!isUpcoming) assert.equal(eventEmbeds(discord).length, 0);
     } finally {
       db.close();
@@ -355,7 +374,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.equal(result.firstRun, true);
     assert.equal(posted.length, 3);
     const postedTitles = getAllEvents(db)
-      .filter((event) => event.discordMessageId !== null)
+      .filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId !== null && getGuildEventObject(db, 'guild', event.eventKey)?.messageId !== undefined)
       .map((event) => event.title);
     assert.equal(postedTitles.length, 3);
     assert.ok(postedTitles.some((title) => title.includes('Allerschutzheiligen')));
@@ -371,7 +390,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
       'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404.',
       'Erststart: 21 erfasst, 3 gepostet, 14 unklassifiziert, 37 ignoriert',
     ]);
-    assert.deepEqual(getOpenEvents(db, NOW).filter((event) => event.discordMessageId !== null).length, 3);
+    assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 3);
 
     discord.logs.length = 0;
     setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
@@ -388,6 +407,88 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.deepEqual(discord.logs, [
       `Nicht klassifiziert: Neue Meldung ohne Eventbezug (https://de.finalfantasyxiv.com${newTopicUrl})`,
     ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('a newly configured guild gets an immediate first sync while Lodestone is fetched once for all guilds', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  upsertGuildSetup(db, { guildId: 'guild-a', eventChannelId: 'events-a', logChannelId: 'logs-a' });
+  const fetchCalls: string[] = [];
+  const baseFetch = fixtureFetcher();
+  const fetchText: FetchText = async (url, options) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/lodestone/topics/' || parsed.pathname === '/lodestone/news/category/2' || parsed.pathname === '/lodestone/news/news.xml') {
+      fetchCalls.push(`${parsed.pathname}${parsed.search}`);
+    }
+    return baseFetch(url, options);
+  };
+  try {
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+    const guildAMessages = discord.messages.filter((message) => message.channelId === 'events-a');
+    assert.equal(guildAMessages.filter((message) => message.embeds.some((embed) => embed.title === 'Läuft gerade')).length, 1);
+
+    upsertGuildSetup(db, { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b' });
+    fetchCalls.length = 0;
+    await runCycle({ store: db, discord, fetchText, now: () => new Date(NOW) });
+
+    const guildBMessages = discord.messages.filter((message) => message.channelId === 'events-b');
+    assert.equal(guildAMessages.filter((message) => message.embeds.some((embed) => embed.title === 'Läuft gerade')).length, 1);
+    assert.equal(guildBMessages.filter((message) => message.embeds.some((embed) => embed.title === 'Läuft gerade')).length, 1);
+    assert.equal(guildBMessages.filter((message) => message.embeds.some((embed) => embed.footer?.text)).length, 3);
+    assert.equal(discord.scheduledEvents.filter((event) => event.guildId === 'guild-a').length, 3);
+    assert.equal(discord.scheduledEvents.filter((event) => event.guildId === 'guild-b').length, 3);
+    assert.equal(fetchCalls.length, 7, 'three topic pages, three maintenance pages and one feed are shared by both servers');
+    assert.equal(new Set(fetchCalls).size, fetchCalls.length, 'each Lodestone list is fetched once in the cycle');
+    assert.ok(discord.logChannels.some(({ channelId, content }) => channelId === 'logs-b' && content.startsWith('Erststart:')));
+  } finally {
+    db.close();
+  }
+});
+
+test('one event sync failure is logged for its guild and later events still synchronize', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  const sourceUrls = [
+    'https://de.finalfantasyxiv.com/lodestone/special/failing-event/',
+    'https://de.finalfantasyxiv.com/lodestone/special/later-event/',
+  ];
+  for (const [index, title] of ['Fehlerhaftes Event', 'Späteres Event'].entries()) {
+    const eventKey = `sync-isolation:${index}`;
+    const id = createEvent(db, { eventKey, eventType: 'topic-generic', title });
+    attachSource(db, { eventId: id, url: sourceUrls[index]!, kind: 'special' });
+    applyField(db, id, 'start', { status: 'ok', value: '2026-10-16T10:00:00.000Z' }, sourceUrls[index]!);
+    applyField(db, id, 'end', { status: 'ok', value: '2026-10-20T14:59:00.000Z' }, sourceUrls[index]!);
+  }
+  discord.failScheduledNameOnce = 'Fehlerhaftes Event';
+  const baseOptions = cycleOptions(db, discord);
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title: 'Unclassified filler', url: '/lodestone/topics/detail/filler' }]),
+    maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored' }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === '/lodestone/topics/detail/filler'
+      ? { status: 200, body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>', finalUrl: url }
+      : undefined,
+  });
+  try {
+    await runCycle({ ...baseOptions, fetchText });
+
+    const eventTitles = eventEmbeds(discord).map(({ embed }) => embed.title);
+    assert.ok(eventTitles.includes('Fehlerhaftes Event'));
+    assert.ok(eventTitles.includes('Späteres Event'));
+    assert.ok(discord.scheduledEvents.some((event) => event.name === 'Späteres Event'));
+    assert.equal(discord.logChannels.filter(({ channelId, content }) => channelId === 'logs'
+      && content.includes('Der Abgleich für „Fehlerhaftes Event“')).length, 1);
+    assert.equal(getGuildEventObject(db, 'guild', 'sync-isolation:0')?.status, 'failed');
+    assert.equal(getGuildEventObject(db, 'guild', 'sync-isolation:1')?.status, 'synced');
+    const messageCount = discord.createMessageCount;
+    await runCycle({ ...baseOptions, fetchText });
+    assert.equal(discord.createMessageCount, messageCount);
+    assert.equal(getGuildEventObject(db, 'guild', 'sync-isolation:0')?.status, 'synced');
+    assert.equal(discord.scheduledEvents.filter((event) => event.name === 'Fehlerhaftes Event').length, 1);
   } finally {
     db.close();
   }
@@ -451,7 +552,7 @@ test('ten repeated cycles and a database restart create and edit nothing after i
     db = openDb(dbPath);
     await runCycle(cycleOptions(db, discord, new SourceHealthMonitor(db)));
 
-    assert.equal(discord.createMessageCount, createdMessages, JSON.stringify({ counts, events: getAllEvents(db).map((event) => ({ id: event.id, key: event.eventKey, message: event.discordMessageId, title: event.title })) }));
+    assert.equal(discord.createMessageCount, createdMessages, JSON.stringify({ counts, events: getAllEvents(db).map((event) => ({ id: event.id, key: event.eventKey, message: getGuildEventObject(db, 'guild', event.eventKey)?.messageId, title: event.title })) }));
     assert.equal(discord.createScheduledCount, createdSchedules);
     assert.equal(discord.editMessageCount + discord.editScheduledCount, edits);
     db.close();
@@ -471,7 +572,7 @@ test('blind source state suppresses event and scheduled-event creates', async ()
     authorIsBot: true,
     pinned: true,
     content: '',
-    embeds: [{ title: 'Läuft gerade', description: 'Gerade läuft kein Event.' }],
+    embeds: [{ title: 'Läuft gerade', description: 'Veralteter Status, der im blinden Zustand eingefroren bleiben muss.' }],
   });
   try {
     await runCycle({
@@ -485,6 +586,8 @@ test('blind source state suppresses event and scheduled-event creates', async ()
     assert.equal(eventEmbeds(discord).length, 0);
     assert.equal(discord.createMessageCount, 0);
     assert.equal(discord.editMessageCount, 0);
+    assert.equal(discord.messages.find((message) => message.id === 'status-existing')?.embeds[0]?.description,
+      'Veralteter Status, der im blinden Zustand eingefroren bleiben muss.');
     assert.equal(discord.createScheduledCount, 0);
     assert.ok(discord.logs.some((message) => message.includes('Lodestone nicht lesbar')));
   } finally {
@@ -825,7 +928,7 @@ test('a first-run topic detail failure persists its URL and suppression after it
 
     assert.ok(event);
     assert.equal(event.endStatus, 'unsicher');
-    assert.equal(event.discordMessageId, null);
+    assert.equal(getGuildEventObject(db, 'guild', event.eventKey)?.messageId ?? null, null);
     assert.equal(discord.createMessageCount, messagesAfterBootstrap);
   } finally {
     db.close();
@@ -883,7 +986,7 @@ test('banner specials without a verified title do not publish their URL fragment
     await runCycle({ ...cycleOptions(db, discord), fetchText });
     const event = getAllEvents(db).find((candidate) => candidate.eventKey === 'seasonal-special:/lodestone/special/opaque123/');
     assert.ok(event);
-    const posted = eventEmbeds(discord).find((entry) => entry.eventId === String(event.id));
+    const posted = eventEmbeds(discord).find((entry) => entry.eventId === `Event-ID: ${stableEventIdentity(event.eventKey)}`);
 
     assert.ok(posted);
     assert.equal(event.title, 'opaque123');

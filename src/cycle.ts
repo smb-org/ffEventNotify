@@ -5,20 +5,27 @@ import {
   applyField,
   attachSource,
   createEvent,
+  deliverWarning,
+  getConfiguredGuilds,
   findEventByKey,
   findEventBySourceUrl,
   getAllEvents,
   getEventSources,
   getMetaValue,
   getOpenEvents,
-  isFirstRun,
+  getGuildEventObject,
+  getPendingWarnings,
+  markGuildFirstRunDone,
+  markGuildEventFirstRunSuppressed,
+  markGuildNeedsSetup,
   markFirstRunDone,
   markSeen,
   setMetaValue,
-  warnOnce,
+  setGuildEventSyncStatus,
   type Store,
   type StoreEvent,
   type StoreEventSource,
+  type StoredGuild,
 } from './store.ts';
 import { classifyEntry, maintenanceStem, maintenanceTarget } from './classify.ts';
 import { extractGenericTopic, deriveGenericEventKey } from './extractors/generic.ts';
@@ -59,11 +66,16 @@ export interface CycleOptions {
   store: Store;
   discord: DiscordPort;
   fetchText: FetchText;
+  guilds?: CycleGuild[];
+  now?: () => Date;
+  health?: SourceHealthMonitor;
+}
+
+export interface CycleGuild {
   guildId: string;
   eventChannelId: string;
   logChannelId: string;
-  now?: () => Date;
-  health?: SourceHealthMonitor;
+  firstRun: boolean;
 }
 
 export interface CycleResult {
@@ -78,6 +90,7 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
   clock: () => Date;
   currentTime: Date;
   firstRun: boolean;
+  guilds: CycleGuild[];
   processedSources: Set<string>;
   capturedEventIds: Set<number>;
   unclassifiedUrls: Set<string>;
@@ -91,6 +104,7 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
 interface PendingDiscovery {
   entry: ListEntry;
   firstRun: boolean;
+  firstRunGuildIds?: string[];
 }
 
 interface ApplyExtractOptions {
@@ -124,7 +138,13 @@ function loadPendingDiscoveries(store: Store): Map<string, PendingDiscovery> {
         || typeof record.entry.title !== 'string'
         || !['topic', 'maintenance', 'feed', 'banner'].includes(record.entry.source)) continue;
       const entry = { ...record.entry, url: normalizeLodestoneUrl(record.entry.url) };
-      pending.set(entry.url, { entry, firstRun: record.firstRun });
+      pending.set(entry.url, {
+        entry,
+        firstRun: record.firstRun,
+        firstRunGuildIds: Array.isArray(record.firstRunGuildIds)
+          ? record.firstRunGuildIds.filter((guildId): guildId is string => typeof guildId === 'string')
+          : [],
+      });
     }
   } catch {
     return pending;
@@ -142,6 +162,9 @@ function rememberPendingDiscovery(context: CycleContext, entry: ListEntry): void
   context.pendingDiscoveries.set(normalizedEntry.url, {
     entry: normalizedEntry,
     firstRun: previous?.firstRun ?? context.firstRun,
+    firstRunGuildIds: previous?.firstRunGuildIds ?? (context.firstRun
+      ? context.guilds.filter((guild) => guild.firstRun).map((guild) => guild.guildId)
+      : []),
   });
   persistPendingDiscoveries(context);
 }
@@ -155,10 +178,11 @@ function finishPendingDiscovery(context: CycleContext, url: string, eventId?: nu
 
   if (!pending.firstRun || eventId === undefined) return;
   const event = getAllEvents(context.store).find((candidate) => candidate.id === eventId);
-  if (!event || (event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > context.currentTime.getTime())) return;
-  const suppressed = new Set<number>(JSON.parse(getMetaValue(context.store, 'first_run_suppressed_event_ids') ?? '[]') as number[]);
-  suppressed.add(eventId);
-  setMetaValue(context.store, 'first_run_suppressed_event_ids', JSON.stringify([...suppressed]));
+  if (!event || (event.endStatus === 'ok' && event.endUtc !== null
+    && Date.parse(event.endUtc) > context.currentTime.getTime())) return;
+  for (const guildId of pending.firstRunGuildIds ?? []) {
+    markGuildEventFirstRunSuppressed(context.store, guildId, event.eventKey);
+  }
 }
 
 function sourceKind(entry: ListEntry): StoreEventSource['kind'] {
@@ -254,8 +278,18 @@ async function readLists(context: CycleContext, firstRun: boolean): Promise<Load
   return { topicEntries, maintenanceEntries, bannerHtml, feedEntries, counts, succeeded };
 }
 
-async function logWarning(context: CycleContext, key: string, message: string): Promise<void> {
-  if (warnOnce(context.store, key)) await context.discord.sendLog(context.logChannelId, message);
+async function logWarning(context: CycleContext, key: string, message: string, targetGuildId?: string): Promise<void> {
+  const recipients = targetGuildId === undefined
+    ? context.guilds
+    : context.guilds.filter((guild) => guild.guildId === targetGuildId);
+  for (const guild of recipients) {
+    try {
+      await deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
+        (channelId, content) => context.discord.sendLog(channelId, content));
+    } catch (error) {
+      console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+    }
+  }
 }
 
 async function logSourceFailure(context: CycleContext, url: string, error: unknown): Promise<void> {
@@ -809,13 +843,13 @@ async function warnForUnmatchedFollowups(context: CycleContext): Promise<void> {
 
 async function warnForUncertainFields(
   context: CycleContext,
+  guild: CycleGuild,
   event: StoreEvent,
-  firstRunSuppressed: ReadonlySet<number>,
 ): Promise<void> {
+  const guildEvent = getGuildEventObject(context.store, guild.guildId, event.eventKey);
   const ended = event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) <= context.currentTime.getTime();
-  const suppressedAndNotPostable = firstRunSuppressed.has(event.id)
-    && (event.endStatus !== 'ok' || !event.endUtc || Date.parse(event.endUtc) <= context.currentTime.getTime());
-  if (ended || suppressedAndNotPostable) return;
+  if (ended || guildEvent?.firstRunSuppressed
+    || (guild.firstRun && !shouldPostToGuild(event, guild.guildId, context.currentTime, true, context.store))) return;
 
   const fields: Array<[string, string | null]> = [
     ['Titel', event.titleStatus === 'unsicher' ? event.titleReason : null],
@@ -825,7 +859,10 @@ async function warnForUncertainFields(
     ['Beschreibung', event.descriptionStatus === 'unsicher' ? event.descriptionReason : null],
   ];
   for (const [field, reason] of fields) {
-    if (reason) await logWarning(context, `event:${event.id}:field:${field}`, `Unsicheres Feld „${field}“ bei „${event.title}“: ${reason}`);
+    if (reason) {
+      await logWarning(context, `event:${event.eventKey}:field:${field}`,
+        `Unsicheres Feld „${field}“ bei „${event.title}“: ${reason}`, guild.guildId);
+    }
   }
 }
 
@@ -864,56 +901,116 @@ async function runWikiCrossCheck(context: CycleContext): Promise<void> {
   }
 }
 
-function shouldPost(event: StoreEvent, now: Date, firstRun: boolean, firstRunSuppressed: ReadonlySet<number>): boolean {
+function shouldPostToGuild(event: StoreEvent, guildId: string, now: Date, firstRun: boolean, store: Store): boolean {
+  const object = getGuildEventObject(store, guildId, event.eventKey);
+  if (object?.firstRunSuppressed) return false;
   if (firstRun) return event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime();
-  if (event.discordMessageId !== null) return true;
-  if (firstRunSuppressed.has(event.id)) {
-    return event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime();
-  }
-  return event.endStatus === 'unsicher' || (event.endUtc !== null && Date.parse(event.endUtc) > now.getTime());
+  if (object?.messageId) return true;
+  if (event.endUtc !== null && Date.parse(event.endUtc) <= now.getTime()) return false;
+  return event.endStatus === 'unsicher' || event.endUtc !== null;
 }
 
-async function syncEvents(
-  context: CycleContext,
-  firstRun: boolean,
-  blind: boolean,
-  firstRunSuppressed: ReadonlySet<number>,
-): Promise<number> {
+async function drainPendingWarnings(context: CycleContext): Promise<void> {
+  for (const guild of context.guilds) {
+    for (const warning of getPendingWarnings(context.store, guild.guildId)) {
+      try {
+        await deliverWarning(context.store, guild.guildId, guild.logChannelId, warning.key, warning.content,
+          (channelId, content) => context.discord.sendLog(channelId, content));
+      } catch (error) {
+        console.warn(`Ausstehende Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+      }
+    }
+  }
+}
+
+async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: boolean): Promise<number> {
   const candidates = getOpenEvents(context.store, context.currentTime)
-    .filter((event) => shouldPost(event, context.currentTime, firstRun, firstRunSuppressed));
+    .filter((event) => shouldPostToGuild(event, guild.guildId, context.currentTime, guild.firstRun, context.store));
   if (blind) return 0;
   let posted = 0;
   for (const event of candidates) {
     const sourceUrls = getEventSources(context.store, event.id).map((source) => source.url);
-    await syncEventEmbed({
-      event,
-      sourceUrls,
-      channelId: context.eventChannelId,
-      logChannelId: context.logChannelId,
-      discord: context.discord,
-      store: context.store,
-      now: context.currentTime,
-    });
-    await syncScheduledEvent({
-      event,
-      sourceUrls,
-      guildId: context.guildId,
-      discord: context.discord,
-      store: context.store,
-      now: context.currentTime,
-      clock: context.clock,
-    });
-    posted += 1;
+    const errors: unknown[] = [];
+    try {
+      await syncEventEmbed({
+        event, sourceUrls, guildId: guild.guildId, channelId: guild.eventChannelId,
+        discord: context.discord, store: context.store, now: context.currentTime,
+      });
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await syncScheduledEvent({
+        event, sourceUrls, guildId: guild.guildId, discord: context.discord,
+        store: context.store, now: context.currentTime, clock: context.clock,
+      });
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length > 0) {
+      const details = errors.map((error) => error instanceof Error ? error.message : String(error)).join('; ');
+      setGuildEventSyncStatus(context.store, guild.guildId, event.eventKey, 'failed', details);
+      await logWarning(context, `guild-event-sync:${event.eventKey}`,
+        `Der Abgleich für „${event.title}“ ist fehlgeschlagen und wird erneut versucht: ${details}`, guild.guildId);
+    } else {
+      setGuildEventSyncStatus(context.store, guild.guildId, event.eventKey, 'synced');
+      posted += 1;
+    }
   }
   return posted;
+}
+
+async function syncGuildStatus(context: CycleContext, guild: CycleGuild, blind: boolean): Promise<void> {
+  if (blind) return;
+  try {
+    await syncLiveStatusPost({
+      guildId: guild.guildId,
+      channelId: guild.eventChannelId,
+      logChannelId: guild.logChannelId,
+      events: getOpenEvents(context.store, context.currentTime),
+      discord: context.discord,
+      store: context.store,
+      now: context.currentTime,
+      suppressLogs: guild.firstRun,
+    });
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    await logWarning(context, 'status-post:sync-failed',
+      `Die Statusmeldung „Läuft gerade“ konnte nicht synchronisiert werden: ${details}`, guild.guildId);
+  }
 }
 
 export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const clock = options.now ?? (() => new Date());
   const currentTime = clock();
-  const firstRun = isFirstRun(options.store);
+  const configured: CycleGuild[] = options.guilds ?? getConfiguredGuilds(options.store).map((guild: StoredGuild) => ({
+    guildId: guild.guildId,
+    eventChannelId: guild.eventChannelId!,
+    logChannelId: guild.logChannelId!,
+    firstRun: !guild.firstRunDone,
+  }));
+  const guilds: CycleGuild[] = [];
+  for (const guild of configured) {
+    let channelsAvailable = false;
+    try {
+      const [eventChannel, logChannel] = await Promise.all([
+        options.discord.isTextChannel(guild.eventChannelId),
+        options.discord.isTextChannel(guild.logChannelId),
+      ]);
+      channelsAvailable = eventChannel && logChannel;
+    } catch {
+      channelsAvailable = false;
+    }
+    if (!channelsAvailable) {
+      markGuildNeedsSetup(options.store, guild.guildId);
+      continue;
+    }
+    guilds.push(guild);
+  }
+  const firstRun = guilds.some((guild) => guild.firstRun);
   const context: CycleContext = {
     ...options,
+    guilds,
     health: options.health ?? new SourceHealthMonitor(options.store),
     clock,
     currentTime,
@@ -927,6 +1024,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     specialPages: new Map(),
     pendingDiscoveries: loadPendingDiscoveries(options.store),
   };
+  await drainPendingWarnings(context);
+  if (guilds.length === 0) return { firstRun, capturedEvents: 0, postedEvents: 0, blind: false };
+
   const lists = await readLists(context, firstRun);
   const health = context.health.recordCycleHealth(lists.counts, lists.succeeded, currentTime);
   await logHealthTransition(context);
@@ -944,48 +1044,39 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     await warnForUnmatchedFollowups(context);
   }
 
-  const firstRunSuppressed = new Set<number>(JSON.parse(getMetaValue(context.store, 'first_run_suppressed_event_ids') ?? '[]') as number[]);
-  if (firstRun && !health.isBlind) {
-    for (const event of getAllEvents(context.store)) {
-      if (!context.capturedEventIds.has(event.id)) continue;
-      if (event.endStatus !== 'ok' || event.endUtc === null || Date.parse(event.endUtc) <= currentTime.getTime()) {
-        firstRunSuppressed.add(event.id);
+  for (const guild of guilds) {
+    for (const event of getAllEvents(options.store)) await warnForUncertainFields(context, guild, event);
+  }
+
+  let postedEvents = 0;
+  for (const guild of guilds) {
+    if (guild.firstRun) {
+      for (const event of getAllEvents(options.store)) {
+        if (!shouldPostToGuild(event, guild.guildId, context.currentTime, true, options.store)) {
+          markGuildEventFirstRunSuppressed(options.store, guild.guildId, event.eventKey);
+        }
       }
     }
-    setMetaValue(context.store, 'first_run_suppressed_event_ids', JSON.stringify([...firstRunSuppressed]));
+    const guildPosted = await syncGuildEvents(context, guild, health.isBlind);
+    postedEvents += guildPosted;
+    await syncGuildStatus(context, guild, health.isBlind);
+    if (guild.firstRun && lists.succeeded && !health.isBlind) {
+      try {
+        await deliverWarning(options.store, guild.guildId, guild.logChannelId, 'first-run:summary',
+          `Erststart: ${context.capturedEventIds.size} erfasst, ${guildPosted} gepostet, ${context.unclassifiedUrls.size} unklassifiziert, ${context.ignoredUrls.size} ignoriert`,
+          (channelId, content) => options.discord.sendLog(channelId, content));
+      } catch (error) {
+        console.warn(`Erststart-Bericht für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+      }
+      markGuildFirstRunDone(options.store, guild.guildId);
+    }
   }
 
-  const postedEvents = await syncEvents(context, firstRun, health.isBlind, firstRunSuppressed);
-  for (const event of getAllEvents(context.store)) {
-    await warnForUncertainFields(context, event, firstRunSuppressed);
+  // Explicit guild overrides are used by dry-run and compatibility callers without guild rows.
+  if (options.guilds && guilds.some((guild) => guild.firstRun) && lists.succeeded && !health.isBlind) {
+    markFirstRunDone(options.store);
   }
-  const liveEvents = getOpenEvents(context.store, currentTime);
-  await syncLiveStatusPost({
-    guildId: context.guildId,
-    channelId: context.eventChannelId,
-    logChannelId: context.logChannelId,
-    events: liveEvents,
-    discord: context.discord,
-    store: context.store,
-    now: currentTime,
-    suppressLogs: firstRun,
-  });
 
   await runWikiCrossCheck(context);
-  if (firstRun && lists.succeeded && !health.isBlind) {
-    if (warnOnce(context.store, 'first-run:summary')) {
-      await context.discord.sendLog(
-        context.logChannelId,
-        `Erststart: ${context.capturedEventIds.size} erfasst, ${postedEvents} gepostet, ${context.unclassifiedUrls.size} unklassifiziert, ${context.ignoredUrls.size} ignoriert`,
-      );
-    }
-    markFirstRunDone(context.store);
-  }
-
-  return {
-    firstRun,
-    capturedEvents: context.capturedEventIds.size,
-    postedEvents,
-    blind: health.isBlind,
-  };
+  return { firstRun, capturedEvents: context.capturedEventIds.size, postedEvents, blind: health.isBlind };
 }

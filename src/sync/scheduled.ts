@@ -1,7 +1,8 @@
 // Synchronizes Discord-managed external scheduled events without setting status.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { setDiscordIds } from '../store.ts';
+import { getGuildEventObject, setGuildDiscordIds } from '../store.ts';
+import { stableEventIdentity } from '../event-identity.ts';
 import type { DiscordPort, ScheduledEventPayload, ScheduledEventSnapshot } from '../types.ts';
 
 export interface SyncScheduledEventOptions {
@@ -32,8 +33,8 @@ function orderedUrls(sourceUrls: readonly string[]): string[] {
   ];
 }
 
-function eventMarker(eventId: number): string {
-  return `Event-ID: ${eventId}`;
+function eventMarker(eventKey: string): string {
+  return `Event-ID: ${stableEventIdentity(eventKey)}`;
 }
 
 export function scheduledEventPayloadFor(
@@ -51,7 +52,7 @@ export function scheduledEventPayloadFor(
   const chosenUrl = urls[0];
   const selectedLocation = chosenUrl && chosenUrl.length <= 100 ? chosenUrl : LOCATION_FALLBACK;
   const descriptionUrl = urls.find((url) => url.length <= 980) ?? chosenUrl ?? '';
-  const description = `${eventMarker(event.id)}${descriptionUrl ? `\n${descriptionUrl}` : ''}`;
+  const description = `${eventMarker(event.eventKey)}${descriptionUrl ? `\n${descriptionUrl}` : ''}`;
 
   const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
   if (!(nowMs < scheduledStart && scheduledStart < endMs)) return undefined;
@@ -85,14 +86,36 @@ export function scheduledEventUnavailableReason(event: StoreEvent, now: Date): s
   return 'Es konnte kein passender Discord-Event-Zeitraum berechnet werden.';
 }
 
+function sameInstant(left: string, right: string): boolean {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+}
+
 function sameSchedule(event: ScheduledEventSnapshot, payload: ScheduledEventPayload): boolean {
-  return event.name === payload.name && event.startUtc === payload.startUtc && event.endUtc === payload.endUtc &&
+  return event.name === payload.name && sameInstant(event.startUtc, payload.startUtc) && sameInstant(event.endUtc, payload.endUtc) &&
     event.location === payload.location && event.description === payload.description;
 }
 
-function findByMarker(events: readonly ScheduledEventSnapshot[], eventId: number): ScheduledEventSnapshot | undefined {
-  const marker = eventMarker(eventId);
-  return events.find((event) => event.description.includes(marker));
+function hasExactMarkerLine(description: string, marker: string): boolean {
+  return description.split(/\r?\n/).includes(marker);
+}
+
+function findByMarker(
+  events: readonly ScheduledEventSnapshot[],
+  event: StoreEvent,
+  sourceUrls: readonly string[],
+): ScheduledEventSnapshot | undefined {
+  const marker = eventMarker(event.eventKey);
+  const stableMatches = events.filter((candidate) => hasExactMarkerLine(candidate.description, marker));
+  if (stableMatches.length > 1) throw new Error(`Mehrere Discord-Events tragen dieselbe Event-ID ${marker}.`);
+  if (stableMatches.length === 1) return stableMatches[0];
+
+  // Older versions stored numeric row IDs. Adopt one only when its title and exact source URL
+  // prove that it belongs to this Lodestone event; a reused SQLite ID alone is not identity.
+  const legacyMarker = `Event-ID: ${event.id}`;
+  return events.find((candidate) => hasExactMarkerLine(candidate.description, legacyMarker) &&
+    candidate.name === event.title && candidate.description.split(/\r?\n/).some((line) => sourceUrls.includes(line)));
 }
 
 async function createReplacement(
@@ -107,7 +130,7 @@ async function createReplacement(
   const payload = scheduledEventPayloadFor(event, sourceUrls, clock?.() ?? now);
   if (!payload) return undefined;
   const created = await discord.createScheduledEvent(guildId, payload);
-  setDiscordIds(store, event.id, { scheduledEventId: created.id });
+  setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
   return created.id;
 }
 
@@ -123,18 +146,21 @@ export async function syncScheduledEvent({
   if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
 
   const schedules = await discord.listScheduledEvents(guildId);
-  const stored = event.scheduledEventId === null ? undefined : schedules.find((candidate) => candidate.id === event.scheduledEventId);
-  const matched = stored ?? findByMarker(schedules, event.id);
+  const storedObject = getGuildEventObject(store, guildId, event.eventKey);
+  const stored = storedObject?.scheduledEventId === null || storedObject?.scheduledEventId === undefined
+    ? undefined
+    : schedules.find((candidate) => candidate.id === storedObject.scheduledEventId);
+  const matched = stored ?? findByMarker(schedules, event, sourceUrls);
   const currentTime = clock?.() ?? now;
   const initialPayload = scheduledEventPayloadFor(event, sourceUrls, currentTime);
   if (!initialPayload) return undefined;
   if (!matched) {
     const created = await discord.createScheduledEvent(guildId, initialPayload);
-    setDiscordIds(store, event.id, { scheduledEventId: created.id });
+    setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
     return created.id;
   }
 
-  setDiscordIds(store, event.id, { scheduledEventId: matched.id });
+  setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: matched.id });
   if (matched.status === 'COMPLETED' || matched.status === 'CANCELED') {
     return createReplacement(event, sourceUrls, guildId, discord, store, currentTime, clock);
   }
@@ -145,7 +171,7 @@ export async function syncScheduledEvent({
 
   try {
     const edited = await discord.editScheduledEvent(guildId, matched.id, payload);
-    setDiscordIds(store, event.id, { scheduledEventId: edited.id });
+    setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: edited.id });
     return edited.id;
   } catch (error) {
     const refreshed = await discord.listScheduledEvents(guildId);

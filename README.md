@@ -4,9 +4,10 @@ Ein Discord-Bot für deutsche FINAL FANTASY XIV-Events. Er soll Lodestone-Meldun
 
 ## Einrichtung
 
-1. Einen Discord-Bot anlegen und ihn mit den unten aufgeführten Rechten auf den Server einladen.
-2. `.env.example` nach `.env` kopieren und Bot-Token sowie Server- und Kanal-IDs eintragen.
+1. Eine Discord-Anwendung anlegen und den Bot mit den unten aufgeführten Rechten einladen. Der Bot ist öffentlich und kann auf mehreren Servern verwendet werden.
+2. `.env.example` nach `.env` kopieren und `DISCORD_TOKEN` eintragen. `DB_PATH` und `FIXTURE_DUMP_DIR` sind optionale Pfade; Server- und Kanal-IDs werden nicht in der `.env` gespeichert.
 3. Mit `docker compose up -d` starten. SQLite-Daten werden in `./data` gespeichert.
+4. Auf jedem Server `/ffevents setup` ausführen und **Event-Kanal** sowie **Log-Kanal** wählen. Dafür ist „Server verwalten“ nötig. Der Bot prüft seine Rechte, speichert die Kanäle und startet direkt den Erstabgleich für diesen Server.
 
 Bot-Token und Berechtigungen einrichten: siehe [docs/discord-setup.md](docs/discord-setup.md).
 
@@ -20,7 +21,7 @@ Benötigte Bot-Rechte:
 - Nachrichten senden
 - Links einbetten
 - Nachrichtenverlauf lesen
-- Nachrichten verwalten (für den angehefteten Statusbeitrag)
+- Nachrichten anheften oder Nachrichten verwalten (für den angehefteten Statusbeitrag)
 - Events erstellen. Diese Berechtigung deckt auch Änderungen an eigenen Events ab; eine zusätzliche Berechtigung „Events verwalten“ ist dafür nicht erforderlich.
 
 Gateway-Intent: **Guilds** (keine weiteren Intents).

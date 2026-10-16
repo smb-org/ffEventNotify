@@ -145,6 +145,9 @@ export interface DiscordPort {
   createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   fetchRecentBotMessages(channelId: string, limit: number): Promise<DiscordMessageSnapshot[]>;
+  fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]>;
+  fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null>;
+  isTextChannel(channelId: string): Promise<boolean>;
   createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   editScheduledEvent(guildId: string, eventId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   listScheduledEvents(guildId: string): Promise<ScheduledEventSnapshot[]>;

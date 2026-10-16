@@ -84,6 +84,14 @@ test('dry-run config works without environment while production still requires D
   assert.throws(() => readConfig({ env: {} }), /DISCORD_TOKEN/);
 });
 
+test('runtime configuration accepts only shared token and optional paths', () => {
+  const config = readConfig({ env: { DISCORD_TOKEN: 'token' } });
+  assert.equal(config.discordToken, 'token');
+  assert.equal(config.dbPath, './data/ffeventnotify.sqlite');
+  assert.equal(config.fixtureDumpDir, undefined);
+  assert.deepEqual(readConfig({ dryRun: true, env: {} }), { dbPath: ':memory:' });
+});
+
 test('dry-run CLI accepts an optional database and dump directory', () => {
   assert.deepEqual(parseCliArgs(['--dry-run', '--db', './dry-run.sqlite', '--dump', './lodestone-dump']), {
     dryRun: true,
