@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { ButtonStyle, ChannelType, Client, ForumChannel, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
 import test from 'node:test';
 import { readConfig } from '../src/config.ts';
-import { CYCLE_INTERVAL_MS, createCoalescedCycleRunner, createDiscordClient, DiscordJsPort, handleChannelDelete, handleFfEventsSetup, parseCliArgs, reconcileStoredGuilds, REMINDER_INTERVAL_MS, startHourlyScheduler, startReminderScheduler } from '../src/main.ts';
+import { CYCLE_INTERVAL_MS, createCoalescedCycleRunner, createDiscordClient, DiscordJsPort, handleChannelDelete, handleFfEventsSetup, parseCliArgs, redactToken, reconcileStoredGuilds, REMINDER_INTERVAL_MS, startHourlyScheduler, startReminderScheduler } from '../src/main.ts';
 import { applyField, attachSource, createEvent, getGuild, openDb, upsertGuildSetup } from '../src/store.ts';
 import { runGuildSyncFromStoredData } from '../src/cycle.ts';
 
@@ -812,4 +812,9 @@ test('deleting an event channel marks setup invalid and notifies through the sur
   } finally {
     db.close();
   }
+});
+
+test('redactToken removes the Discord token from error text', () => {
+  assert.equal(redactToken('login failed with abc.def.ghi!', 'abc.def.ghi'), 'login failed with [Token entfernt]!');
+  assert.equal(redactToken('plain', ''), 'plain');
 });
