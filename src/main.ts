@@ -696,7 +696,7 @@ export async function startHourlyScheduler(
 
     activeCycle = cycleBody()
       .catch((error: unknown) => {
-        (options.onCycleError ?? (() => console.error('Der Stundenzyklus ist fehlgeschlagen.')))(error);
+        (options.onCycleError ?? ((cause) => console.error('Der Stundenzyklus ist fehlgeschlagen:', describeError(cause))))(error);
       })
       .finally(() => {
         activeCycle = undefined;
@@ -1053,6 +1053,14 @@ export async function handleChannelDelete(
   });
 }
 
+export function redactToken(text: string, token = process.env.DISCORD_TOKEN): string {
+  return token ? text.split(token).join('[Token entfernt]') : text;
+}
+
+export function describeError(error: unknown): string {
+  return redactToken(error instanceof Error ? (error.stack ?? error.message) : String(error));
+}
+
 export async function main(cycleBody?: CycleBody, options: HourlySchedulerOptions = {}): Promise<void> {
   if (cycleBody) {
     await startHourlyScheduler(cycleBody, options);
@@ -1068,7 +1076,7 @@ export async function main(cycleBody?: CycleBody, options: HourlySchedulerOption
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   void main().catch((error: unknown) => {
-    console.error('Der Bot wurde beendet.');
+    console.error('Der Bot wurde beendet:', describeError(error));
     process.exitCode = 1;
   });
 }
