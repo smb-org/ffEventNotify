@@ -3,7 +3,7 @@
 import { stableEventIdentity } from '../event-identity.ts';
 import { getCachedItem, getEventSources, isAllowedSpecialImageUrl, type Store, type StoreEvent } from '../store.ts';
 import { BERLIN_TIME_ZONE } from '../time.ts';
-import { MAX_CHARS, MAX_NAME_LENGTH, type EventDiscordLink, type WebChar } from './data.ts';
+import { MAX_CHARS, MAX_NAME_LENGTH, type WebChar } from './data.ts';
 
 const ARCHIVE_DAYS = 60;
 const ITEM_DB = 'https://de.finalfantasyxiv.com/lodestone/playguide/db/item/';
