@@ -290,8 +290,14 @@ export class DiscordJsPort implements DiscordPort {
 
   private async forumThread(channelId: string, threadId: string): Promise<ThreadChannel | null> {
     const forum = await this.forumChannel(channelId);
-    const thread = await forum.threads.fetch(threadId, { force: true });
-    return thread && thread.parentId === forum.id ? thread : null;
+    try {
+      const thread = await forum.threads.fetch(threadId, { force: true });
+      return thread && thread.parentId === forum.id ? thread : null;
+    } catch (error) {
+      // A deleted forum post is reported as 10003 Unknown Channel.
+      if (this.isUnknownDiscordResource(error)) return null;
+      throw error;
+    }
   }
 
   private queueThreadMemberOperation(action: () => Promise<void>): Promise<void> {
