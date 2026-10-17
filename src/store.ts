@@ -79,6 +79,7 @@ export interface StoredGuild {
   firstRunDone: boolean;
   needsSetup: boolean;
   statusMessageId: string | null;
+  statusLastKeepaliveAt: string | null;
 }
 
 export interface GuildEventObject {
@@ -90,6 +91,7 @@ export interface GuildEventObject {
   reminderThreadId: string | null;
   continuationMessageIds: string[];
   firstPostAttemptAt: string | null;
+  lastKeepaliveAt: string | null;
   status: 'pending' | 'synced' | 'failed';
   lastError: string | null;
   firstRunSuppressed: boolean;
@@ -157,7 +159,8 @@ const SCHEMA = `
     setup_at TEXT,
     first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0, 1)),
     needs_setup INTEGER NOT NULL DEFAULT 0 CHECK (needs_setup IN (0, 1)),
-    status_message_id TEXT
+    status_message_id TEXT,
+    status_last_keepalive_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS guild_event_objects (
@@ -169,6 +172,7 @@ const SCHEMA = `
     reminder_thread_id TEXT,
     continuation_message_ids TEXT NOT NULL DEFAULT '[]',
     first_post_attempt_at TEXT,
+    last_keepalive_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'synced', 'failed')),
     last_error TEXT,
     first_run_suppressed INTEGER NOT NULL DEFAULT 0 CHECK (first_run_suppressed IN (0, 1)),
@@ -294,7 +298,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -393,6 +397,27 @@ function migrateV5ToV6(db: Store): void {
     }
     db.exec(SCHEMA);
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (6)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV6ToV7(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const guildColumns = tableColumns(db, 'guilds');
+    if (guildColumns.size > 0 && !guildColumns.has('status_last_keepalive_at')) {
+      db.exec('ALTER TABLE guilds ADD COLUMN status_last_keepalive_at TEXT');
+    }
+    const objectColumns = tableColumns(db, 'guild_event_objects');
+    if (objectColumns.size > 0 && !objectColumns.has('last_keepalive_at')) {
+      db.exec('ALTER TABLE guild_event_objects ADD COLUMN last_keepalive_at TEXT');
+    }
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -417,20 +442,27 @@ function initializeSchema(db: Store): void {
     migrateV3ToV4(db);
     migrateV4ToV5(db);
     migrateV5ToV6(db);
+    migrateV6ToV7(db);
   } else if (version === 2) {
     migrateV2ToV3(db);
     migrateV3ToV4(db);
     migrateV4ToV5(db);
     migrateV5ToV6(db);
+    migrateV6ToV7(db);
   } else if (version === 3) {
     migrateV3ToV4(db);
     migrateV4ToV5(db);
     migrateV5ToV6(db);
+    migrateV6ToV7(db);
   } else if (version === 4) {
     migrateV4ToV5(db);
     migrateV5ToV6(db);
+    migrateV6ToV7(db);
   } else if (version === 5) {
     migrateV5ToV6(db);
+    migrateV6ToV7(db);
+  } else if (version === 6) {
+    migrateV6ToV7(db);
   } else {
     db.exec(SCHEMA);
   }
@@ -496,7 +528,8 @@ export function getGuild(db: Store, guildId: string): StoredGuild | undefined {
     SELECT guild_id AS guildId, event_channel_id AS eventChannelId,
            log_channel_id AS logChannelId, setup_at AS setupAt,
            first_run_done AS firstRunDone, needs_setup AS needsSetup,
-           status_message_id AS statusMessageId
+           status_message_id AS statusMessageId,
+           status_last_keepalive_at AS statusLastKeepaliveAt
     FROM guilds WHERE guild_id = ?
   `).get(guildId) as Omit<StoredGuild, 'firstRunDone' | 'needsSetup'> & {
     firstRunDone: number; needsSetup: number;
@@ -545,13 +578,17 @@ export function upsertGuildSetup(
         status_message_id = CASE
           WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN NULL
           ELSE guilds.status_message_id
+        END,
+        status_last_keepalive_at = CASE
+          WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN NULL
+          ELSE guilds.status_last_keepalive_at
         END
     `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
     if (eventChannelChanged) {
       db.prepare(`UPDATE guild_event_objects
         SET message_id = NULL, message_channel_id = NULL, reminder_thread_id = NULL,
             continuation_message_ids = '[]', first_post_attempt_at = NULL,
-            first_run_suppressed = 0, status = 'pending', last_error = NULL
+            last_keepalive_at = NULL, first_run_suppressed = 0, status = 'pending', last_error = NULL
         WHERE guild_id = ?`).run(input.guildId);
     }
     if (!existing && existingGuildCount === 0) {
@@ -576,7 +613,13 @@ export function markGuildFirstRunDone(db: Store, guildId: string): void {
 }
 
 export function setGuildStatusMessage(db: Store, guildId: string, messageId: string | null): void {
-  db.prepare('UPDATE guilds SET status_message_id = ? WHERE guild_id = ?').run(messageId, guildId);
+  db.prepare(`UPDATE guilds SET status_message_id = ?,
+    status_last_keepalive_at = CASE WHEN status_message_id IS NOT ? THEN NULL ELSE status_last_keepalive_at END
+    WHERE guild_id = ?`).run(messageId, messageId, guildId);
+}
+
+export function setGuildStatusLastKeepaliveAt(db: Store, guildId: string, lastKeepaliveAt: string): void {
+  db.prepare('UPDATE guilds SET status_last_keepalive_at = ? WHERE guild_id = ?').run(lastKeepaliveAt, guildId);
 }
 
 export function deleteGuild(db: Store, guildId: string): void {
@@ -612,6 +655,7 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
            reminder_thread_id AS reminderThreadId,
            continuation_message_ids AS continuationMessageIds,
            first_post_attempt_at AS firstPostAttemptAt,
+           last_keepalive_at AS lastKeepaliveAt,
            status, last_error AS lastError, first_run_suppressed AS firstRunSuppressed
     FROM guild_event_objects WHERE guild_id = ? AND event_key = ?
   `).get(guildId, eventKey) as (Omit<GuildEventObject, 'firstRunSuppressed' | 'continuationMessageIds'> & {
@@ -673,6 +717,10 @@ export function setGuildDiscordIds(
   if (ids.continuationMessageIds !== undefined) {
     assignments.push('continuation_message_ids = ?');
     values.push(JSON.stringify(ids.continuationMessageIds));
+  }
+  if (ids.messageId !== undefined) {
+    assignments.push('last_keepalive_at = CASE WHEN message_id IS NOT ? THEN NULL ELSE last_keepalive_at END');
+    values.push(ids.messageId);
   }
   if (assignments.length === 0) return;
   assignments.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
@@ -1089,6 +1137,16 @@ export function isAllowedSpecialImageUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function setGuildEventLastKeepaliveAt(db: Store, guildId: string, eventKey: string, lastKeepaliveAt: string): void {
+  runTransaction(db, () => {
+    if (!getGuild(db, guildId)) return;
+    ensureGuildObject(db, guildId, eventKey);
+    db.prepare(`UPDATE guild_event_objects SET last_keepalive_at = ?,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ? AND event_key = ?`)
+      .run(lastKeepaliveAt, guildId, eventKey);
+  });
 }
 
 export function setEventImageUrl(db: Store, eventId: number, imageUrl: string | null | undefined): boolean {

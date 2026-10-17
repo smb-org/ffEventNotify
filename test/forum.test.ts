@@ -10,6 +10,7 @@ import {
   getGuildEventObject,
   openDb,
   saveChecklistSelection,
+  setGuildEventLastKeepaliveAt,
   setChecklistReminderPreference,
   upsertGuildSetup,
   type StoreEvent,
@@ -17,6 +18,7 @@ import {
 import { FORUM_TAG_NAMES, ensureForumTags, forumTagIdsForEvent, syncForumEvent, syncForumStatus } from '../src/sync/forum.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { syncScheduledEvent } from '../src/sync/scheduled.ts';
+import { runGuildSyncFromStoredData } from '../src/cycle.ts';
 import type {
   DiscordEmbed,
   DiscordForumPostSnapshot,
@@ -62,10 +64,12 @@ class ForumDiscord implements DiscordPort {
   readonly replies = new Map<string, DiscordMessageSnapshot[]>();
   readonly scheduled: ScheduledEventSnapshot[] = [];
   readonly operations: string[] = [];
+  readonly logs: Array<{ channelId: string; content: string }> = [];
   readonly sentToThreads: Array<{ threadId: string; payload: DiscordMessagePayload }> = [];
   tags: DiscordForumTag[] = FORUM_TAG_NAMES.map((name, index) => ({ id: `tag-${index + 1}`, name }));
   postCreates = 0;
   threadStarts = 0;
+  failUnarchive = false;
   private sequence = 0;
 
   async createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> { return makeMessage(`message-${++this.sequence}`, channelId, payload); }
@@ -100,9 +104,11 @@ class ForumDiscord implements DiscordPort {
   async createForumPost(channelId: string, name: string, payload: DiscordMessagePayload, appliedTags: readonly string[], autoArchiveDuration: number): Promise<DiscordForumPostSnapshot> {
     const id = `post-${++this.sequence}`;
     const starterMessage = makeMessage(id, id, payload);
+    starterMessage.createdAt = NOW.toISOString();
     const post: DiscordForumPostSnapshot = {
       id, parentChannelId: channelId, starterMessageId: id, name, archived: false,
-      appliedTags: [...appliedTags], starterMessage, autoArchiveDuration, locked: false, pinned: false,
+      appliedTags: [...appliedTags], starterMessage, autoArchiveDuration,
+      archiveTimestamp: NOW.toISOString(), lastMessageAt: NOW.toISOString(), locked: false, pinned: false,
     };
     this.posts.set(id, post);
     this.replies.set(id, []);
@@ -129,8 +135,19 @@ class ForumDiscord implements DiscordPort {
   }
   async setForumPostName(threadId: string, name: string): Promise<void> { this.posts.get(threadId)!.name = name; this.operations.push('set-name'); }
   async setForumPostArchived(threadId: string, archived: boolean): Promise<void> {
+    if (!archived && this.failUnarchive) throw new Error('simulated unarchive failure');
     this.posts.get(threadId)!.archived = archived;
     this.operations.push(archived ? 'archive' : 'unarchive');
+  }
+  async setForumPostAutoArchiveDuration(threadId: string, autoArchiveDuration: number): Promise<void> {
+    this.posts.get(threadId)!.autoArchiveDuration = autoArchiveDuration;
+    this.operations.push(`duration-${autoArchiveDuration}`);
+  }
+  async refreshForumPostKeepAlive(threadId: string, autoArchiveDuration: number): Promise<void> {
+    this.posts.get(threadId)!.autoArchiveDuration = 4_320;
+    this.operations.push('duration-4320');
+    this.posts.get(threadId)!.autoArchiveDuration = autoArchiveDuration;
+    this.operations.push(`duration-${autoArchiveDuration}`);
   }
   async keepForumPostActive(threadId: string, autoArchiveDuration: number): Promise<void> {
     const post = this.posts.get(threadId)!;
@@ -165,7 +182,7 @@ class ForumDiscord implements DiscordPort {
   }
   async listScheduledEvents(_guildId: string): Promise<ScheduledEventSnapshot[]> { return [...this.scheduled]; }
   async pinMessage(_channelId: string, _messageId: string): Promise<void> {}
-  async sendLog(_channelId: string, _content: string): Promise<void> {}
+  async sendLog(channelId: string, content: string): Promise<void> { this.logs.push({ channelId, content }); }
 }
 
 function storeEvent(
@@ -290,6 +307,7 @@ test('restart recovers active and archived event posts from their marker without
     };
     const first = storeEvent(db, eventInput);
     const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: first, sourceUrls: [eventInput.sourceUrl], discord, store: db, now: NOW });
+    assert.equal(discord.posts.get(postId)?.autoArchiveDuration, 10_080);
     discord.posts.get(postId)!.archived = archived;
     db.close();
 
@@ -301,6 +319,66 @@ test('restart recovers active and archived event posts from their marker without
     assert.equal(discord.posts.size, 1);
     assert.equal(getGuildEventObject(db, 'guild-1', eventInput.eventKey)?.messageId, postId);
     assert.equal(discord.posts.get(postId)?.archived, false);
+    db.close();
+  }
+});
+
+test('the next stored-data cycle unarchives a running event post', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/cycle-unarchive';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/cycle-unarchive', eventType: 'seasonal-special',
+    title: 'Zyklus-Event', sourceUrl: url,
+    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    discord.posts.get(postId)!.archived = true;
+    discord.operations.length = 0;
+    await runGuildSyncFromStoredData({
+      store: db,
+      discord,
+      fetchText: async (requestedUrl) => ({ status: 200, body: '', finalUrl: requestedUrl }),
+      now: () => new Date(NOW),
+    }, 'guild-1');
+    assert.equal(discord.posts.get(postId)?.archived, false);
+    assert.ok(discord.operations.includes('unarchive'));
+  } finally {
+    db.close();
+  }
+});
+
+test('an active post older than six days gets one silent duration toggle per keep-alive window', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/keepalive';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/keepalive', eventType: 'seasonal-special',
+    title: 'Keep-alive-Event', sourceUrl: url,
+    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    const post = discord.posts.get(postId)!;
+    const old = new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+    post.archiveTimestamp = old;
+    post.lastMessageAt = old;
+    setGuildEventLastKeepaliveAt(db, 'guild-1', event.eventKey, old);
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.deepEqual(discord.operations.filter((operation) => operation.startsWith('duration-')), ['duration-4320', 'duration-10080']);
+    assert.equal(getGuildEventObject(db, 'guild-1', event.eventKey)?.lastKeepaliveAt, NOW.toISOString());
+    assert.equal(discord.sentToThreads.length, 0);
+
+    discord.operations.length = 0;
+    const nextHour = new Date(NOW.getTime() + 60 * 60 * 1_000);
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: nextHour });
+    assert.deepEqual(discord.operations.filter((operation) => operation.startsWith('duration-')), []);
+  } finally {
     db.close();
   }
 });
@@ -326,12 +404,16 @@ test('an event ending updates its Beendet tag and card before archiving without 
     assert.equal(discord.posts.get(postId)?.locked, false);
     assert.ok(discord.operations.indexOf('set-tags') < discord.operations.indexOf('edit-starter'));
     assert.ok(discord.operations.indexOf('edit-starter') < discord.operations.indexOf('archive'));
+    discord.operations.length = 0;
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.equal(discord.posts.get(postId)?.archived, true);
+    assert.equal(discord.operations.includes('unarchive'), false);
   } finally {
     db.close();
   }
 });
 
-test('the pinned Läuft gerade forum post stays active and carries the Läuft tag', async () => {
+test('the pinned Läuft gerade forum post is restored when archived and carries the Läuft tag', async () => {
   const db = openDb(':memory:');
   const discord = new ForumDiscord();
   setupGuild(db);
@@ -350,6 +432,30 @@ test('the pinned Läuft gerade forum post stays active and carries the Läuft ta
     assert.equal(status.autoArchiveDuration, 10_080);
     assert.deepEqual(status.appliedTags, ['tag-12']);
     assert.match(status.starterMessage.embeds[0]?.description ?? '', /discord\.com\/channels\/guild-1\/post-/);
+
+    status.archived = true;
+    discord.operations.length = 0;
+    await syncForumStatus({ guildId: 'guild-1', channelId: 'forum-1', events: [event], discord, store: db, now: NOW });
+    assert.equal(status.archived, false);
+    assert.ok(discord.operations.includes('unarchive'));
+  } finally {
+    db.close();
+  }
+});
+
+test('failed status-post unarchive is logged once in German to the guild log channel', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  try {
+    await syncForumStatus({ guildId: 'guild-1', channelId: 'forum-1', logChannelId: 'logs-1', events: [], discord, store: db, now: NOW });
+    const status = [...discord.posts.values()].find((post) => post.name === 'Läuft gerade')!;
+    status.archived = true;
+    discord.failUnarchive = true;
+    await syncForumStatus({ guildId: 'guild-1', channelId: 'forum-1', logChannelId: 'logs-1', events: [], discord, store: db, now: NOW });
+    await syncForumStatus({ guildId: 'guild-1', channelId: 'forum-1', logChannelId: 'logs-1', events: [], discord, store: db, now: NOW });
+    assert.deepEqual(discord.logs.map(({ channelId }) => channelId), ['logs-1']);
+    assert.match(discord.logs[0]?.content ?? '', /konnte nicht entarchiviert werden/);
   } finally {
     db.close();
   }

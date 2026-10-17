@@ -399,9 +399,12 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
     await port.setForumPostName(postId, 'Renamed-Event');
     await port.setForumPostArchived(postId, true);
     await port.keepForumPostActive(postId, 10_080);
+    await port.refreshForumPostKeepAlive(postId, 10_080);
     await port.editForumStarter(postId, { embeds: [{ title: 'Aktualisiert' }] });
     await port.pinForumPost(postId);
     assert.ok(requests.some((request) => request.method === 'PATCH' && request.route.includes(`/channels/${postId}`) && request.body?.flags !== undefined));
+    assert.deepEqual(requests.filter((request) => request.method === 'PATCH' && request.route.includes(`/channels/${postId}`)
+      && request.body?.auto_archive_duration !== undefined).slice(-2).map((request) => request.body?.auto_archive_duration), [4_320, 10_080]);
   } finally {
     client.destroy();
   }

@@ -1103,7 +1103,7 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
     try {
       if (forumMode) {
         await syncForumEvent({
-          event, sourceUrls, guildId: guild.guildId, channelId: guild.eventChannelId,
+          event, sourceUrls, guildId: guild.guildId, channelId: guild.eventChannelId, logChannelId: guild.logChannelId,
           discord: context.discord, store: context.store, now: context.currentTime,
         });
       } else {

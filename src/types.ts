@@ -216,6 +216,8 @@ export interface DiscordForumPostSnapshot extends DiscordThreadSnapshot {
   appliedTags: string[];
   starterMessage: DiscordMessageSnapshot;
   autoArchiveDuration: number;
+  archiveTimestamp?: string | null;
+  lastMessageAt?: string | null;
   locked: boolean;
   pinned: boolean;
 }
@@ -245,6 +247,8 @@ export interface DiscordPort {
   setForumPostTags?(threadId: string, appliedTags: readonly string[]): Promise<void>;
   setForumPostName?(threadId: string, name: string): Promise<void>;
   setForumPostArchived?(threadId: string, archived: boolean): Promise<void>;
+  setForumPostAutoArchiveDuration?(threadId: string, autoArchiveDuration: number): Promise<void>;
+  refreshForumPostKeepAlive?(threadId: string, autoArchiveDuration: number): Promise<void>;
   keepForumPostActive?(threadId: string, autoArchiveDuration: number): Promise<void>;
   pinForumPost?(threadId: string): Promise<void>;
   startThreadOnMessage(channelId: string, starterMessageId: string, name: string, autoArchiveDuration: number): Promise<DiscordThreadSnapshot>;

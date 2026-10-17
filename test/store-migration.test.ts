@@ -19,7 +19,7 @@ test('v1 schema migrates idempotently, preserving warnings while ignoring legacy
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 6);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
     assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
@@ -67,7 +67,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 6);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');
@@ -98,11 +98,46 @@ test('v4 schema migration adds forum continuation metadata without changing guil
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 6);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'reminder_thread_id'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'continuation_message_ids'));
     assert.equal((db.prepare('SELECT message_id AS messageId, reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { messageId: string; reminderThreadId: string | null }).messageId, 'card');
     assert.equal((db.prepare('SELECT reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { reminderThreadId: string | null }).reminderThreadId, null);
+  } finally {
+    db?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('v6 schema adds keep-alive timestamps for event and status forum posts', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-v6-migration-'));
+  const path = join(directory, 'v6.sqlite');
+  let db: ReturnType<typeof openDb> | undefined;
+  try {
+    const seeded = new DatabaseSync(path);
+    seeded.exec(`
+      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      INSERT INTO schema_version (version) VALUES (6);
+      CREATE TABLE guilds (
+        guild_id TEXT PRIMARY KEY, event_channel_id TEXT, log_channel_id TEXT, setup_at TEXT,
+        first_run_done INTEGER NOT NULL DEFAULT 0, needs_setup INTEGER NOT NULL DEFAULT 0, status_message_id TEXT
+      );
+      CREATE TABLE guild_event_objects (
+        guild_id TEXT NOT NULL, event_key TEXT NOT NULL, message_id TEXT, message_channel_id TEXT,
+        scheduled_event_id TEXT, reminder_thread_id TEXT, continuation_message_ids TEXT NOT NULL DEFAULT '[]',
+        first_post_attempt_at TEXT, status TEXT NOT NULL DEFAULT 'pending', last_error TEXT,
+        first_run_suppressed INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO guilds (guild_id, status_message_id) VALUES ('guild', 'status');
+      INSERT INTO guild_event_objects (guild_id, event_key, message_id) VALUES ('guild', 'event', 'post');
+    `);
+    seeded.close();
+
+    db = openDb(path);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
+    assert.ok((db.prepare('PRAGMA table_info(guilds)').all() as Array<{ name: string }>).some(({ name }) => name === 'status_last_keepalive_at'));
+    assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'last_keepalive_at'));
+    assert.equal((db.prepare('SELECT message_id AS messageId, last_keepalive_at AS lastKeepaliveAt FROM guild_event_objects').get() as { messageId: string; lastKeepaliveAt: string | null }).messageId, 'post');
   } finally {
     db?.close();
     rmSync(directory, { recursive: true, force: true });

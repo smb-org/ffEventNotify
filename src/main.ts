@@ -294,6 +294,15 @@ export class DiscordJsPort implements DiscordPort {
   private async forumPostSnapshot(thread: ThreadChannel): Promise<DiscordForumPostSnapshot> {
     const starter = await thread.fetchStarterMessage();
     if (!starter) throw new Error(`Forum post ${thread.id} has no starter message.`);
+    let lastMessageAt = starter.createdAt.toISOString();
+    if (thread.lastMessageId && thread.lastMessageId !== starter.id) {
+      try {
+        const lastMessage = await thread.messages.fetch({ message: thread.lastMessageId, force: true });
+        lastMessageAt = lastMessage.createdAt.toISOString();
+      } catch {
+        // The starter timestamp and stored keep-alive time remain safe fallbacks when history is unavailable.
+      }
+    }
     return {
       id: thread.id,
       parentChannelId: thread.parentId ?? '',
@@ -303,6 +312,8 @@ export class DiscordJsPort implements DiscordPort {
       appliedTags: [...thread.appliedTags],
       starterMessage: messageSnapshot(starter, this.client.user?.id),
       autoArchiveDuration: thread.autoArchiveDuration ?? 1_440,
+      archiveTimestamp: thread.archiveTimestamp == null ? null : new Date(thread.archiveTimestamp).toISOString(),
+      lastMessageAt,
       locked: thread.locked ?? false,
       pinned: thread.flags.has(ChannelFlags.Pinned),
     };
@@ -472,6 +483,19 @@ export class DiscordJsPort implements DiscordPort {
     const channel = await this.client.channels.fetch(threadId, { force: true });
     if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
     await channel.setArchived(archived);
+  }
+
+  async setForumPostAutoArchiveDuration(threadId: string, autoArchiveDuration: number): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    await channel.setAutoArchiveDuration(autoArchiveDuration as ThreadAutoArchiveDuration);
+  }
+
+  async refreshForumPostKeepAlive(threadId: string, autoArchiveDuration: number): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    await channel.setAutoArchiveDuration(4_320);
+    await channel.setAutoArchiveDuration(autoArchiveDuration as ThreadAutoArchiveDuration);
   }
 
   async keepForumPostActive(threadId: string, autoArchiveDuration: number): Promise<void> {
