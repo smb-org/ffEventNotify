@@ -1,0 +1,6 @@
+#!/bin/sh
+# Versioned pre-push hook; activated via `pnpm install` (prepare script).
+if ! { pnpm typecheck && pnpm test; }; then
+  echo "Push abgebrochen: Typecheck oder Tests sind rot. (Umgehen nur mit: git push --no-verify)" >&2
+  exit 1
+fi

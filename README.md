@@ -49,3 +49,5 @@ Mit installierten Abhängigkeiten:
 
 - `pnpm test`
 - `pnpm typecheck`
+
+Der Git-Hook `.githooks/pre-push` führt vor jedem Push Typecheck und Tests aus (aktiviert durch `pnpm install`).
