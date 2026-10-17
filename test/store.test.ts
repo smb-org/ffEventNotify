@@ -68,6 +68,10 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'seen_entries',
       'short_links',
       'warnings_sent',
+      'web_chars',
+      'web_checklist',
+      'web_user_guilds',
+      'web_users',
     ]);
 
     const first = newEvent(db, 'first');

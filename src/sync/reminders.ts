@@ -2,7 +2,6 @@
 
 import {
   ensureReminderDeliveries,
-  getChecklistReminderRecipients,
   getEventSources,
   getGuild,
   getGuildEventObject,
@@ -13,6 +12,7 @@ import {
   type Store,
   type StoreEvent,
 } from '../store.ts';
+import { getReminderRecipients } from '../web/data.ts';
 import { bestEventSourceUrl, hasEventMarkerUrl, stableEventIdentity } from '../event-identity.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import { log, logAction } from '../log.ts';
@@ -111,14 +111,11 @@ function recipientsForEvent(
   store: Store,
   guildId: string,
 ): ReminderRecipient[] {
-  const rewardsById = new Map(event.rewards.map((reward) => [reward.itemId, reward.name]));
-  return getChecklistReminderRecipients(store, guildId, event.eventKey, event.rewards.map((reward) => reward.itemId))
-    .map(({ userId, openItemIds }) => {
-      const names = openItemIds.slice(0, 3).map((itemId) => (rewardsById.get(itemId) ?? 'Belohnung').slice(0, 180));
-      const remaining = openItemIds.length - names.length;
-      const items = `${names.join(', ')}${remaining > 0 ? ` +${remaining}` : ''}`;
-      return { userId, line: `• <@${userId}>: ${items}` };
-    });
+  return getReminderRecipients(store, guildId, event).map(({ userId, chars }) => {
+    // Names are player input: no angle brackets (the recovery scan reads <@id>), markdown or mentions.
+    const clean = (name: string) => name.replace(/[<>@]/g, '').replace(/[\\[\]()*_~`|]/g, '\\$&');
+    return { userId, line: `• <@${userId}>: ${chars.map((entry) => `${clean(entry.name) || 'Char'}: ${entry.open} offen`).join(', ')}` };
+  });
 }
 
 function splitReminderMessages(prefix: string, recipients: readonly ReminderRecipient[]): Array<{ content: string; userIds: string[] }> {

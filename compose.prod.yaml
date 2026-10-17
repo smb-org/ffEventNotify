@@ -5,6 +5,9 @@ services:
     env_file: .env
     environment:
       DB_PATH: /data/ffeventnotify.sqlite
+    # The web page is reachable only through Caddy on the compose network.
+    expose:
+      - "3480"
     volumes:
       - ./data:/data
     logging:
@@ -12,3 +15,26 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - bot
+    ports:
+      - "8443:8443"
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?WEB_DOMAIN must be set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

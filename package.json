@@ -11,7 +11,9 @@
     "start": "node src/main.ts",
     "dry-run": "node src/main.ts --dry-run",
     "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "web:dev": "node src/web/dev.ts",
+    "gen-secret": "node -p \"crypto.randomBytes(32).toString('base64')\""
   },
   "dependencies": {
     "cheerio": "1.0.0",

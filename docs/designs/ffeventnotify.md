@@ -1178,6 +1178,8 @@ Keine.
 - D20: SQLite über `node:sqlite` statt better-sqlite3 (keine native Abhängigkeit). Paketmanager pnpm (Vorgabe sb).
 - D21: Öffentlicher Mehr-Server-Bot mit `/ffevents setup` (Manage Guild), Lodestone 1×/h für alle, Discord-IDs pro Server, Erststart-Regel pro Server, Aufräumen beim Entfernen, Scope `applications.commands`, Public Bot an.
 - D22: Befehl `/ffevents` mit Unterbefehlen (`setup`, später `status`, `test`) statt `/setup`, um Verwechslung mit anderen Bots zu vermeiden (Vorgabe sb).
+- D28: Die Discord-Auswahlmenü-Checkliste entfällt. Stattdessen eine Webseite mit persönlichem Geheimlink je Discord-Nutzer (kein Login), mehreren Chars pro Nutzer und Erinnern-Schalter je Char. Token AES-256-GCM-verschlüsselt (Schlüssel `WEB_LINK_SECRET`), Suche über HMAC-Spalte; `/ffevents neuer-link` rotiert. Alte Checklistenzeilen wandern per Migration (Schema v9) in einen Char „Hauptchar“; die alten Tabellen bleiben als Quelle bestehen.
+- D29: Webserver (`node:http`) im Bot-Prozess, davor Caddy mit automatischem HTTPS (`compose.prod.yaml`). Erinnerungen zählen offene Belohnungen je Char mit „erinnern“ und gehen nur auf Servern, auf denen der Nutzer den Button genutzt hat.
 - Technische Festlegungen: sqex.to-Kurzlinks werden aufgelöst und auf de. normalisiert; Sonderseite ohne Zeitraum macht ein Topic nicht saisonal; Banner-Leiste nur `div.ldst__side`; Item-Fixtures gzip.
 
 ## GSTACK REVIEW REPORT

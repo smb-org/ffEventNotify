@@ -11,10 +11,8 @@ import {
   getGuildSidebarFollowUserIds,
   isGuildSidebarFollowEnabled,
   openDb,
-  saveChecklistSelection,
   setGuildSidebarFollow,
   setGuildEventLastKeepaliveAt,
-  setChecklistReminderPreference,
   upsertGuildSetup,
   type StoreEvent,
 } from '../src/store.ts';
@@ -23,6 +21,7 @@ import { handleSidebarFollowButton, handleSidebarFollowCommand } from '../src/in
 import { sidebarFollowCustomId } from '../src/sidebar-follow.ts';
 import { assertDiscordActionRows } from './component-invariants.ts';
 import { captureLog } from './log-capture.ts';
+import { createChar, recordUserGuild } from '../src/web/data.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { runGuildSyncFromStoredData } from '../src/cycle.ts';
@@ -627,8 +626,8 @@ test('reminders go into the event forum post and scheduled event location is the
   });
   try {
     const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
-    saveChecklistSelection(db, { guildId: 'guild-1', userId: 'user-1', eventKey: event.eventKey, itemIds: ['item-1'], doneItemIds: [] });
-    setChecklistReminderPreference(db, 'guild-1', 'user-1', event.eventKey, true);
+    recordUserGuild(db, 'user-1', 'guild-1');
+    createChar(db, 'user-1', 'Mira');
     await syncEventReminders({ guildId: 'guild-1', channelId: 'forum-1', events: [event], store: db, discord, now: NOW });
     assert.equal(discord.sentToThreads.length, 1);
     assert.equal(discord.sentToThreads[0]?.threadId, postId);

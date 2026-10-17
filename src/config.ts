@@ -1,6 +1,7 @@
 // Reads process configuration shared by the public multi-server bot.
 
 import { existsSync } from 'node:fs';
+import { parseLinkSecret } from './web/token.ts';
 import { parseLogLevel, type LogLevel } from './log.ts';
 
 export interface AppConfig {
@@ -8,6 +9,9 @@ export interface AppConfig {
   dbPath: string;
   fixtureDumpDir?: string;
   logLevel: LogLevel;
+  webBaseUrl: string;
+  webPort: number;
+  webLinkSecret: string;
 }
 
 export interface DryRunConfig {
@@ -52,12 +56,18 @@ export function readConfig(options: ReadConfigOptions = {}): AppConfig | DryRunC
     discordToken: readRequired('DISCORD_TOKEN'),
     dbPath: environment.DB_PATH?.trim() || './data/ffeventnotify.sqlite',
     logLevel: parseLogLevel(environment.LOG_LEVEL),
+    webBaseUrl: readRequired('WEB_BASE_URL').replace(/\/+$/, ''),
+    webPort: Number(environment.WEB_PORT?.trim() || 3480),
+    webLinkSecret: readRequired('WEB_LINK_SECRET'),
     ...(environment.FIXTURE_DUMP_DIR?.trim() ? { fixtureDumpDir: environment.FIXTURE_DUMP_DIR.trim() } : {}),
   };
 
   if (missing.length > 0) {
     throw new Error('Missing required environment variables: ' + missing.join(', '));
   }
+  if (!/^https?:\/\/[^/\s]+(\/\S*)?$/.test(config.webBaseUrl)) throw new Error('WEB_BASE_URL must be an http(s) URL.');
+  if (!Number.isInteger(config.webPort) || config.webPort < 1 || config.webPort > 65_535) throw new Error('WEB_PORT must be a port number.');
+  parseLinkSecret(config.webLinkSecret);
 
   return config;
 }
