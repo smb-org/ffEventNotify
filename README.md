@@ -13,6 +13,8 @@ Wer laufende Events links in der Kanalliste sehen möchte, aktiviert die Schaltf
 
 Bot-Token und Berechtigungen einrichten: siehe [docs/discord-setup.md](docs/discord-setup.md).
 
+Betrieb auf einem VPS (fertiges Image, Updates, Backups): siehe [docs/deploy.md](docs/deploy.md).
+
 ## Trockenlauf
 
 Mit `pnpm dry-run` wird ein einzelner Lodestone-Abgleich ohne Discord-Verbindung ausgeführt; mit `pnpm dry-run -- --db ./data/dry-run.sqlite --dump ./lodestone-dump` bleiben die SQLite-Daten erhalten und die abgerufenen HTML/XML-Seiten werden gespeichert.
