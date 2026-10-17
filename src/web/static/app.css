@@ -79,6 +79,11 @@ summary::-webkit-details-marker { display: none; }
 .meta { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .title { font-family: var(--serif); font-size: 1.05rem; font-weight: 600; overflow-wrap: anywhere; }
 .period { color: var(--muted); font-size: .8rem; }
+.title a { color: inherit; text-decoration-color: var(--line); }
+.title a:hover { color: var(--accent); }
+.links { flex: none; display: flex; gap: 6px; align-items: center; max-width: 45%; }
+.xlink { font-size: .75rem; color: var(--accent); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; min-width: 0; }
+.xlink:hover { border-color: var(--accent); }
 .state { flex: none; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid currentColor; border-radius: 99px; padding: 1px 8px; }
 .state.s-ended { color: var(--muted); }
 .event[open] > summary { border-bottom: 1px solid var(--line); }
@@ -120,7 +125,12 @@ td { text-align: center; }
 #toast.show { opacity: 1; }
 .gone { display: grid; place-items: center; min-height: 60vh; text-align: center; }
 .gone h1 { font-size: 1.4rem; }
+@media (max-width: 599px) {
+  .evhead, .event > summary { flex-wrap: wrap; }
+  .links { order: 3; flex: 1 1 100%; max-width: none; flex-wrap: wrap; padding-left: 108px; }
+}
 @media (max-width: 480px) {
+  .links { padding-left: 84px; }
   .banner { width: 72px; height: 40px; }
   thead th.item, tbody th.item { width: 9.5rem; min-width: 9.5rem; max-width: 9.5rem; }
   thead th { width: 5rem; min-width: 5rem; max-width: 5rem; }

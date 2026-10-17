@@ -45,6 +45,7 @@ import {
   getStoredGuildIds,
   markGuildNeedsSetup,
   isFirstRun,
+  setGuildName,
   upsertGuildSetup,
   type Store,
 } from './store.ts';
@@ -1012,6 +1013,8 @@ export async function startBot(): Promise<void> {
     const runSetupSync = createSetupSyncRunner(store, runSerializedCycle, runGuildSync);
     const runReminderPass = createCoalescedCycleRunner(async (): Promise<void> => {
       for (const guild of getConfiguredGuilds(store)) {
+        const liveName = client.guilds.cache.get(guild.guildId)?.name;
+        if (liveName) setGuildName(store, guild.guildId, liveName);
         try {
           await syncEventReminders({
             guildId: guild.guildId,
@@ -1155,6 +1158,7 @@ export async function handleFfEventsSetup(
         eventChannelId: eventChannel.id,
         logChannelId: logChannel.id,
       });
+      setGuildName(store, interaction.guildId, guildName);
       await runGuildSync(interaction.guildId);
       log.info(`${guildName}: Server eingerichtet`);
     });
