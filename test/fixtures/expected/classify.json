@@ -1,9 +1,9 @@
 {
   "summary": {
     "topics-p1": {
-      "topic-generic": 4,
+      "topic-generic": 3,
       "unclassified": 14,
-      "seasonal-special": 2
+      "seasonal-special": 3
     },
     "topics-p1-ifOnlyLiteralHrefs": {
       "topic-generic": 5,
@@ -148,9 +148,9 @@
       "bodySqexToResolvesToSpecial": [
         "https://sqex.to/sl1ML"
       ],
-      "expected": "topic-generic",
+      "expected": "seasonal-special",
       "expectedIfOnlyLiteralHrefs": "topic-generic",
-      "note": "The resolved special page has no fixture proving a period. The evidenced exact-case keyword Kollaboration classifies this topic as generic."
+      "note": "The topic article carries the event period; the linked special page supplies rewards."
     },
     {
       "title": "Matching innerhalb derselben Region mit Vorab-Implementierung in Japan",

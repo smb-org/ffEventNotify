@@ -24,203 +24,232 @@
       "itemId": "8448914d1c5",
       "name": "Mameshiba-Halstuch",
       "pageName": "Mameshiba-Halstuch",
-      "stones": 50
+      "stones": 50,
+      "cost": "50 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "68cbf969203",
       "name": "Ramuh-Kristall",
       "pageName": "Ramuh-Kristall",
-      "stones": 50
+      "stones": 50,
+      "cost": "50 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "901a124bffb",
       "name": "Notenrolle von „The Legendary Beast“",
       "pageName": "Notenrolle von „The Legendary Beast“",
-      "stones": 50
+      "stones": 50,
+      "cost": "50 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "0cda2eaa295",
       "name": "Himmelsänger-Unterhemd",
       "pageName": "Himmelsänger-Unterhemd",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "10d1ba3159d",
       "name": "Schürze des Facharbeiters",
       "pageName": "Schürze des Facharbeiters",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "760042f3f18",
       "name": "Froschkopf",
       "pageName": "Froschkopf",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "67e58f6954c",
       "name": "Froschanzug",
       "pageName": "Froschanzug",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "b22f164eb29",
       "name": "Ballsaal-Etikette: Taktvolle Belehrung",
       "pageName": "Ballsaal-Etikette: Taktvolle Belehrung",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "7ed61351336",
       "name": "Tugendhafter Begleiter",
       "pageName": "Tugendhafter Begleiter",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "cf953a18569",
       "name": "Leichter Ishgarder Rossharnisch",
       "pageName": "Leichter Ishgarder Rossharnisch",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "1e554b3d343",
       "name": "Blauer-Kamuy-Pfeife",
       "pageName": "Blauer-Kamuy-Pfeife",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "0fcae87494f",
       "name": "MGP-Platinkarte",
       "pageName": "MGP-Platinkarte",
-      "stones": 30
+      "stones": 30,
+      "cost": "30 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "6b90dd50b7d",
       "name": "Käsefondue-Set",
       "pageName": "Käsefondue-Set",
-      "stones": 20
+      "stones": 20,
+      "cost": "20 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "1c01181b4f6",
       "name": "Korpokkur-Chronometer",
       "pageName": "Korpokkur-Chronometer",
-      "stones": 20
+      "stones": 20,
+      "cost": "20 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "b58338ec043",
       "name": "Bambus-Paravent",
       "pageName": "Bambus-Paravent",
-      "stones": 20
+      "stones": 20,
+      "cost": "20 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "c6b3ccc0592",
       "name": "Mantel des trotzigen Duellanten",
       "pageName": "Mantel des trotzigen Duellanten",
-      "stones": 15
+      "stones": 15,
+      "cost": "15 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "be5a0640321",
       "name": "Mantel des roten Diebes",
       "pageName": "Mantel des roten Diebes",
-      "stones": 15
+      "stones": 15,
+      "cost": "15 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "38dfc2e663d",
       "name": "Mantel des Geisterdiebes",
       "pageName": "Mantel des Geisterdiebes",
-      "stones": 15
+      "stones": 15,
+      "cost": "15 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "7403adb0c1f",
       "name": "Notenrolle von „What Is Love?“",
       "pageName": "Notenrolle von „What Is Love?“",
-      "stones": 15
+      "stones": 15,
+      "cost": "15 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "63e628a56d5",
       "name": "Vergilbte Sagenleder-Karte",
       "pageName": "Vergilbte Sagenleder-Karte",
-      "stones": 15
+      "stones": 15,
+      "cost": "15 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "d7735290a0e",
       "name": "Vergilbte Epenleder-Karten",
       "pageName": "Vergilbte Epenleder-Karten",
-      "stones": 15
+      "stones": 15,
+      "cost": "15 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "21dd44b5866",
       "name": "Ananta-Karte",
       "pageName": "Ananta-Karte",
-      "stones": 10
+      "stones": 10,
+      "cost": "10 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "c5835832f24",
       "name": "Kotokaze-Karte",
       "pageName": "Kotokaze-Karte",
-      "stones": 10
+      "stones": 10,
+      "cost": "10 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "22fdcec29ae",
       "name": "Chocomoppel-Karte",
       "pageName": "Chocomoppel-Karte",
-      "stones": 7
+      "stones": 7,
+      "cost": "7 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "6517213940b",
       "name": "Magazin „Moderne Ästhetik - Lange Haare“",
       "pageName": "Magazin „Moderne Ästhetik - Lange Haare“",
-      "stones": 7
+      "stones": 7,
+      "cost": "7 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "5ebd9d25cc6",
       "name": "Domakin",
       "pageName": "Domakin",
-      "stones": 7
+      "stones": 7,
+      "cost": "7 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "91bbfd9d596",
       "name": "Dhalmel-Horn",
       "pageName": "Dhalmel-Horn",
-      "stones": 7
+      "stones": 7,
+      "cost": "7 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "d326149d19f",
       "name": "Smaragd-Rossharnisch",
       "pageName": "Smaragd-Rossharnisch",
-      "stones": 5
+      "stones": 5,
+      "cost": "5 Benötigte Steine"
     },
     {
       "section": "Eintauschbare Gegenstände",
       "itemId": "7df9a5ab439",
       "name": "Holo-Prisma „Jobmeisterschaft“",
       "pageName": "Holo-Prisma „Jobmeisterschaft“",
-      "stones": 1
+      "stones": 1,
+      "cost": "1 Benötigte Steine"
     }
   ],
   "notes": [

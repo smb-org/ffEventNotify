@@ -1,0 +1,101 @@
+Lodestone-Trockenlauf
+Zyklus: Erststart; erfasst: 37; würde posten: 3
+Lodestone blind: nein
+
+Würde als Event-Beitrag veröffentlicht (3)
+
+## Mog Mog-Kollektion Astronomische Abenteuer - Teil 1
+Typ: Sonderseite
+Zeitraum: Mi., 09.09.2026, 10:00 MESZ – Mo., 19.10.2026, 16:59 MESZ
+  UTC: 2026-09-09T08:00:00Z – 2026-10-19T14:59:00Z
+Status je Feld:
+  Titel: ok
+  Start: ok
+  Ende: ok
+  Belohnungen: ok
+  Beschreibung: ok
+Belohnungen nach Abschnitt:
+  Eintausch: Uolon-Horn
+  Eintauschbare Gegenstände: Mameshiba-Halstuch, Ramuh-Kristall, Notenrolle von „The Legendary Beast“, Himmelsänger-Unterhemd, Schürze des Facharbeiters, Froschkopf, Froschanzug, Ballsaal-Etikette: Taktvolle Belehrung, Tugendhafter Begleiter, Leichter Ishgarder Rossharnisch, Blauer-Kamuy-Pfeife, MGP-Platinkarte, Käsefondue-Set, Korpokkur-Chronometer, Bambus-Paravent, Mantel des trotzigen Duellanten, Mantel des roten Diebes, Mantel des Geisterdiebes, Notenrolle von „What Is Love?“, Vergilbte Sagenleder-Karte, Vergilbte Epenleder-Karten, Ananta-Karte, Kotokaze-Karte, Chocomoppel-Karte, Magazin „Moderne Ästhetik - Lange Haare“, Domakin, Dhalmel-Horn, Smaragd-Rossharnisch, Holo-Prisma „Jobmeisterschaft“
+Quellen:
+  https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/lsekubsk45
+  https://de.finalfantasyxiv.com/lodestone/topics/detail/62cea9ac15920b5fab2ba123100b2f95e5d3c244
+Discord-Event: würde erstellt: Start Fr., 16.10.2026, 23:19 MESZ (2026-10-16T21:19:23.029Z), Ende Mo., 19.10.2026, 16:59 MESZ (2026-10-19T14:59:00Z), Ort: https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/lsekubsk45
+
+## Kollabo-Event: FINAL FANTASY XIV x Fall Guys
+Typ: Sonderseite
+Zeitraum: Mi., 07.10.2026, 10:00 MESZ – Di., 27.10.2026, 15:59 MEZ
+  UTC: 2026-10-07T08:00:00Z – 2026-10-27T14:59:00Z
+Status je Feld:
+  Titel: ok
+  Start: ok
+  Ende: ok
+  Belohnungen: ok
+  Beschreibung: ok
+Belohnungen nach Abschnitt:
+  Spezielle Belohnungen: Bohnen-Strickmütze, Bohnen-Pullover, Bohnen-Hose, Bohnen-Schuhe, Matte Siegeskrone, Glänzende Siegeskrone, Rhiyes-Kennschlüssel, Ballsaal-Etikette: Bohnensieg, Pinke Bohne, Pegwin, Stolperville-Siegeskrone, Stolperville-Fahne, Elastische Stolperville-Donuts, Gepolsterte Stolperville-Wand, Stolperville-Regenbogen, Stolperville-Hammer, Notenrolle von „Everybody Falls“, Portraitmaterial (Stolperville 1), Portraitmaterial (Stolperville 2), Portraitmaterial (Stolperville 3), Zivil-Leitfaden „Ernährung“, Teleport-Ticket des Gold Saucers, Zusatzfarbstoff 1
+Quellen:
+  https://de.finalfantasyxiv.com/lodestone/special/fallguys/
+  https://de.finalfantasyxiv.com/lodestone/topics/detail/67df2c10d0b7467e5a006dbadd025c629dbfe8bc
+Discord-Event: würde erstellt: Start Fr., 16.10.2026, 23:19 MESZ (2026-10-16T21:19:23.029Z), Ende Di., 27.10.2026, 15:59 MEZ (2026-10-27T14:59:00Z), Ort: https://de.finalfantasyxiv.com/lodestone/special/fallguys/
+
+## Allerschutzheiligen 2026 - Schaurig, kostümiert und ... bärenstark?!
+Typ: Sonderseite
+Zeitraum: Do., 15.10.2026, 10:00 MESZ – Mo., 02.11.2026, 15:59 MEZ
+  UTC: 2026-10-15T08:00:00Z – 2026-11-02T14:59:00Z
+Status je Feld:
+  Titel: ok
+  Start: ok
+  Ende: ok
+  Belohnungen: ok
+  Beschreibung: ok
+Belohnungen nach Abschnitt:
+  Ausrüstung: Grizzlybär-Kopf, Grizzlybär-Anzug
+  Möbel: Grinse-Spukpilz, Starrblick-Spukpilz, Wachseelen-Kinderwagen, Allerschutzheiligen-Plakat 2025, Allerschutzheiligen-Tischgemälde 2025, Allerschutzheiligen-Plakat 2016
+Quellen:
+  https://de.finalfantasyxiv.com/lodestone/special/2026/All_Saints_Wake/tfrx2rkv52
+  https://de.finalfantasyxiv.com/lodestone/topics/detail/969680f04eaf5428962bff28f3f8962848e2c125
+Discord-Event: würde erstellt: Start Fr., 16.10.2026, 23:19 MESZ (2026-10-16T21:19:23.029Z), Ende Mo., 02.11.2026, 15:59 MEZ (2026-11-02T14:59:00Z), Ort: https://de.finalfantasyxiv.com/lodestone/special/2026/All_Saints_Wake/tfrx2rkv52
+
+Gespeichert, aber nicht gepostet (34)
+- Wartung aller Welten (2. Jun.) — beim Erststart unterdrückt: Event bereits beendet.
+- Notwartung aller Welten (12. Jun.) — beim Erststart unterdrückt: Event bereits beendet.
+- Wartung aller Welten (23. Jun.) — beim Erststart unterdrückt: Event bereits beendet.
+- Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Berlin — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung der Künstler der Fan Festival-Konzerte in Berlin! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Der Brief des Produzenten LIVE Teil 93 wird am Samstag, den 25. Juli vom Fan Festival in Berlin übertragen! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Die Sonderseite zu Patch 7.5 „Trail to the Heavens“ wurde aktualisiert! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Der Ticketverkauf für die kostenpflichtigen Konzert-Livestreams zum Fan Festival 2026 in Berlin ist eröffnet! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Runde 2 für neue Gegenstände zum Fan Festival 2026 & Rabattaktion! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung des „Fit fürs Fan Festival“-Gewinnspiels — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- [Crystal] Notwartung der Welt Balmung (21. Jul.) — beim Erststart unterdrückt: Event bereits beendet.
+- Am 25. Juli wird es endlich Zeit fürs Fan Festival 2026 in Berlin! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Wartung aller Welten (28. Jul.) — beim Erststart unterdrückt: Event bereits beendet.
+- Lasst euch die Livekonzerte des Fan Festivals 2026 in Berlin nicht entgehen! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Veröffentlichung der Details zu Patch 7.55! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Die Yo-kai sind los! 2026 — beim Erststart unterdrückt: Event bereits beendet.
+- Feuermondreigen 2026 - ... Und erst im Morgenrot kommen wir nach Haus! — beim Erststart unterdrückt: Event bereits beendet.
+- Notwartung aller Welten (7. Aug.) — beim Erststart unterdrückt: Event bereits beendet.
+- Notwartung aller Welten (14. Aug.) — beim Erststart unterdrückt: Event bereits beendet.
+- Runde 3 des Merchandises fürs Fan Festival 2026 ist jetzt zur Vorbestellung erhältlich! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Fest der Wiedergeburt 2026 - Was am Ende des Weges wartet ... — beim Erststart unterdrückt: Event bereits beendet.
+- Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Wartung aller Welten (8. Sep.) — beim Erststart unterdrückt: Event bereits beendet.
+- Veröffentlichung der Details zu Patch 7.56! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Notwartung aller Welten (9. Sep.) — beim Erststart unterdrückt: Event bereits beendet.
+- [Crystal] Notwartung der Welt Diabolos (11. Sep.) — beim Erststart unterdrückt: Event bereits beendet.
+- [Aether] Notwartung der Welt Gilgamesh (14. Sep.) — beim Erststart unterdrückt: Event bereits beendet.
+- Notwartung aller Welten (17. Sep.) — beim Erststart unterdrückt: Event bereits beendet.
+- Kollaborationsevent FINAL FANTASY XIV & FINAL FANTASY XV: Nocturne an einen Helden 2026 — beim Erststart unterdrückt: Event bereits beendet.
+- Wartung aller Welten (12-13. Okt.) — beim Erststart unterdrückt: Event bereits beendet.
+- Veröffentlichung der Details zu Patch 7.57! — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+- Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo — beim Erststart unterdrückt: Ende nicht sicher in der Zukunft.
+
+Log-Kanal-Meldungen, die gesendet würden (1)
+- Erststart: 37 erfasst, 3 gepostet, 33 unklassifiziert, 37 ignoriert
+
+Abrufstatistik:
+- Anfragen: 342; 304: 7; Fehler: 0
+- Dauer: 376.86 s gesamt; 232.23 s kumulierte Anfragezeit

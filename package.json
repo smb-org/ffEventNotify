@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
+    "dry-run": "node src/main.ts --dry-run",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
