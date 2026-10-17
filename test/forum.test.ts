@@ -22,6 +22,7 @@ import { FORUM_TAG_NAMES, buildForumStatusComponents, ensureForumTags, forumTagI
 import { handleSidebarFollowButton, handleSidebarFollowCommand } from '../src/interactions/follow.ts';
 import { sidebarFollowCustomId } from '../src/sidebar-follow.ts';
 import { assertDiscordActionRows } from './component-invariants.ts';
+import { captureLog } from './log-capture.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { runGuildSyncFromStoredData } from '../src/cycle.ts';
@@ -645,6 +646,7 @@ test('a deleted event post is recreated once and the scheduled event points to t
   const db = openDb(':memory:');
   const discord = new ForumDiscord();
   setupGuild(db);
+  const captured = captureLog('info');
   const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/deleted';
   const event = storeEvent(db, {
     eventKey: 'seasonal-special:/lodestone/special/2026/deleted', eventType: 'seasonal-special',
@@ -661,7 +663,10 @@ test('a deleted event post is recreated once and the scheduled event points to t
     assert.equal(discord.posts.size, 1);
     assert.equal(getGuildEventObject(db, 'guild-1', event.eventKey)?.messageId, newId);
     assert.equal(discord.scheduled[0]?.location, `https://discord.com/channels/guild-1/${newId}`);
+    assert.ok(captured.messages().includes('guild-1: Beitrag „Geloeschtes-Event“ neu angelegt (vorher gelöscht)'));
+    assert.ok(captured.messages().includes('guild-1: Beitrag „Geloeschtes-Event“ angelegt'));
   } finally {
+    captured.restore();
     db.close();
   }
 });

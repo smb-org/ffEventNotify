@@ -1,7 +1,10 @@
 # Node 24 runtime image for the ffEventNotify bot.
 FROM node:24-slim
 
-ENV NODE_ENV=production
+ARG GIT_SHA=""
+ARG BUILD_TIME=""
+ENV NODE_ENV=production FFE_GIT_SHA=$GIT_SHA FFE_BUILD_TIME=$BUILD_TIME
+LABEL org.opencontainers.image.revision=$GIT_SHA org.opencontainers.image.created=$BUILD_TIME
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./

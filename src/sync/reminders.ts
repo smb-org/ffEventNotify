@@ -15,6 +15,7 @@ import {
 } from '../store.ts';
 import { bestEventSourceUrl, hasEventMarkerUrl, stableEventIdentity } from '../event-identity.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
+import { log, logAction } from '../log.ts';
 import type { DiscordPort, FieldStatus } from '../types.ts';
 
 export interface ScheduledReminder {
@@ -183,7 +184,7 @@ async function syncEventRemindersUnlocked({
       if (recipients.length === 0) continue;
       const placeholderLink = eventLink(event, store, REMINDER_MARKER_PLACEHOLDER);
       if (!placeholderLink) {
-        console.warn(`Für „${event.titleStatus === 'ok' ? event.title : 'FFXIV-Event'}“ gibt es keine bestätigte Quellenadresse; die Erinnerung bleibt ausstehend.`);
+        log.warn(`Für „${event.titleStatus === 'ok' ? event.title : 'FFXIV-Event'}“ gibt es keine bestätigte Quellenadresse; die Erinnerung bleibt ausstehend.`);
         continue;
       }
       const displayTitle = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
@@ -206,7 +207,7 @@ async function syncEventRemindersUnlocked({
       try {
         threadId = await ensureReminderThread(event, guildId, channelId, store, discord);
       } catch (error) {
-        console.warn(`Der Erinnerungs-Thread für „${displayTitle}“ konnte nicht abgerufen werden.`, error);
+        log.warn(`Der Erinnerungs-Thread für „${displayTitle}“ konnte nicht abgerufen werden.`, error);
         continue;
       }
       if (!threadId) continue;
@@ -225,7 +226,7 @@ async function syncEventRemindersUnlocked({
       const remainingRecipients = unsentRecipients.filter((recipient) => !recoveredUsers.has(recipient.userId));
       if (remainingRecipients.length === 0) continue;
       if (!recentMessages.complete) {
-        console.warn(`Die Suche nach früheren Erinnerungen für „${displayTitle}“ ist unvollständig; der Versand wird wiederholt.`);
+        log.warn(`Die Suche nach früheren Erinnerungen für „${displayTitle}“ ist unvollständig; der Versand wird wiederholt.`);
         continue;
       }
 
@@ -240,8 +241,9 @@ async function syncEventRemindersUnlocked({
             suppressEmbeds: true,
           });
           markReminderDeliveriesSent(store, delivery, message.userIds, now.toISOString());
+          logAction(guildId, 'remindersSent', `Erinnerung „${displayTitle}“ (${leadHours} h vor Ende) an ${message.userIds.length} Nutzer gesendet`);
         } catch (error) {
-          console.warn(`Erinnerung für „${displayTitle}“ konnte nicht gesendet werden.`, error);
+          log.warn(`Erinnerung für „${displayTitle}“ konnte nicht gesendet werden.`, error);
         }
       }
     }

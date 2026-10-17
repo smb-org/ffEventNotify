@@ -8,6 +8,7 @@ import {
   type Store,
   type StoreEvent,
 } from './store.ts';
+import { log } from './log.ts';
 import type { DiscordPort } from './types.ts';
 
 export const SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX = 'ffe:sidebar-follow:';
@@ -45,7 +46,7 @@ async function runMemberOperation(
       return 'left';
     }
     if (code !== 50_001) {
-      console.warn(`Thread-Mitglied ${userId} konnte in ${threadId} nicht ${action === 'add' ? 'hinzugefügt' : 'entfernt'} werden.`, error);
+      log.warn(`Thread-Mitglied ${userId} konnte in ${threadId} nicht ${action === 'add' ? 'hinzugefügt' : 'entfernt'} werden.`, error);
     }
     return 'ok';
   }

@@ -73,7 +73,17 @@ docker compose -f compose.prod.yaml pull && docker compose -f compose.prod.yaml 
 docker compose -f compose.prod.yaml logs -f
 ```
 
-Erwartete Zeilen: „Verbunden als …“ und „Zyklus fertig: …“.
+Erwartete Zeilen: die Versionszeile, „Verbunden als …“ und „Zyklus fertig: …“.
+
+## Log
+
+Eine Zeile pro Schritt, jeweils mit ISO-Zeitstempel. Standard ist `LOG_LEVEL=info`: Lodestone-Listen, neu erkannte oder geänderte Events, Discord-Aktionen je Server und die Zyklus-Zusammenfassung. Unveränderte Events erscheinen nicht. Mit `LOG_LEVEL=debug` in der `.env` (danach `up -d --force-recreate`) kommen jede Lodestone-Anfrage (URL, Status, Dauer, 304/Cache), jeder Discord-Schreibzugriff und vollständige Fehler-Stacks dazu.
+
+**Welche Version läuft?** Die erste Log-Zeile, z. B. `ffEventNotify 0.1.0 (sha-713348e, gebaut 2026-10-17T00:58Z)`. Sie steht auch in der Antwort auf `/ffevents abgleichen`.
+
+## Abgleich auf Abruf
+
+`/ffevents abgleichen` (Berechtigung „Server verwalten“) startet sofort einen Lodestone-Abgleich und gleicht den eigenen Server ab. Läuft gerade ein Zyklus, wird dieser mitgenutzt. Sperre: 10 Minuten je Server und 5 Minuten insgesamt; der Stundentakt bleibt unberührt.
 
 ## Updates
 

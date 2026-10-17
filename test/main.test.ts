@@ -701,7 +701,7 @@ test('setup defers before fetching the bot member and completes with editReply',
     assert.match(setupLogMessages[0]?.content ?? '', /Kanäle verwalten/);
     assert.equal(setupLogMessages[0]?.flags, MessageFlags.SuppressEmbeds);
     assert.doesNotMatch(setupLogMessages[0]?.content ?? '', /\r|\n/);
-    assert.deepEqual(loggedMessages, ['Server Testserver eingerichtet']);
+    assert.deepEqual(loggedMessages.map((line) => String(line).replace(/^\S+ /, '')), ['Testserver: Server eingerichtet']);
   } finally {
     console.log = originalLog;
     db.close();
@@ -739,7 +739,7 @@ test('setup reports a bot-member fetch failure after acknowledging the interacti
     await handleFfEventsSetup(interaction as never, db, async () => assert.fail('sync should not run after a permission fetch failure'));
     assert.deepEqual(order, ['defer', 'fetch', 'edit']);
     assert.equal(loggedErrors.length, 1);
-    assert.match(String(loggedErrors[0]?.[1]), /raw Discord failure/);
+    assert.match(String(loggedErrors[0]?.[0]), /raw Discord failure/);
   } finally {
     console.error = originalError;
     db.close();
