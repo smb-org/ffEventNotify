@@ -26,6 +26,9 @@ export function createFfEventsCommand() {
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
         .setRequired(true)))
     .addSubcommand((subcommand) => subcommand
+      .setName('abgleichen')
+      .setDescription('Events jetzt von Lodestone abgleichen (Server verwalten)'))
+    .addSubcommand((subcommand) => subcommand
       .setName('folgen')
       .setDescription('Alle laufenden Events in deiner Seitenleiste anzeigen')
       .addStringOption((option) => option

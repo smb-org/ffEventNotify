@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { load } from 'cheerio';
 import test from 'node:test';
-import { createCoalescedCycleRunner, createSetupSyncRunner } from '../src/main.ts';
+import { createCoalescedCycleRunner, createLoggedCycleRunner, createSetupSyncRunner } from '../src/main.ts';
+import { captureLog } from './log-capture.ts';
 import { SourceHealthMonitor } from '../src/health.ts';
 import { applyField, attachSource, createEvent, deleteGuild, getAllEvents, getEventSources, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
@@ -725,6 +726,7 @@ test('one event sync failure is logged for its guild and later events still sync
     applyField(db, id, 'end', { status: 'ok', value: '2026-10-20T14:59:00.000Z' }, sourceUrls[index]!);
   }
   discord.failScheduledNameOnce = 'Fehlerhaftes Event';
+  const captured = captureLog('info');
   const baseOptions = cycleOptions(db, discord);
   const fetchText = controlledFetcher({
     topicList: topicListHtml([{ title: 'Unclassified filler', url: '/lodestone/topics/detail/filler' }]),
@@ -736,6 +738,8 @@ test('one event sync failure is logged for its guild and later events still sync
   });
   try {
     await runCycle({ ...baseOptions, fetchText });
+    assert.deepEqual(captured.messages().filter((line) => line.startsWith('FEHLER Abgleich fehlgeschlagen')),
+      ['FEHLER Abgleich fehlgeschlagen: „Fehlerhaftes Event“ auf guild: simulated scheduled-event failure for Fehlerhaftes Event']);
 
     const eventTitles = eventEmbeds(discord).map(({ embed }) => embed.title);
     assert.ok(eventTitles.includes('Fehlerhaftes Event'));
@@ -752,7 +756,41 @@ test('one event sync failure is logged for its guild and later events still sync
     assert.equal(getGuildEventObject(db, 'guild', 'sync-isolation:0')?.status, 'synced');
     assert.equal(discord.scheduledEvents.filter((event) => event.name === 'Fehlerhaftes Event').length, 1);
   } finally {
+    captured.restore();
     db.close();
+  }
+});
+
+test('an idle cycle logs only start, list lines and summary, and a restart counts no known event as new', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-log-'));
+  const dbPath = join(directory, 'events.sqlite');
+  const discord = new FakeDiscordPort();
+  const captured = captureLog('info');
+  try {
+    let db = openDb(dbPath);
+    const first = await createLoggedCycleRunner(cycleOptions(db, discord))();
+    assert.ok(first && first.newEvents > 0);
+    assert.ok(captured.messages().some((line) => line.startsWith('Neu erkannt: „')));
+
+    captured.lines.length = 0;
+    const idle = await createLoggedCycleRunner(cycleOptions(db, discord))();
+    assert.equal(idle?.newEvents, 0);
+    const lines = captured.messages();
+    assert.match(lines[0]!, /^Zyklus gestartet$/);
+    assert.match(lines.at(-1)!, /^Zyklus fertig: 0 neue Events, 0 Beiträge neu, 0 bearbeitet, \d+ Anfragen \(\d+ aus Cache\/304\) in \d+ s$/);
+    for (const line of lines.slice(1, -1)) assert.match(line, /^(Lodestone: (Topic-Liste|Wartungsliste|news\.xml) gelesen \(\d+ Einträge, \d+ neu\)|Banner: \d+ Sonderseiten)$/);
+
+    db.close();
+    db = openDb(dbPath);
+    captured.lines.length = 0;
+    const afterRestart = await createLoggedCycleRunner(cycleOptions(db, discord))();
+    assert.equal(afterRestart?.newEvents, 0);
+    assert.equal(captured.messages().some((line) => line.startsWith('Neu erkannt')), false);
+    assert.ok((afterRestart?.capturedEvents ?? 0) > 0, 'known events are still re-read');
+    db.close();
+  } finally {
+    captured.restore();
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

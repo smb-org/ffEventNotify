@@ -1,11 +1,13 @@
 // Reads process configuration shared by the public multi-server bot.
 
 import { existsSync } from 'node:fs';
+import { parseLogLevel, type LogLevel } from './log.ts';
 
 export interface AppConfig {
   discordToken: string;
   dbPath: string;
   fixtureDumpDir?: string;
+  logLevel: LogLevel;
 }
 
 export interface DryRunConfig {
@@ -49,6 +51,7 @@ export function readConfig(options: ReadConfigOptions = {}): AppConfig | DryRunC
   const config: AppConfig = {
     discordToken: readRequired('DISCORD_TOKEN'),
     dbPath: environment.DB_PATH?.trim() || './data/ffeventnotify.sqlite',
+    logLevel: parseLogLevel(environment.LOG_LEVEL),
     ...(environment.FIXTURE_DUMP_DIR?.trim() ? { fixtureDumpDir: environment.FIXTURE_DUMP_DIR.trim() } : {}),
   };
 

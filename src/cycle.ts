@@ -56,6 +56,7 @@ import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
 import { syncForumEvent, syncForumStatus } from './sync/forum.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
+import { briefError, guildLabel, log, snapshotActions } from './log.ts';
 import { SourceHealthMonitor } from './health.ts';
 import { parseGermanDateTime } from './time.ts';
 import { stableEventIdentity } from './event-identity.ts';
@@ -98,6 +99,10 @@ export interface CycleResult {
   requests: number;
   duplicatesAvoided: number;
   syncedGuildIds: string[];
+  /** Events that were not in the database before this cycle. */
+  newEvents: number;
+  postsCreated: number;
+  postsEdited: number;
 }
 
 interface CycleFetchMemo {
@@ -329,6 +334,11 @@ async function readLists(context: CycleContext, firstRun: boolean): Promise<Load
     await logSourceFailure(context, 'https://de.finalfantasyxiv.com/lodestone/news/news.xml', error);
   }
 
+  const newCount = (urls: readonly string[]): number => urls.filter((url) => !isSeen(context.store, normalizeLodestoneUrl(url))).length;
+  log.info(`Lodestone: Topic-Liste gelesen (${topicEntries.length} Einträge, ${newCount(topicEntries.map((entry) => entry.url))} neu)`);
+  log.info(`Lodestone: Wartungsliste gelesen (${maintenanceEntries.length} Einträge, ${newCount(maintenanceEntries.map((entry) => entry.url))} neu)`);
+  log.info(`Lodestone: news.xml gelesen (${feedEntries.length} Einträge, ${newCount(feedEntries.filter((entry) => entry.category === 'Wartung').map((entry) => entry.url))} neu)`);
+
   return { topicEntries, maintenanceEntries, bannerHtml, feedEntries, counts, succeeded };
 }
 
@@ -341,7 +351,7 @@ async function logWarning(context: CycleContext, key: string, message: string, t
       await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
         (channelId, content) => context.discord.sendLog(channelId, content)));
     } catch (error) {
-      console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+      log.warn(`Log-Meldung für Server ${guildLabel(guild.guildId)} konnte nicht gesendet werden.`, error);
     }
   }
 }
@@ -352,7 +362,7 @@ async function logWarningToEstablishedGuilds(context: CycleContext, key: string,
       await deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
         (channelId, content) => context.discord.sendLog(channelId, content));
     } catch (error) {
-      console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+      log.warn(`Log-Meldung für Server ${guildLabel(guild.guildId)} konnte nicht gesendet werden.`, error);
     }
   }
 }
@@ -581,7 +591,7 @@ async function logNewUnclassifiedTopics(context: CycleContext): Promise<void> {
         await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, key, content,
           (channelId, warning) => context.discord.sendLog(channelId, warning)));
       } catch (error) {
-        console.warn(`Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+        log.warn(`Log-Meldung für Server ${guildLabel(guild.guildId)} konnte nicht gesendet werden.`, error);
       }
     }
   }
@@ -899,7 +909,9 @@ async function processBannerRail(context: CycleContext, html: string | undefined
   for (const pending of context.pendingDiscoveries.values()) {
     if (pending.entry.source === 'banner') entries.set(pending.entry.url, pending.entry);
   }
-  for (const path of html ? parseBannerRail(html) : []) {
+  const bannerPaths = html ? parseBannerRail(html) : [];
+  log.info(`Banner: ${bannerPaths.length} Sonderseiten`);
+  for (const path of bannerPaths) {
     const specialUrl = normalizeLodestoneUrl(path);
     entries.set(specialUrl, { title: '', url: specialUrl, source: 'banner' });
   }
@@ -1068,6 +1080,49 @@ async function runWikiCrossCheck(context: CycleContext): Promise<void> {
   }
 }
 
+const eventTypeLabels: Record<EventType, string> = {
+  'seasonal-special': 'Saison-Event',
+  maintenance: 'Wartung',
+  'topic-generic': 'Meldung',
+};
+
+function berlinTime(utc: string | null, status: 'ok' | 'unsicher'): string {
+  if (!utc || status !== 'ok') return 'unklar';
+  const parts = new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(utc));
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? '';
+  return `${part('day')}.${part('month')}.${part('year')} ${part('hour')}:${part('minute')}`;
+}
+
+function displayTitleOf(event: StoreEvent): string {
+  return event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+}
+
+/** Logs events that appeared or changed during source reading; unchanged events stay silent. Returns the number of new events. */
+function logEventChanges(store: Store, before: ReadonlyMap<number, StoreEvent>): number {
+  let created = 0;
+  for (const event of getAllEvents(store)) {
+    const previous = before.get(event.id);
+    if (!previous) {
+      created += 1;
+      log.info(`Neu erkannt: „${displayTitleOf(event)}“ (${eventTypeLabels[event.eventType]}, ${berlinTime(event.startUtc, event.startStatus)}–${berlinTime(event.endUtc, event.endStatus)} Berlin, ${event.rewards.length} Belohnungen)`);
+      continue;
+    }
+    const title = displayTitleOf(event);
+    const changes: Array<[string, string, string]> = [];
+    if (previous.title !== event.title) changes.push(['Titel', previous.title, event.title]);
+    if (previous.startUtc !== event.startUtc) changes.push(['Beginn', berlinTime(previous.startUtc, previous.startStatus), berlinTime(event.startUtc, event.startStatus)]);
+    if (previous.endUtc !== event.endUtc) changes.push(['Ende', berlinTime(previous.endUtc, previous.endStatus), berlinTime(event.endUtc, event.endStatus)]);
+    if (JSON.stringify(previous.rewards) !== JSON.stringify(event.rewards)) {
+      changes.push(['Belohnungen', String(previous.rewards.length), String(event.rewards.length)]);
+    }
+    if (previous.description !== event.description) log.info(`Geändert: „${title}“: Beschreibung geändert`);
+    for (const [field, from, to] of changes) log.info(`Geändert: „${title}“: ${field} ${from} → ${to}`);
+  }
+  return created;
+}
+
 function shouldPostToGuild(event: StoreEvent, guildId: string, now: Date, firstRun: boolean, store: Store): boolean {
   const object = getGuildEventObject(store, guildId, event.eventKey);
   if (object?.firstRunSuppressed && !(event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime())) return false;
@@ -1084,7 +1139,7 @@ async function drainPendingWarnings(context: CycleContext): Promise<void> {
         await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, warning.key, warning.content,
           (channelId, content) => context.discord.sendLog(channelId, content)));
       } catch (error) {
-        console.warn(`Ausstehende Log-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+        log.warn(`Ausstehende Log-Meldung für Server ${guildLabel(guild.guildId)} konnte nicht gesendet werden.`, error);
       }
     }
   }
@@ -1095,7 +1150,10 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
   const sourceEvents = forumMode ? getAllEvents(context.store) : getOpenEvents(context.store, context.currentTime);
   const candidates = sourceEvents
     .filter((event) => shouldPostToGuild(event, guild.guildId, context.currentTime, guild.firstRun, context.store));
-  if (blind) return 0;
+  if (blind) {
+    log.info(`${guildLabel(guild.guildId)}: Abgleich übersprungen, Lodestone gerade nicht lesbar`);
+    return 0;
+  }
   let posted = 0;
   for (const event of candidates) {
     const sourceUrls = getEventSources(context.store, event.id).map((source) => source.url);
@@ -1126,8 +1184,9 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
     if (errors.length > 0) {
       const details = errors.map((error) => error instanceof Error ? error.message : String(error)).join('; ');
       setGuildEventSyncStatus(context.store, guild.guildId, event.eventKey, 'failed', details);
-      console.error(`Der Discord-Abgleich für Ereignis ${event.eventKey} ist fehlgeschlagen.`, errors);
       const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+      log.error(`Abgleich fehlgeschlagen: „${title}“ auf ${guildLabel(guild.guildId)}: ${errors.map(briefError).join('; ')}`);
+      for (const error of errors) log.stack(error);
       await logWarning(context, `guild-event-sync:${event.eventKey}`,
         `Der Discord-Abgleich für „${title}“ konnte nicht abgeschlossen werden. Der Bot versucht es erneut.`, guild.guildId);
     } else {
@@ -1165,7 +1224,8 @@ async function syncGuildStatus(context: CycleContext, guild: CycleGuild, blind: 
       });
     }
   } catch (error) {
-    console.error(`Die Statusmeldung für Server ${guild.guildId} konnte nicht synchronisiert werden.`, error);
+    log.error(`Die Statusmeldung für Server ${guildLabel(guild.guildId)} konnte nicht synchronisiert werden:`, error);
+    log.stack(error);
     await logWarning(context, 'status-post:sync-failed',
       'Die Statusmeldung „Läuft gerade“ konnte nicht synchronisiert werden. Der Bot versucht es erneut.', guild.guildId);
   }
@@ -1198,7 +1258,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
           options.discord.isTextChannel(guild.logChannelId),
         ]);
       } catch (error) {
-        console.warn(`Die Kanäle für Server ${guild.guildId} konnten vorübergehend nicht geprüft werden.`, error);
+        log.warn(`Die Kanäle für Server ${guildLabel(guild.guildId)} konnten vorübergehend nicht geprüft werden.`, error);
         return undefined;
       }
       if (!storedGuild) return undefined;
@@ -1210,7 +1270,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
               'Der Event-Kanal wurde gelöscht. Bitte richte den Bot mit `/ffevents setup` erneut ein.',
               (channelId, content) => options.discord.sendLog(channelId, content));
           } catch (error) {
-            console.warn(`Die Setup-Meldung für Server ${guild.guildId} konnte nicht gesendet werden.`, error);
+            log.warn(`Die Setup-Meldung für Server ${guildLabel(guild.guildId)} konnte nicht gesendet werden.`, error);
           }
         }
         return undefined;
@@ -1240,6 +1300,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     pendingDiscoveries: loadPendingDiscoveries(options.store),
   };
   await drainPendingWarnings(context);
+  const eventsBefore = new Map(getAllEvents(options.store).map((event) => [event.id, event]));
+  const actionsBefore = snapshotActions();
 
   const lists = await readLists(context, globalFirstRun);
   const health = context.health.recordCycleHealth(lists.counts, lists.succeeded, currentTime);
@@ -1258,6 +1320,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     await refreshOpenEvents(context);
     await warnForUnmatchedFollowups(context);
   }
+  const newEvents = logEventChanges(options.store, eventsBefore);
 
   for (const guild of guilds) {
     for (const event of getAllEvents(options.store)) await warnForUncertainFields(context, guild, event);
@@ -1288,7 +1351,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
             `Erststart: ${context.capturedEventIds.size} erfasst, ${guildPosted} gepostet, ${context.unclassifiedUrls.size} unklassifiziert, ${context.ignoredUrls.size} ignoriert`,
             (channelId, content) => options.discord.sendLog(channelId, content));
         } catch (error) {
-          console.warn(`Erststart-Bericht für Server ${lockedGuild.guildId} konnte nicht gesendet werden.`, error);
+          log.warn(`Erststart-Bericht für Server ${guildLabel(lockedGuild.guildId)} konnte nicht gesendet werden.`, error);
         }
         markGuildFirstRunDone(options.store, lockedGuild.guildId);
       }
@@ -1300,7 +1363,11 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   }
 
   await runWikiCrossCheck(context);
+  const actions = snapshotActions();
   return {
+    newEvents,
+    postsCreated: actions.postCreated + actions.postRecreated - actionsBefore.postCreated - actionsBefore.postRecreated,
+    postsEdited: actions.postEdited - actionsBefore.postEdited,
     firstRun,
     capturedEvents: context.capturedEventIds.size,
     postedEvents,
@@ -1331,7 +1398,7 @@ async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId
       options.discord.isTextChannel(guild.logChannelId),
     ]);
   } catch (error) {
-    console.warn(`Die Kanäle für Server ${guildId} konnten vorübergehend nicht geprüft werden.`, error);
+    log.warn(`Die Kanäle für Server ${guildLabel(guildId)} konnten vorübergehend nicht geprüft werden.`, error);
     return;
   }
   if (!getGuild(options.store, guildId)) return;

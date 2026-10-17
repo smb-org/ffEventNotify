@@ -35,6 +35,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%MZ)" >> "$GITHUB_OUTPUT"
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -49,6 +51,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.build.outputs.time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - uses: actions/delete-package-versions@v5

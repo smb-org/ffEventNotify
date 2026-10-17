@@ -13,6 +13,7 @@ import {
 } from '../store.ts';
 import { eventSourceLink, hasEventMarkerUrl } from '../event-identity.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
+import { briefError, guildLabel, log, logAction } from '../log.ts';
 import { buildEventComponents, buildEventEmbed } from './embed.ts';
 import { addSidebarFollowersToEventPost, sidebarFollowCustomId } from '../sidebar-follow.ts';
 import type {
@@ -259,7 +260,7 @@ async function logForumUnarchiveFailure(
       (channelId, content) => discord.sendLog(channelId, content),
     );
   } catch (error) {
-    console.error(`Die Log-Meldung für den nicht entarchivierten Forum-Post ${threadId} konnte nicht gesendet werden.`, error);
+    log.error(`Die Log-Meldung für den nicht entarchivierten Forum-Post ${threadId} konnte nicht gesendet werden:`, error);
   }
 }
 
@@ -270,9 +271,11 @@ async function keepForumPostVisible(options: KeepForumPostVisibleOptions): Promi
     try {
       if (!discord.setForumPostArchived) throw new Error('Dieser Discord-Adapter kann Forum-Posts nicht entarchivieren.');
       await discord.setForumPostArchived(post.id, false);
+      logAction(options.guildId, 'postUnarchived', `Beitrag „${options.title}“ entarchiviert`);
       lastKeepaliveAt = now.toISOString();
       saveLastKeepaliveAt(lastKeepaliveAt);
-    } catch {
+    } catch (error) {
+      log.warn(`${guildLabel(options.guildId)}: Beitrag „${options.title}“ konnte nicht entarchiviert werden: ${briefError(error)}`);
       await logForumUnarchiveFailure(options);
       return false;
     }
@@ -405,6 +408,8 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
     if (!firstPostAttemptAt) throw new Error('Der erste Forum-Post-Versuch konnte nicht gespeichert werden.');
     post = await discord.createForumPost(channelId, eventTitle(event), payload, appliedTags, FORUM_AUTO_ARCHIVE_DURATION);
     createdPost = true;
+    if (eventObject?.messageId) logAction(guildId, 'postRecreated', `Beitrag „${eventTitle(event)}“ neu angelegt (vorher gelöscht)`);
+    else logAction(guildId, 'postCreated', `Beitrag „${eventTitle(event)}“ angelegt`);
   } else {
     if (!starterMatches(post, event)) throw new Error('Der gespeicherte Forum-Post trägt nicht die Event-Markierung.');
   }
@@ -440,14 +445,21 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
   }
 
   if (!createdPost) {
-    if (post.name !== eventTitle(event) && discord.setForumPostName) await discord.setForumPostName(post.id, eventTitle(event));
+    let edited = false;
+    if (post.name !== eventTitle(event) && discord.setForumPostName) {
+      await discord.setForumPostName(post.id, eventTitle(event));
+      edited = true;
+    }
     if (JSON.stringify([...post.appliedTags].sort()) !== JSON.stringify([...appliedTags].sort()) && discord.setForumPostTags) {
       await discord.setForumPostTags(post.id, appliedTags);
+      edited = true;
     }
     if (JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
       JSON.stringify(post.starterMessage.components ?? []) !== JSON.stringify(payload.components ?? [])) {
       await discord.editForumStarter(post.id, payload);
+      edited = true;
     }
+    if (edited) logAction(guildId, 'postEdited', `Beitrag „${eventTitle(event)}“ bearbeitet`);
   }
 
   await syncContinuations(post.id, event, sourceUrls, card.continuationBodies, discord, store, guildId);
@@ -455,7 +467,10 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
     if (post.autoArchiveDuration !== FORUM_AUTO_ARCHIVE_DURATION && discord.setForumPostAutoArchiveDuration) {
       await discord.setForumPostAutoArchiveDuration(post.id, FORUM_AUTO_ARCHIVE_DURATION);
     }
-    if (!post.archived && discord.setForumPostArchived) await discord.setForumPostArchived(post.id, true);
+    if (!post.archived && discord.setForumPostArchived) {
+      await discord.setForumPostArchived(post.id, true);
+      logAction(guildId, 'postArchived', `Beitrag „${eventTitle(event)}“ archiviert`);
+    }
   }
   return post.id;
 }
@@ -524,6 +539,7 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   const statusTagId = (await discord.fetchForumTags(channelId)).find((tag) => tag.name === 'Läuft')?.id;
   if (!post) {
     post = await discord.createForumPost(channelId, 'Läuft gerade', payload, statusTagId ? [statusTagId] : [], FORUM_AUTO_ARCHIVE_DURATION);
+    logAction(guildId, 'statusEdited', 'Status-Beitrag „Läuft gerade“ angelegt');
     setGuildStatusMessage(store, guildId, post.id);
     setGuildStatusLastKeepaliveAt(store, guildId, now.toISOString());
   } else {
@@ -550,6 +566,7 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   if (JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
     JSON.stringify(post.starterMessage.components ?? []) !== JSON.stringify(payload.components ?? [])) {
     await discord.editForumStarter(post.id, payload);
+    logAction(guildId, 'statusEdited', 'Status-Beitrag „Läuft gerade“ bearbeitet');
   }
   // The status forum post is always kept active and uses Discord's maximum archive duration.
 }

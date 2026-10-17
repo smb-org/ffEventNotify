@@ -3,6 +3,7 @@
 import type { Store, StoreEvent } from '../store.ts';
 import { getGuild, getGuildEventObject, setGuildDiscordIds } from '../store.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
+import { logAction } from '../log.ts';
 import {
   bestEventSourceUrl,
   eventMarkerFragment,
@@ -172,6 +173,7 @@ async function createReplacement(
   if (!payload) return undefined;
   const created = await discord.createScheduledEvent(guildId, payload);
   setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
+  logAction(guildId, 'scheduledCreated', `Geplantes Event „${event.title}“ neu angelegt (Ersatz)`);
   return created.id;
 }
 
@@ -213,6 +215,7 @@ async function syncScheduledEventUnlocked({
   if (!matched) {
     const created = await discord.createScheduledEvent(guildId, initialPayload);
     setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
+    logAction(guildId, 'scheduledCreated', `Geplantes Event „${event.title}“ angelegt`);
     return created.id;
   }
 
@@ -230,6 +233,7 @@ async function syncScheduledEventUnlocked({
   try {
     const edited = await discord.editScheduledEvent(guildId, matched.id, payload);
     setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: edited.id });
+    logAction(guildId, 'scheduledUpdated', `Geplantes Event „${event.title}“ aktualisiert`);
     return edited.id;
   } catch (error) {
     const refreshed = await discord.listScheduledEvents(guildId);

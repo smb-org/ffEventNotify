@@ -2,6 +2,7 @@ import { MessageFlags, type ButtonInteraction, type ChatInputCommandInteraction 
 import { getGuild, isGuildSidebarFollowEnabled, setGuildSidebarFollow, type Store } from '../store.ts';
 import { syncSidebarFollowForUser, sidebarFollowCustomId } from '../sidebar-follow.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
+import { guildLabel, log } from '../log.ts';
 import type { DiscordPort } from '../types.ts';
 
 const ENABLED_REPLY = 'Aktiviert: du siehst jetzt alle laufenden Events links in der Kanalliste.';
@@ -41,9 +42,10 @@ async function updateSidebarFollow(
         enabled: isEnabled,
       });
     });
+    log.info(`${guildLabel(guildId)}: Seitenleiste ${isEnabled ? 'eingeschaltet' : 'ausgeschaltet'} für ${interaction.user.username ?? interaction.user.id}`);
     await interaction.editReply({ content: isEnabled ? ENABLED_REPLY : DISABLED_REPLY });
   } catch (error) {
-    console.error(`Die Seitenleisten-Einstellung für Server ${guildId} konnte nicht vollständig synchronisiert werden.`, error);
+    log.error(`Die Seitenleisten-Einstellung für Server ${guildLabel(guildId)} konnte nicht vollständig synchronisiert werden:`, error);
     await interaction.editReply({ content: 'Deine Einstellung wurde gespeichert, aber die Events konnten gerade nicht vollständig aktualisiert werden.' });
   }
 }

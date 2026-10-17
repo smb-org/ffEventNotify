@@ -31,7 +31,7 @@ import {
 import { readConfig } from './config.ts';
 import { createTrackedFetch, FetchMetrics, runDryRunCycle } from './dry-run.ts';
 import { SourceHealthMonitor } from './health.ts';
-import { runCycle, type CycleResult } from './cycle.ts';
+import { runCycle, type CycleOptions, type CycleResult } from './cycle.ts';
 import { runGuildSyncFromStoredData } from './cycle.ts';
 import { openDb } from './store.ts';
 import { LodestoneRequestQueue } from './sources/queue.ts';
@@ -52,6 +52,8 @@ import { syncEventReminders } from './sync/reminders.ts';
 import { ensureForumTags } from './sync/forum.ts';
 import { formatLogContent } from './log-format.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
+import { versionLine } from './version.ts';
+import { configureLog, diffActions, log, redactToken, snapshotActions, type ActionCounts } from './log.ts';
 import { handleChecklistInteraction } from './interactions/checklist.ts';
 import { handleSidebarFollowButton, handleSidebarFollowCommand } from './interactions/follow.ts';
 import { SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX } from './sidebar-follow.ts';
@@ -694,7 +696,7 @@ export async function startHourlyScheduler(
     const tickAt = nextTickAt;
     nextTickAt += CYCLE_INTERVAL_MS;
     if (activeCycle !== undefined) {
-      (options.onSkipped ?? ((at) => console.warn(
+      (options.onSkipped ?? ((at) => log.warn(
         `Stundenzyklus vom ${new Date(at).toISOString()} übersprungen, weil der vorherige Zyklus noch läuft.`,
       )))(tickAt);
       continue;
@@ -702,7 +704,7 @@ export async function startHourlyScheduler(
 
     activeCycle = cycleBody()
       .catch((error: unknown) => {
-        (options.onCycleError ?? ((cause) => console.error('Der Stundenzyklus ist fehlgeschlagen:', describeError(cause))))(error);
+        (options.onCycleError ?? ((cause) => log.error('Der Stundenzyklus ist fehlgeschlagen:', describeError(cause))))(error);
       })
       .finally(() => {
         activeCycle = undefined;
@@ -720,6 +722,116 @@ export function createCoalescedCycleRunner<T>(cycleBody: () => Promise<T>): () =
     active = run;
     return run;
   };
+}
+
+export function createLoggedCycleRunner(
+  cycleOptions: CycleOptions,
+  fetchStats: { notModified: number } = { notModified: 0 },
+): () => Promise<CycleResult | undefined> {
+  return createCoalescedCycleRunner(async () => {
+    const startedAt = performance.now();
+    const notModifiedBefore = fetchStats.notModified;
+    log.info('Zyklus gestartet');
+    try {
+      const result = await runCycle(cycleOptions);
+      const cached = fetchStats.notModified - notModifiedBefore + result.duplicatesAvoided;
+      log.info(`Zyklus fertig: ${result.newEvents} neue Events, ${result.postsCreated} Beiträge neu, ${result.postsEdited} bearbeitet, ${result.requests} Anfragen (${cached} aus Cache/304) in ${Math.round((performance.now() - startedAt) / 1_000)} s`);
+      return result;
+    } catch (error) {
+      log.error('Der Stundenzyklus ist fehlgeschlagen:', error);
+      log.stack(error);
+      return undefined;
+    }
+  });
+}
+
+export const GUILD_SYNC_COOLDOWN_MS = 10 * 60_000;
+export const GLOBAL_SYNC_COOLDOWN_MS = 5 * 60_000;
+
+export interface SyncCooldown {
+  /** Returns the remaining wait in milliseconds, or 0 when a manual sync is allowed. */
+  remaining(guildId: string): number;
+  start(guildId: string): void;
+}
+
+export function createSyncCooldown(now: () => number = Date.now): SyncCooldown {
+  const guildStarts = new Map<string, number>();
+  let globalStart: number | undefined;
+  return {
+    remaining(guildId) {
+      const at = now();
+      const guildWait = (guildStarts.get(guildId) ?? -Infinity) + GUILD_SYNC_COOLDOWN_MS - at;
+      const globalWait = (globalStart ?? -Infinity) + GLOBAL_SYNC_COOLDOWN_MS - at;
+      return Math.max(0, guildWait, globalWait);
+    },
+    start(guildId) {
+      guildStarts.set(guildId, now());
+      globalStart = now();
+    },
+  };
+}
+
+function formatWait(milliseconds: number): string {
+  const seconds = Math.ceil(milliseconds / 1_000);
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes} Min ${seconds % 60} s` : `${seconds} s`;
+}
+
+function describeSyncResult(counts: ActionCounts): string {
+  const created = counts.postCreated + counts.postRecreated;
+  const scheduled = counts.scheduledCreated + counts.scheduledUpdated;
+  const parts = [
+    created > 0 ? `${created} ${created === 1 ? 'Beitrag' : 'Beiträge'} neu angelegt` : '',
+    counts.postEdited > 0 ? `${counts.postEdited} bearbeitet` : '',
+    counts.postArchived > 0 ? `${counts.postArchived} archiviert` : '',
+    counts.postUnarchived > 0 ? `${counts.postUnarchived} entarchiviert` : '',
+    scheduled > 0 ? `${scheduled} geplante${scheduled === 1 ? 's Event' : ' Events'} angelegt oder aktualisiert` : '',
+  ].filter(Boolean);
+  return parts.length > 0 ? `Fertig: ${parts.join(', ')}.` : 'Fertig: Alles ist bereits aktuell.';
+}
+
+export async function handleFfEventsAbgleichen(
+  interaction: ChatInputCommandInteraction,
+  store: ReturnType<typeof openDb>,
+  deps: {
+    runCycle: () => Promise<CycleResult | undefined>;
+    runGuildSync: (guildId: string) => Promise<void>;
+    cooldown: SyncCooldown;
+  },
+): Promise<void> {
+  if (!interaction.inGuild() || !interaction.guild) {
+    await interaction.reply({ content: 'Dieser Befehl funktioniert nur auf einem Server.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({ content: 'Dafür brauchst du die Berechtigung „Server verwalten“.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const guildId = interaction.guildId;
+  const stored = getGuild(store, guildId);
+  if (!stored?.eventChannelId || stored.needsSetup) {
+    await interaction.reply({ content: 'Der Bot ist auf diesem Server noch nicht eingerichtet. Bitte richte ihn mit `/ffevents setup` ein.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const wait = deps.cooldown.remaining(guildId);
+  if (wait > 0) {
+    await interaction.reply({ content: `Der Abgleich ist gerade gesperrt. Bitte versuche es in ${formatWait(wait)} erneut.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  deps.cooldown.start(guildId);
+  log.info(`${interaction.guild.name}: Abgleich von ${interaction.user.username ?? interaction.user.id} angefordert`);
+  await interaction.reply({ content: 'Abgleich gestartet …', flags: MessageFlags.Ephemeral });
+
+  const before = snapshotActions(guildId);
+  try {
+    const result = await deps.runCycle();
+    if (!result?.syncedGuildIds.includes(guildId)) await deps.runGuildSync(guildId);
+  } catch (error) {
+    log.error(`Abgleich auf ${interaction.guild.name} fehlgeschlagen:`, error);
+    await interaction.editReply({ content: 'Der Abgleich ist fehlgeschlagen. Bitte versuche es später erneut.' });
+    return;
+  }
+  await interaction.editReply({ content: `${describeSyncResult(diffActions(snapshotActions(guildId), before))}\nVersion: ${versionLine()}` });
 }
 
 export function createSetupSyncRunner(
@@ -752,15 +864,19 @@ export async function startReminderScheduler(
     try {
       await reminderBody();
     } catch (error) {
-      (options.onCycleError ?? ((cause) => console.error('Der Erinnerungslauf ist fehlgeschlagen.', cause)))(error);
+      (options.onCycleError ?? ((cause) => log.error('Der Erinnerungslauf ist fehlgeschlagen.', cause)))(error);
     }
   }
 }
 
-export function createQueuedFetchText(queue: LodestoneRequestQueue): FetchText {
+export function createQueuedFetchText(queue: LodestoneRequestQueue, stats?: { notModified: number }): FetchText {
   const cache = new Map<string, { body: string; finalUrl: string; etag?: string; lastModified?: string }>();
   return async (url, options) => {
     const previous = cache.get(url);
+    const startedAt = performance.now();
+    const logRequest = (status: number | string, note = ''): void => {
+      log.debug(`Lodestone-Anfrage: ${url} → ${status} in ${Math.round(performance.now() - startedAt)} ms${note}`);
+    };
     const result = await queue.fetch(url, {
       priority: options.priority,
       ...(previous?.etag ? { etag: previous.etag } : {}),
@@ -768,11 +884,14 @@ export function createQueuedFetchText(queue: LodestoneRequestQueue): FetchText {
       maxRetries: options.priority === 'item' ? 0 : 3,
     });
     if (!(result instanceof Response)) {
+      if (result.status === 304 && stats) stats.notModified += 1;
+      logRequest(result.status, ', aus Cache');
       if (result.status === 304 && previous) return { status: 200, ...previous };
       return { status: result.status, body: '', finalUrl: previous?.finalUrl ?? url };
     }
 
     const body = await result.text();
+    logRequest(result.status);
     const finalUrl = result.url || url;
     const etag = result.headers.get('etag') ?? undefined;
     const lastModified = result.headers.get('last-modified') ?? undefined;
@@ -821,6 +940,7 @@ export function parseCliArgs(args: readonly string[]): CliOptions {
 }
 
 async function startDryRun(options: CliOptions): Promise<void> {
+  log.info(versionLine());
   const config = readConfig({
     dryRun: true,
     ...(options.dbPath ? { dbPath: options.dbPath } : {}),
@@ -841,11 +961,22 @@ async function startDryRun(options: CliOptions): Promise<void> {
 
 export async function startBot(): Promise<void> {
   const config = readConfig();
+  configureLog({ level: config.logLevel });
+  log.info(versionLine());
   const store = openDb(config.dbPath);
   const client = createDiscordClient();
   const discord = new DiscordJsPort(client);
-  const fetchText = createQueuedFetchText(new LodestoneRequestQueue());
+  configureLog({
+    level: config.logLevel,
+    guildName: (guildId) => client.guilds.cache.get(guildId)?.name,
+  });
+  const fetchStats = { notModified: 0 };
+  const fetchText = createQueuedFetchText(new LodestoneRequestQueue(), fetchStats);
   const health = new SourceHealthMonitor(store);
+  // Debug level lists every Discord write; reads stay silent.
+  client.rest.on('response', (request, response) => {
+    if (request.method !== 'GET') log.debug(`Discord: ${request.method} ${request.path} → ${response.status}`);
+  });
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once('SIGINT', stop);
@@ -859,7 +990,7 @@ export async function startBot(): Promise<void> {
     await client.login(config.discordToken);
     await ready;
     reconcileStoredGuilds(store, new Set(client.guilds.cache.keys()));
-    console.log(`Verbunden als ${client.user?.tag ?? 'unbekannt'}, ${getConfiguredGuilds(store).length} Server eingerichtet`);
+    log.info(`Verbunden als ${client.user?.tag ?? 'unbekannt'}, ${getConfiguredGuilds(store).length} Server eingerichtet`);
     const application = client.application;
     if (!application) throw new Error('Discord application is unavailable after login.');
     await registerGlobalFfEventsCommand(application.commands);
@@ -870,18 +1001,8 @@ export async function startBot(): Promise<void> {
         fetchText,
         health,
       };
-    const runSerializedCycle = createCoalescedCycleRunner(async () => {
-      const startedAt = performance.now();
-      console.log('Zyklus gestartet');
-      try {
-        const result = await runCycle(cycleOptions);
-        console.log(`Zyklus fertig: ${result.capturedEvents} neue Events, ${result.postedEvents} Posts, ${result.requests} Anfragen in ${Math.round((performance.now() - startedAt) / 1_000)} s`);
-        return result;
-      } catch (error) {
-        console.error('Der Stundenzyklus ist fehlgeschlagen.', error);
-        return undefined;
-      }
-    });
+    const runSerializedCycle = createLoggedCycleRunner(cycleOptions, fetchStats);
+    const syncCooldown = createSyncCooldown();
     const runGuildSync = (guildId: string): Promise<void> => runGuildSyncFromStoredData(cycleOptions, guildId);
     const runSetupSync = createSetupSyncRunner(store, runSerializedCycle, runGuildSync);
     const runReminderPass = createCoalescedCycleRunner(async (): Promise<void> => {
@@ -896,35 +1017,43 @@ export async function startBot(): Promise<void> {
             now: new Date(),
           });
         } catch (error) {
-          console.error(`Erinnerungen für Server ${guild.guildId} konnten nicht synchronisiert werden.`, error);
+          log.error(`Erinnerungen für Server ${guild.guildId} konnten nicht synchronisiert werden.`, error);
         }
       }
     });
     const reminderScheduler = startReminderScheduler(runReminderPass, {
       signal: controller.signal,
-      onCycleError: (error) => console.error('Der Erinnerungslauf ist fehlgeschlagen.', error),
+      onCycleError: (error) => log.error('Der Erinnerungslauf ist fehlgeschlagen.', error),
     });
     void runReminderPass();
 
     client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
         const subcommand = interaction.options.getSubcommand();
-        if (subcommand === 'folgen') {
+        if (subcommand === 'abgleichen') {
+          void handleFfEventsAbgleichen(interaction, store, {
+            runCycle: runSerializedCycle,
+            runGuildSync,
+            cooldown: syncCooldown,
+          }).catch((error: unknown) => {
+            log.error('Der Abgleich konnte nicht abgeschlossen werden.', error);
+          });
+        } else if (subcommand === 'folgen') {
           void handleSidebarFollowCommand(interaction, store, discord).catch((error: unknown) => {
-            console.error('Die Seitenleisten-Einstellung konnte nicht abgeschlossen werden.', error);
+            log.error('Die Seitenleisten-Einstellung konnte nicht abgeschlossen werden.', error);
           });
         } else {
           void handleFfEventsSetup(interaction, store, runSetupSync, discord).catch((error: unknown) => {
-            console.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
+            log.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
           });
         }
       } else if (interaction.isButton() && interaction.customId.startsWith(SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX)) {
         void handleSidebarFollowButton(interaction, store, discord).catch((error: unknown) => {
-          console.error('Die Seitenleisten-Einstellung konnte nicht umgeschaltet werden.', error);
+          log.error('Die Seitenleisten-Einstellung konnte nicht umgeschaltet werden.', error);
         });
       } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
         void handleChecklistInteraction(interaction, store).catch((error: unknown) => {
-          console.error('Die Checkliste konnte nicht verarbeitet werden.', error);
+          log.error('Die Checkliste konnte nicht verarbeitet werden.', error);
         });
       }
     });
@@ -933,13 +1062,13 @@ export async function startBot(): Promise<void> {
       const guildId = 'guildId' in channel ? channel.guildId : null;
       if (!guildId) return;
       void handleChannelDelete(guildId, channel.id, store, discord).catch((error: unknown) => {
-        console.error('Der gelöschte Kanal konnte nicht protokolliert werden.', error);
+        log.error('Der gelöschte Kanal konnte nicht protokolliert werden.', error);
       });
     });
 
     await startHourlyScheduler(async () => { await runSerializedCycle(); }, {
       signal: controller.signal,
-      onCycleError: (error) => console.error('Der Stundenzyklus ist fehlgeschlagen.', error),
+      onCycleError: (error) => log.error('Der Stundenzyklus ist fehlgeschlagen.', error),
     });
     await reminderScheduler;
   } finally {
@@ -984,7 +1113,7 @@ export async function handleFfEventsSetup(
   try {
     botMember = await interaction.guild.members.fetchMe();
   } catch (error) {
-    console.error('Die Bot-Berechtigungen konnten nicht abgerufen werden.', error);
+    log.error('Die Bot-Berechtigungen konnten nicht abgerufen werden.', error);
     await interaction.editReply({ content: 'Die Berechtigungen des Bots konnten gerade nicht geprüft werden. Bitte versuche es erneut.' });
     return;
   }
@@ -1000,11 +1129,12 @@ export async function handleFfEventsSetup(
   const discord = discordPort ?? new DiscordJsPort(interaction.client);
   try {
     forumTagSetup = await ensureForumTags(discord, eventChannel.id, Boolean(eventPermissions?.has(PermissionFlagsBits.ManageChannels)));
+    if (forumTagSetup.createdNames.length > 0) log.info(`${guildName}: Forum-Tags angelegt (${forumTagSetup.createdNames.join(', ')})`);
     if (forumTagSetup.missingNames.length > 0) {
       setupHints.push(`Im Forum fehlen diese Tags, die ich nicht anlegen konnte: ${forumTagSetup.missingNames.join(', ')}.`);
     }
   } catch (error) {
-    console.error('Die Forum-Tags konnten nicht vorbereitet werden.', error);
+    log.error('Die Forum-Tags konnten nicht vorbereitet werden.', error);
     setupHints.push('Die Forum-Tags konnten gerade nicht vollständig vorbereitet werden; vorhandene Tags werden verwendet.');
   }
 
@@ -1016,10 +1146,10 @@ export async function handleFfEventsSetup(
         logChannelId: logChannel.id,
       });
       await runGuildSync(interaction.guildId);
-      console.log(`Server ${guildName} eingerichtet`);
+      log.info(`${guildName}: Server eingerichtet`);
     });
   } catch (error) {
-    console.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);
+    log.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);
   }
   const hintText = setupHints.length > 0 ? `\nHinweis: ${setupHints.join(' ')}` : '';
   try {
@@ -1029,7 +1159,7 @@ export async function handleFfEventsSetup(
       allowedMentions: { parse: [] },
     });
   } catch (error) {
-    console.warn(`Setup-Bestätigung für Server ${interaction.guildId} konnte nicht im Log-Kanal gesendet werden.`, error);
+    log.warn(`Setup-Bestätigung für Server ${interaction.guildId} konnte nicht im Log-Kanal gesendet werden.`, error);
   }
   await interaction.editReply({
     content: `✅ Einrichtung gespeichert. Event-Forum: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>. Der erste Abgleich für diesen Server startet jetzt.${hintText ? `\n${hintText.trim()}` : ''}`,
@@ -1059,9 +1189,7 @@ export async function handleChannelDelete(
   });
 }
 
-export function redactToken(text: string, token = process.env.DISCORD_TOKEN): string {
-  return token ? text.split(token).join('[Token entfernt]') : text;
-}
+export { redactToken };
 
 export function describeError(error: unknown): string {
   return redactToken(error instanceof Error ? (error.stack ?? error.message) : String(error));
@@ -1082,7 +1210,7 @@ export async function main(cycleBody?: CycleBody, options: HourlySchedulerOption
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   void main().catch((error: unknown) => {
-    console.error('Der Bot wurde beendet:', describeError(error));
+    log.error('Der Bot wurde beendet:', describeError(error));
     process.exitCode = 1;
   });
 }
