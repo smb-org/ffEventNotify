@@ -12,6 +12,7 @@
     "dry-run": "node src/main.ts --dry-run",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
+    "prepare": "git config core.hooksPath .githooks || true",
     "web:dev": "node src/web/dev.ts",
     "gen-secret": "node -p \"crypto.randomBytes(32).toString('base64')\""
   },
