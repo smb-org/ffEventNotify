@@ -1,5 +1,14 @@
-# Reverse proxy with automatic HTTPS. WEB_DOMAIN comes from .env (see docs/deploy.md).
-{$WEB_DOMAIN} {
-	reverse_proxy bot:3480
+# Reverse proxy behind Cloudflare: listens only on 8443 with a Cloudflare Origin Certificate
+# (see docs/deploy.md). WEB_DOMAIN comes from .env.
+{
+	auto_https off
+	admin off
+}
+
+https://{$WEB_DOMAIN}:8443 {
+	tls /certs/origin.pem /certs/origin.key
 	header -Server
+	reverse_proxy bot:3480 {
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	}
 }

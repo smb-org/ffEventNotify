@@ -21,12 +21,12 @@ services:
     depends_on:
       - bot
     ports:
-      - "80:80"
-      - "443:443"
+      - "8443:8443"
     environment:
       WEB_DOMAIN: ${WEB_DOMAIN:?WEB_DOMAIN must be set in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
     logging:

@@ -15,7 +15,7 @@ export interface WebServerOptions {
   codec: TokenCodec;
   /** Public base URL; POST requests must come from this origin. */
   baseUrl: string;
-  /** Read the client address from X-Forwarded-For (only behind the Caddy proxy). */
+  /** Read the client address from X-Real-IP / X-Forwarded-For (only behind the Caddy proxy). */
   trustProxy?: boolean;
   now?: () => Date;
   ipLimitPerMinute?: number;
@@ -89,9 +89,13 @@ export function createWebServer(options: WebServerOptions): Server {
   const tokenLimiter = new RateLimiter(options.tokenLimitPerMinute ?? 240);
 
   const clientIp = (request: IncomingMessage): string => {
-    const forwarded = options.trustProxy ? request.headers['x-forwarded-for'] : undefined;
-    const last = (Array.isArray(forwarded) ? forwarded.join(',') : forwarded)?.split(',').at(-1)?.trim();
-    return last || request.socket.remoteAddress || 'unknown';
+    if (options.trustProxy) {
+      // Caddy sets X-Real-IP from Cloudflare's CF-Connecting-IP.
+      const real = [request.headers['x-real-ip']].flat()[0]?.trim();
+      const first = [request.headers['x-forwarded-for']].flat().join(',').split(',')[0]?.trim();
+      if (real || first) return (real || first) as string;
+    }
+    return request.socket.remoteAddress || 'unknown';
   };
 
   const sameOrigin = (request: IncomingMessage): boolean => {

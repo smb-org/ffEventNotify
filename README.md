@@ -19,7 +19,7 @@ Die Schaltfläche **„Meine Checkliste“** am Event-Beitrag antwortet nur dir 
 
 Je Char lässt sich „erinnern“ ein- oder ausschalten. Die Erinnerungen im Event-Thread nennen pro Char, wie viele Belohnungen noch offen sind (z. B. „Mira: 3 offen, Kael: 1 offen“), und gehen nur auf Servern raus, auf denen du die Checkliste geöffnet hast.
 
-Der Webserver läuft im Bot-Prozess (Port `WEB_PORT`). Im Produktivbetrieb setzt ein Caddy-Container HTTPS davor, siehe [docs/deploy.md](docs/deploy.md). Lokal ansehen: `cp data/smoke.sqlite data/web-test.sqlite && DB_PATH=./data/web-test.sqlite pnpm web:dev` druckt einen Demo-Link (ohne Discord, nur auf der Kopie).
+Der Webserver läuft im Bot-Prozess (Port `WEB_PORT`). Im Produktivbetrieb setzt ein Caddy-Container (Port 8443, hinter Cloudflare) HTTPS davor, siehe [docs/deploy.md](docs/deploy.md). Lokal ansehen: `cp data/smoke.sqlite data/web-test.sqlite && DB_PATH=./data/web-test.sqlite pnpm web:dev` druckt einen Demo-Link (ohne Discord, nur auf der Kopie).
 
 Bot-Token und Berechtigungen einrichten: siehe [docs/discord-setup.md](docs/discord-setup.md).
 

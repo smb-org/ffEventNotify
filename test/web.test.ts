@@ -178,11 +178,11 @@ test('reminder recipients count open items per reminding character in linked gui
 
 async function withServer(
   run: (ctx: { db: Store; url: string; token: string; get: (path: string) => Promise<Response>; post: (path: string, body: unknown, headers?: Record<string, string>) => Promise<Response> }) => Promise<void>,
-  limits: { ip?: number; token?: number } = {},
+  limits: { ip?: number; token?: number; trustProxy?: boolean } = {},
 ) {
   const db = fresh();
   const server = createWebServer({
-    store: db, codec, baseUrl: BASE, now: () => NOW,
+    store: db, codec, baseUrl: BASE, now: () => NOW, ...(limits.trustProxy ? { trustProxy: true } : {}),
     ...(limits.ip ? { ipLimitPerMinute: limits.ip } : {}), ...(limits.token ? { tokenLimitPerMinute: limits.token } : {}),
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -342,4 +342,20 @@ test('requests beyond the per-IP and per-token limits get 429', async () => {
     assert.equal((await get(`/c/${token}`)).status, 429);
     assert.equal((await get('/c/' + 'B'.repeat(22))).status, 404, 'other tokens are unaffected');
   }, { token: 2 });
+});
+
+test('behind the proxy the rate limit keys on X-Real-IP, then the first X-Forwarded-For entry', async () => {
+  await withServer(async ({ url }) => {
+    const hit = (headers: Record<string, string>) => fetch(url + '/nope', { headers }).then((r) => r.status);
+    assert.equal(await hit({ 'X-Real-IP': '1.1.1.1' }), 404);
+    assert.equal(await hit({ 'X-Real-IP': '1.1.1.1', 'X-Forwarded-For': '9.9.9.9' }), 429, 'X-Real-IP wins');
+    assert.equal(await hit({ 'X-Real-IP': '2.2.2.2' }), 404, 'another client is unaffected');
+    assert.equal(await hit({ 'X-Forwarded-For': '3.3.3.3, 10.0.0.1' }), 404);
+    assert.equal(await hit({ 'X-Forwarded-For': '3.3.3.3, 10.0.0.2' }), 429, 'first entry is the key');
+  }, { ip: 1, trustProxy: true });
+  await withServer(async ({ url }) => {
+    const hit = (ip: string) => fetch(url + '/nope', { headers: { 'X-Real-IP': ip } }).then((r) => r.status);
+    assert.equal(await hit('1.1.1.1'), 404);
+    assert.equal(await hit('2.2.2.2'), 429, 'headers are ignored without trustProxy');
+  }, { ip: 1 });
 });
