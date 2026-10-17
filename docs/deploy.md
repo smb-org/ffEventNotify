@@ -1,6 +1,6 @@
 # Deployment auf einem Linux-VPS
 
-Der Bot läuft als Docker-Container. Das Image baut GitHub Actions bei jedem Merge auf `main` und legt es in der GitHub Container Registry ab (`ghcr.io/smb-org/ffeventnotify`).
+Der Bot läuft als Docker-Container. Das Image baut GitHub Actions bei jedem Merge auf `main` und legt es in der GitHub Container Registry ab (`ghcr.io/smb-org/ffeventnotify`). Das Image wird für x86_64-(amd64-)Server gebaut.
 
 ## Voraussetzungen
 
@@ -85,7 +85,7 @@ docker compose -f compose.prod.yaml pull && docker compose -f compose.prod.yaml 
 
 ## Zurückrollen
 
-Jedes Image trägt zusätzlich den Tag `sha-<kurzer-commit-hash>`:
+Jedes Image trägt zusätzlich den Tag `sha-<kurzer-commit-hash>`. Es werden nur die letzten 5 Versionen aufbewahrt, `FFE_TAG=sha-…` funktioniert also für die letzten 5 Builds:
 
 ```bash
 FFE_TAG=sha-abc1234 docker compose -f compose.prod.yaml up -d
