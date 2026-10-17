@@ -38,10 +38,25 @@
     if (saved) { sessionStorage.removeItem('ffe-scroll'); window.scrollTo(0, Number(saved)); }
   } catch { /* optional */ }
 
+  // "N offen" on the tab: open items of the chars with erinnern on.
+  function updateOpen(event) {
+    const panel = event.closest('[role=tabpanel]');
+    const label = panel && document.querySelector(`#${panel.getAttribute('aria-labelledby')} [data-open]`);
+    if (!label) return;
+    let open = 0;
+    for (const th of panel.querySelectorAll('thead th[data-char]')) {
+      if (!th.querySelector('input[data-remind]').checked) continue;
+      const prog = th.querySelector('.prog');
+      open += Number(prog.dataset.total) - Number(prog.querySelector('b').textContent);
+    }
+    label.textContent = `${open} offen`;
+  }
+
   function updateProgress(table, charId) {
     const done = table.querySelectorAll(`.cell[data-char="${charId}"][aria-pressed="true"]`).length;
     const prog = table.querySelector(`thead th[data-char="${charId}"] .prog`);
     if (prog) prog.querySelector('b').textContent = String(done);
+    updateOpen(table);
   }
 
   async function toggleCell(cell) {
@@ -119,12 +134,56 @@
     const id = box.dataset.remind;
     const value = box.checked;
     const all = () => document.querySelectorAll(`input[data-remind="${id}"]`);
+    const sync = () => document.querySelectorAll('.event').forEach(updateOpen);
     all().forEach((other) => { other.checked = value; });
+    sync();
     try {
       await post('remind', { charId: Number(id), remind: value });
     } catch (error) {
       all().forEach((other) => { other.checked = !value; });
+      sync();
       toast(error.message);
     }
   });
+
+  // Tabs: all panels are in the HTML, switching only toggles `hidden` and the URL.
+  const tablist = document.querySelector('[role=tablist]');
+  const tabs = [...tablist.querySelectorAll('[role=tab]')];
+  const base = `/c/${token}`;
+  const pathOf = (tab) => (tab.dataset.slug ? `${base}/${tab.dataset.slug}` : base);
+
+  function select(tab, focus) {
+    for (const other of tabs) {
+      const on = other === tab;
+      other.setAttribute('aria-selected', String(on));
+      other.tabIndex = on ? 0 : -1;
+      document.getElementById(other.getAttribute('aria-controls')).hidden = !on;
+    }
+    if (focus) tab.focus();
+    const left = tab.offsetLeft - tablist.offsetLeft;
+    if (left < tablist.scrollLeft || left + tab.offsetWidth > tablist.scrollLeft + tablist.clientWidth) {
+      tablist.scrollLeft = left - (tablist.clientWidth - tab.offsetWidth) / 2;
+    }
+  }
+
+  tablist.addEventListener('click', (event) => {
+    const tab = event.target.closest('[role=tab]');
+    if (!tab || tab.getAttribute('aria-selected') === 'true') return;
+    select(tab, false);
+    history.pushState(null, '', pathOf(tab));
+  });
+  tablist.addEventListener('keydown', (event) => {
+    const at = tabs.indexOf(event.target.closest('[role=tab]'));
+    const to = { ArrowRight: (at + 1) % tabs.length, ArrowLeft: (at - 1 + tabs.length) % tabs.length, Home: 0, End: tabs.length - 1 }[event.key];
+    if (at < 0 || to === undefined) return;
+    event.preventDefault();
+    select(tabs[to], true);
+    history.pushState(null, '', pathOf(tabs[to]));
+  });
+  window.addEventListener('popstate', () => {
+    const slug = location.pathname.slice(base.length + 1);
+    select(tabs.find((tab) => tab.dataset.slug === slug) || tabs[0], false);
+  });
+  const current = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+  if (current) select(current, false);
 })();

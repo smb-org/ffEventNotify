@@ -140,9 +140,9 @@ export function createWebServer(options: WebServerOptions): Server {
     const asset = STATIC[url.pathname];
     if (asset && method === 'GET') return send(response, 200, asset.body, asset.type);
 
-    const match = /^\/c\/([^/]+)(?:\/(?:e\/([a-f0-9]{32})|api\/(.+)))?$/.exec(url.pathname);
+    const match = /^\/c\/([^/]+)(?:\/(?:e\/([a-f0-9]{32})|(archiv)|api\/(.+)))?$/.exec(url.pathname);
     if (!match) return send(response, 404, renderNotFound(), 'text/html; charset=utf-8');
-    const [, token = '', focusHash, apiAction] = match;
+    const [, token = '', focusHash, archiveTab, apiAction] = match;
     if (!tokenLimiter.allow(token.slice(0, 64), nowMs)) {
       response.setHeader('Retry-After', '60');
       return send(response, 429, 'Zu viele Anfragen.', 'text/plain; charset=utf-8');
@@ -156,7 +156,7 @@ export function createWebServer(options: WebServerOptions): Server {
     }
     if (method !== 'GET') return send(response, 405, 'Nicht erlaubt.', 'text/plain; charset=utf-8');
     send(response, 200, renderPage({
-      store, events: getAllEvents(store), chars: listChars(store, userId), done: getDoneKeys(store, userId), focusHash, now: now(),
+      store, events: getAllEvents(store), chars: listChars(store, userId), done: getDoneKeys(store, userId), focusHash, archiveTab: archiveTab !== undefined, now: now(),
     }), 'text/html; charset=utf-8');
   }
 

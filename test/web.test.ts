@@ -226,9 +226,48 @@ test('the overview lists running and announced events by end date, archive last,
     assert.ok(html.includes('rel="noopener noreferrer"'));
     assert.match(html, /4\/12|1 von 12/);
 
-    const focus = await (await get(`/c/${token}/e/${eventHash('seasonal-special:/lodestone/special/old/')}`)).text();
-    assert.ok(focus.indexOf('Altes Event') < focus.indexOf('Bald Event'), 'focused event comes first');
-    assert.ok(/id="e-[a-f0-9]{32}" data-event="[a-f0-9]{32}" open>[\s\S]{0,400}Altes Event/.test(focus));
+  });
+});
+
+test('tabs: one per running event plus Archiv, selection by URL, escaped labels', async () => {
+  await withServer(async ({ db, token, get }) => {
+    seedEvent(db, 'soon', 'Bald Event', '2026-10-20T14:59:00.000Z');
+    seedEvent(db, 'next', 'Kommt Event', '2026-12-01T14:59:00.000Z', 3, '2026-10-25T08:00:00.000Z');
+    seedEvent(db, 'xss', '<script>alert(1)</script> und ein sehr sehr langer Titel', '2026-10-30T14:59:00.000Z');
+    seedEvent(db, 'old', 'Altes Event', '2026-10-10T14:59:00.000Z');
+    createChar(db, 'user-1', 'Hauptchar');
+    const selectedTab = (html: string) => /role="tab"[^>]*id="t-([a-f0-9]{32}|archiv)"[^>]*aria-selected="true"/.exec(html)?.[1];
+    const hidden = (html: string, id: string) => new RegExp(`id="p-${id}"[^>]*hidden`).test(html);
+    const hash = (key: string) => eventHash(`seasonal-special:/lodestone/special/${key}/`);
+
+    const html = await (await get(`/c/${token}`)).text();
+    assert.equal((html.match(/role="tab"/g) ?? []).length, 4, '3 events + Archiv');
+    assert.ok(html.includes('role="tablist"') && html.includes('role="tabpanel"'));
+    assert.equal(selectedTab(html), hash('soon'), 'first tab by end date');
+    assert.ok(!hidden(html, hash('soon')) && hidden(html, hash('next')) && hidden(html, 'archiv'));
+    assert.ok(html.includes('noch 3 Tage') && html.includes('ab 25.10.') && html.includes('noch 13 Tage'));
+    assert.ok(html.includes('3 offen'), 'open hint for reminding chars');
+    assert.ok(!html.includes('<script>alert') && html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+    assert.ok(html.includes('sehr sehr langer Titel'), 'full title in the title attribute');
+    assert.match(html, /<span class="tab-title">&lt;script&gt;[^<]*…<\/span>/);
+
+    const next = await (await get(`/c/${token}/e/${hash('next')}`)).text();
+    assert.equal(selectedTab(next), hash('next'));
+    assert.ok(!hidden(next, hash('next')) && hidden(next, hash('soon')));
+
+    const archive = await get(`/c/${token}/archiv`);
+    assert.equal(archive.status, 200);
+    const archiveHtml = await archive.text();
+    assert.equal(selectedTab(archiveHtml), 'archiv');
+    assert.ok(!hidden(archiveHtml, 'archiv') && hidden(archiveHtml, hash('soon')) && archiveHtml.includes('Altes Event'));
+
+    const archived = await (await get(`/c/${token}/e/${hash('old')}`)).text();
+    assert.equal(selectedTab(archived), 'archiv');
+    assert.match(archived, /<details class="event" id="e-[a-f0-9]{32}" data-event="[a-f0-9]{32}" open>/);
+
+    const unknown = await get(`/c/${token}/e/${'0'.repeat(32)}`);
+    assert.equal(unknown.status, 200);
+    assert.equal(selectedTab(await unknown.text()), hash('soon'));
   });
 });
 

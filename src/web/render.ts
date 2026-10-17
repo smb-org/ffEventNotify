@@ -60,13 +60,16 @@ export interface PageInput {
   events: readonly StoreEvent[];
   chars: readonly WebChar[];
   done: ReadonlySet<string>;
+  /** Selected event (32-char hash) from /e/<hash>; unknown values fall back to the first tab. */
   focusHash?: string | undefined;
+  /** True for /archiv. */
+  archiveTab?: boolean | undefined;
   now: Date;
 }
 
 const MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="ring" cx="12" cy="12" r="9.5"/><path class="tick" d="M7 12.6l3.3 3.3L17 9"/></svg>';
 
-function eventSection(input: PageInput, event: StoreEvent, open: boolean): string {
+function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'closed' | 'open'): string {
   const nowMs = input.now.getTime();
   const hash = eventHash(event.eventKey);
   const seen = new Set<string>();
@@ -101,10 +104,41 @@ function eventSection(input: PageInput, event: StoreEvent, open: boolean): strin
     rows.push(`<tr><th class="item" scope="row"><div class="itemcell">${icon}<span class="iname"><a href="${ITEM_DB}${encodeURIComponent(reward.itemId)}/" target="_blank" rel="noopener noreferrer">${esc(reward.name)}</a>${cost}</span></div></th>${cells}</tr>`);
   }
   const empty = input.chars.length === 0 ? '<p class="hint">Lege oben einen Char an, dann kannst du hier Belohnungen abhaken.</p>' : '';
-  return `<details class="event" id="e-${hash}" data-event="${hash}"${open ? ' open' : ''}>
-  <summary>${banner}<span class="meta"><span class="title">${esc(event.titleStatus === 'ok' ? event.title : 'FFXIV-Event')}</span><span class="period">${esc(period(event))}</span></span><span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span></summary>
-  ${empty}<div class="tablewrap"><table><thead><tr><th class="item" scope="col">Belohnung</th>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>
+  const title = esc(event.titleStatus === 'ok' ? event.title : 'FFXIV-Event');
+  const head2 = `${banner}<span class="meta"><span class="title">${title}</span><span class="period">${esc(period(event))}</span></span><span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span>`;
+  const body = `${empty}<div class="tablewrap"><table><thead><tr><th class="item" scope="col">Belohnung</th>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  if (mode === 'panel') return `<div class="event" data-event="${hash}"><div class="evhead">${head2}</div>
+  ${body}
+</div>`;
+  return `<details class="event" id="e-${hash}" data-event="${hash}"${mode === 'open' ? ' open' : ''}>
+  <summary>${head2}</summary>
+  ${body}
 </details>`;
+}
+
+const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: BERLIN_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+const shortDate = new Intl.DateTimeFormat('de-DE', { timeZone: BERLIN_TIME_ZONE, day: '2-digit', month: '2-digit' });
+const dayNumber = (date: Date) => Date.parse(`${dayFormat.format(date)}T00:00:00Z`) / 86_400_000;
+
+function tabNote(event: StoreEvent, now: Date): string {
+  const nowMs = now.getTime();
+  if (event.startStatus === 'ok' && event.startUtc && Date.parse(event.startUtc) > nowMs) return `ab ${shortDate.format(new Date(event.startUtc))}`;
+  if (event.endStatus !== 'ok' || !event.endUtc) return 'Ende offen';
+  const days = dayNumber(new Date(event.endUtc)) - dayNumber(now);
+  if (days <= 0) return 'endet heute';
+  return `noch ${days} ${days === 1 ? 'Tag' : 'Tage'}`;
+}
+
+function shorten(title: string): string {
+  const chars = [...title];
+  return chars.length <= 28 ? title : `${chars.slice(0, 27).join('').trimEnd()}…`;
+}
+
+function openCount(input: PageInput, event: StoreEvent): number | undefined {
+  const reminding = input.chars.filter((char) => char.remind);
+  if (reminding.length === 0) return undefined;
+  const ids = [...new Set(event.rewards.map((reward) => reward.itemId))];
+  return reminding.reduce((sum, char) => sum + ids.filter((id) => !input.done.has(`${char.id}|${event.eventKey}|${id}`)).length, 0);
 }
 
 function charManager(chars: readonly WebChar[]): string {
@@ -125,14 +159,33 @@ function charManager(chars: readonly WebChar[]): string {
 
 export function renderPage(input: PageInput): string {
   const { current, archive } = splitEvents(input.events, input.now);
-  const focus = input.focusHash ? [...current, ...archive].find((event) => eventHash(event.eventKey) === input.focusHash) : undefined;
-  const shown = focus ? [focus, ...current.filter((event) => event !== focus)] : current;
-  const archived = focus ? archive.filter((event) => event !== focus) : archive;
-  const main = shown.length === 0
-    ? '<p class="hint">Zurzeit gibt es keine laufenden Events mit Belohnungsliste.</p>'
-    : shown.map((event) => eventSection(input, event, focus ? event === focus : true)).join('\n');
-  const archiveHtml = archived.length === 0 ? '' : `<details class="archive"><summary>Archiv <span class="count">${archived.length}</span></summary>
-${archived.map((event) => eventSection(input, event, false)).join('\n')}</details>`;
+  const hashOf = (event: StoreEvent) => eventHash(event.eventKey);
+  const archivedFocus = input.focusHash ? archive.find((event) => hashOf(event) === input.focusHash) : undefined;
+  const currentFocus = input.focusHash ? current.findIndex((event) => hashOf(event) === input.focusHash) : -1;
+  // Tab ids: one per current event, then 'archiv'.
+  const archiveSelected = Boolean(input.archiveTab || archivedFocus) || (current.length === 0);
+  const selected = archiveSelected ? current.length : Math.max(currentFocus, 0);
+  const tabs = current.map((event, index) => {
+    const hash = hashOf(event);
+    const full = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+    const open = openCount(input, event);
+    const hint = open === undefined ? '' : `<span class="tab-open" data-open>${open} offen</span>`;
+    return `<button type="button" role="tab" class="tab" id="t-${hash}" aria-controls="p-${hash}" aria-selected="${index === selected}" tabindex="${index === selected ? 0 : -1}" data-slug="${index === 0 ? '' : `e/${hash}`}" title="${esc(full)}"><span class="tab-title">${esc(shorten(full))}</span><span class="tab-note">${esc(tabNote(event, input.now))}${hint ? ' · ' : ''}${hint}</span></button>`;
+  });
+  tabs.push(`<button type="button" role="tab" class="tab" id="t-archiv" aria-controls="p-archiv" aria-selected="${archiveSelected}" tabindex="${archiveSelected ? 0 : -1}" data-slug="archiv"><span class="tab-title">Archiv</span><span class="tab-note">${archive.length} beendet</span></button>`);
+  const panels = current.map((event, index) => {
+    const hash = hashOf(event);
+    return `<section role="tabpanel" class="panel" id="p-${hash}" aria-labelledby="t-${hash}"${index === selected ? '' : ' hidden'}>
+${eventSection(input, event, 'panel')}
+</section>`;
+  });
+  const archiveBody = archive.length === 0
+    ? '<p class="hint">Keine beendeten Events in den letzten 60 Tagen.</p>'
+    : archive.map((event) => eventSection(input, event, event === archivedFocus ? 'open' : 'closed')).join('\n');
+  const noCurrent = current.length === 0 ? '<p class="hint">Zurzeit gibt es keine laufenden Events mit Belohnungsliste.</p>\n' : '';
+  panels.push(`<section role="tabpanel" class="panel" id="p-archiv" aria-labelledby="t-archiv"${archiveSelected ? '' : ' hidden'}>
+${noCurrent}${archiveBody}
+</section>`);
   return `<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow"><meta name="color-scheme" content="light dark">
@@ -140,9 +193,9 @@ ${archived.map((event) => eventSection(input, event, false)).join('\n')}</detail
 <body>
 <header class="top"><h1>Event-Checkliste</h1><p>Dein persönlicher Link – bitte nicht weitergeben.</p></header>
 ${charManager(input.chars)}
+<div class="tabbar"><div class="tabs" role="tablist" aria-label="Events">${tabs.join('')}</div></div>
 <main>
-${main}
-${archiveHtml}
+${panels.join('\n')}
 </main>
 <div id="toast" role="status" aria-live="polite"></div>
 </body></html>`;
