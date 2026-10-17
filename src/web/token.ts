@@ -10,7 +10,8 @@ export interface TokenCodec {
   hmac(token: string): string;
 }
 
-export const TOKEN_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+// New tokens are 43 chars; 22-char tokens from before stay valid until rotated.
+export const TOKEN_PATTERN = /^[A-Za-z0-9_-]{22}$|^[A-Za-z0-9_-]{43}$/;
 
 export function parseLinkSecret(value: string): Buffer {
   const secret = Buffer.from(value.trim(), 'base64');
@@ -24,7 +25,7 @@ export function createTokenCodec(secretBase64: string): TokenCodec {
   const encKey = derive('ffe-token-enc');
   const macKey = derive('ffe-token-mac');
   return {
-    newToken: () => randomBytes(16).toString('base64url'),
+    newToken: () => randomBytes(32).toString('base64url'),
     encrypt(token) {
       const iv = randomBytes(12);
       const cipher = createCipheriv('aes-256-gcm', encKey, iv);

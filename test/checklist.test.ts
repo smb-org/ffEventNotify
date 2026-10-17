@@ -44,7 +44,7 @@ test('the button replies ephemerally with a personal link, reuses the token and 
     await handleChecklistInteraction(first as never, db, web);
     const content = first.replies[0]!.content;
     assert.ok(first.replies[0]!.flags & MessageFlags.Ephemeral);
-    const match = new RegExp(`^Deine Checkliste für „Mog Mog-Kollektion 2026“: https://ffe\\.example\\.de/c/([\\w-]{22})/e/${hash} — nur für dich, bitte nicht teilen\\.$`).exec(content);
+    const match = new RegExp(`^Deine Checkliste für „Mog Mog-Kollektion 2026“: https://ffe\\.example\\.de/c/([\\w-]{43})/e/${hash} — nur für dich, bitte nicht teilen\\.$`).exec(content);
     assert.ok(match, content);
     assert.equal(findUserByToken(db, codec, match[1]!), 'user-1');
     assert.deepEqual(db.prepare('SELECT user_id AS u, guild_id AS g FROM web_user_guilds').all().map((row) => ({ ...row })), [{ u: 'user-1', g: 'guild-1' }]);
@@ -77,12 +77,12 @@ test('/ffevents neuer-link rotates the token and the old link stops working', as
     seed(db);
     const button = new FakeInteraction();
     await handleChecklistInteraction(button as never, db, web);
-    const oldToken = /\/c\/([\w-]{22})\//.exec(button.replies[0]!.content)![1]!;
+    const oldToken = /\/c\/([\w-]{43})\//.exec(button.replies[0]!.content)![1]!;
 
     const command = new FakeInteraction();
     await handleNewLinkCommand(command as never, db, web);
     assert.ok(command.replies[0]!.flags & MessageFlags.Ephemeral);
-    const newToken = /https:\/\/ffe\.example\.de\/c\/([\w-]{22}) /.exec(command.replies[0]!.content)![1]!;
+    const newToken = /https:\/\/ffe\.example\.de\/c\/([\w-]{43}) /.exec(command.replies[0]!.content)![1]!;
     assert.notEqual(newToken, oldToken);
     assert.equal(findUserByToken(db, codec, oldToken), undefined);
     assert.equal(findUserByToken(db, codec, newToken), 'user-1');

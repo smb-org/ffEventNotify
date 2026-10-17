@@ -20,6 +20,8 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 var(-
 h1, h2 { font-family: var(--serif); font-weight: 600; margin: 0; letter-spacing: .01em; }
 .top, .chars, main { max-width: 1900px; margin: 0 auto; padding: 0 12px; }
 .top { padding-top: 16px; padding-bottom: 8px; }
+.toprow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.chars-link { font-size: .85rem; color: var(--accent); white-space: nowrap; }
 .top h1 { font-size: 1.6rem; color: var(--accent); }
 .top p { margin: 2px 0 0; color: var(--muted); font-size: .85rem; }
 button, input { font: inherit; color: inherit; }
@@ -31,9 +33,11 @@ input[type=text] { background: var(--surface); border: 1px solid var(--line); bo
 .danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 
 /* char management */
-.chars { margin-top: 8px; margin-bottom: 12px; }
-.chars-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
-.chars-head h2 { font-size: 1.1rem; }
+.chars { margin-top: 8px; margin-bottom: 80px; }
+.chars > summary { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.chars h2 { font-size: 1.1rem; }
+.chars > summary::before { content: "▸"; color: var(--accent); }
+.chars[open] > summary::before { content: "▾"; }
 .count { color: var(--muted); font-size: .8rem; }
 .add { display: flex; gap: 8px; margin-bottom: 8px; }
 .add input { flex: 1; max-width: 22rem; min-width: 0; }
@@ -65,7 +69,7 @@ input[type=text] { background: var(--surface); border: 1px solid var(--line); bo
 .evhead { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 
 /* events */
-main { padding-bottom: 80px; }
+main { padding-bottom: 12px; }
 main > .panel > .event { margin-top: 0; }
 .event { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; box-shadow: var(--shadow); }
 summary { cursor: pointer; list-style: none; }
@@ -79,10 +83,12 @@ summary::-webkit-details-marker { display: none; }
 .state.s-ended { color: var(--muted); }
 .event[open] > summary { border-bottom: 1px solid var(--line); }
 .hint { margin: 0; padding: 12px; color: var(--muted); }
-.tablewrap { overflow: auto; max-height: min(calc(100vh - var(--tabs-h) - 16px), 900px); overscroll-behavior: contain; }
+/* no inner vertical scroll: the page scrolls, header row sticks below the tab bar */
+.tablewrap { overflow: visible; }
+@media (max-width: 900px) { .tablewrap { overflow-x: auto; overflow-y: visible; } }
 table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
 th, td { padding: 0; border-bottom: 1px solid var(--line); background: var(--surface); }
-thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); text-align: center; vertical-align: top; padding: 6px 4px; width: 5.75rem; min-width: 5.75rem; max-width: 5.75rem; }
+thead th { position: sticky; top: var(--tabs-h); z-index: 3; background: var(--surface-2); text-align: center; vertical-align: top; padding: 6px 4px; width: 5.75rem; min-width: 5.75rem; max-width: 5.75rem; }
 thead th.item { left: 0; z-index: 4; text-align: left; padding-left: 10px; width: 19rem; min-width: 19rem; max-width: 19rem; }
 tbody th.item { position: sticky; left: 0; z-index: 2; text-align: left; font-weight: 400; padding: 4px 8px 4px 10px; width: 19rem; min-width: 19rem; max-width: 19rem; box-shadow: 1px 0 0 var(--line); }
 .itemcell { display: flex; align-items: center; gap: 8px; }

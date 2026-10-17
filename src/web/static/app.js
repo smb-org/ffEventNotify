@@ -30,11 +30,12 @@
 
   // Structural char changes reload the page; keep the reading position.
   function reload() {
-    try { sessionStorage.setItem('ffe-scroll', String(window.scrollY)); } catch { /* optional */ }
+    try { sessionStorage.setItem('ffe-scroll', String(window.scrollY)); if (document.getElementById('chars').open) sessionStorage.setItem('ffe-chars', '1'); } catch { /* optional */ }
     location.reload();
   }
   try {
     const saved = sessionStorage.getItem('ffe-scroll');
+    if (sessionStorage.getItem('ffe-chars')) { sessionStorage.removeItem('ffe-chars'); document.getElementById('chars').open = true; }
     if (saved) { sessionStorage.removeItem('ffe-scroll'); window.scrollTo(0, Number(saved)); }
   } catch { /* optional */ }
 
@@ -89,6 +90,13 @@
       toast(error.message);
     }
   }
+
+  document.querySelector('.chars-link').addEventListener('click', (event) => {
+    event.preventDefault();
+    const box = document.getElementById('chars');
+    box.open = true;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
   const list = document.querySelector('.char-list');
   list.addEventListener('click', (event) => {

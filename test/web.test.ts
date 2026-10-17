@@ -39,12 +39,11 @@ test('tokens are stored encrypted, found by HMAC and rotate', () => {
   const db = fresh();
   try {
     const token = getOrCreateToken(db, codec, 'user-1');
-    assert.match(token, /^[A-Za-z0-9_-]{22}$/);
+    assert.match(token, /^[A-Za-z0-9_-]{43}$/);
     assert.equal(getOrCreateToken(db, codec, 'user-1'), token, 'shown again');
     const row = db.prepare('SELECT token_enc AS enc, token_hmac AS mac FROM web_users').get() as { enc: string; mac: string };
     assert.ok(!row.enc.includes(token) && !row.mac.includes(token));
     assert.equal(findUserByToken(db, codec, token), 'user-1');
-    assert.equal(findUserByToken(db, codec, 'A'.repeat(22)), undefined);
 
     const next = rotateToken(db, codec, 'user-1');
     assert.notEqual(next, token);
@@ -53,6 +52,9 @@ test('tokens are stored encrypted, found by HMAC and rotate', () => {
     assert.throws(() => createTokenCodec(Buffer.alloc(8).toString('base64')), /32 bytes/);
     const other = createTokenCodec(Buffer.alloc(32, 1).toString('base64'));
     assert.throws(() => other.decrypt(codec.encrypt(token)));
+    const old = 'A'.repeat(22);
+    db.prepare('UPDATE web_users SET token_enc = ?, token_hmac = ? WHERE user_id = ?').run(codec.encrypt(old), codec.hmac(old), 'user-1');
+    assert.equal(findUserByToken(db, codec, old), 'user-1', 'old 22-char token still resolves');
   } finally {
     db.close();
   }
@@ -225,6 +227,11 @@ test('the overview lists running and announced events by end date, archive last,
     assert.ok(!html.includes('evil.example'), 'only allowed image hosts');
     assert.ok(html.includes('rel="noopener noreferrer"'));
     assert.match(html, /4\/12|1 von 12/);
+    assert.ok(html.indexOf('<details class="chars"') > html.lastIndexOf('role="tabpanel"'), 'char management after the panels');
+    assert.ok(html.includes('class="chars-link"') && html.indexOf('chars-link') < html.indexOf('role="tablist"'));
+    assert.ok(!/<details class="chars"[^>]* open/.test(html), 'collapsed with chars');
+    const css = await (await get('/static/app.css')).text();
+    assert.ok(!/\.tablewrap\s*\{[^}]*max-height/.test(css), 'no inner vertical scroll');
 
   });
 });

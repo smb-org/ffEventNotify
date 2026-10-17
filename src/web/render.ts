@@ -103,7 +103,7 @@ function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'clos
     }).join('');
     rows.push(`<tr><th class="item" scope="row"><div class="itemcell">${icon}<span class="iname"><a href="${ITEM_DB}${encodeURIComponent(reward.itemId)}/" target="_blank" rel="noopener noreferrer">${esc(reward.name)}</a>${cost}</span></div></th>${cells}</tr>`);
   }
-  const empty = input.chars.length === 0 ? '<p class="hint">Lege oben einen Char an, dann kannst du hier Belohnungen abhaken.</p>' : '';
+  const empty = input.chars.length === 0 ? '<p class="hint">Lege unten deinen ersten Char an, dann kannst du hier Belohnungen abhaken.</p>' : '';
   const title = esc(event.titleStatus === 'ok' ? event.title : 'FFXIV-Event');
   const head2 = `${banner}<span class="meta"><span class="title">${title}</span><span class="period">${esc(period(event))}</span></span><span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span>`;
   const body = `${empty}<div class="tablewrap"><table><thead><tr><th class="item" scope="col">Belohnung</th>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
@@ -142,6 +142,7 @@ function openCount(input: PageInput, event: StoreEvent): number | undefined {
 }
 
 function charManager(chars: readonly WebChar[]): string {
+  // Collapsed once the user has chars; open for the first one.
   const items = chars.map((char, index) => `<li data-char="${char.id}">
       <span class="who"><span class="name" title="${esc(char.name)}">${esc(char.name)}</span>
         <input class="rename-in" type="text" value="${esc(char.name)}" maxlength="${MAX_NAME_LENGTH}" aria-label="Neuer Name" autocomplete="off"></span>
@@ -150,11 +151,11 @@ function charManager(chars: readonly WebChar[]): string {
         <span class="a-rename"><button type="button" data-act="save-rename">Speichern</button><button type="button" data-act="cancel">Abbrechen</button></span>
         <span class="a-delete"><span class="ask">Wirklich löschen?</span><button type="button" class="danger" data-act="delete">Ja</button><button type="button" data-act="cancel">Nein</button></span>
       </span></li>`).join('');
-  return `<section class="chars" aria-labelledby="chars-h">
-  <div class="chars-head"><h2 id="chars-h">Deine Chars</h2><span class="count">${chars.length} von ${MAX_CHARS}</span></div>
+  return `<details class="chars" id="chars"${chars.length === 0 ? ' open' : ''}>
+  <summary><h2 id="chars-h">Chars verwalten</h2><span class="count">${chars.length} von ${MAX_CHARS}</span></summary>
   <form class="add" autocomplete="off"><input type="text" name="name" maxlength="${MAX_NAME_LENGTH}" placeholder="Neuer Char" aria-label="Neuer Char" required><button type="submit">Hinzufügen</button></form>
   <ul class="char-list">${items}</ul>
-</section>`;
+</details>`;
 }
 
 export function renderPage(input: PageInput): string {
@@ -191,12 +192,12 @@ ${noCurrent}${archiveBody}
 <meta name="robots" content="noindex, nofollow"><meta name="color-scheme" content="light dark">
 <title>Event-Checkliste</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
 <body>
-<header class="top"><h1>Event-Checkliste</h1><p>Dein persönlicher Link – bitte nicht weitergeben.</p></header>
-${charManager(input.chars)}
+<header class="top"><div class="toprow"><h1>Event-Checkliste</h1><a class="chars-link" href="#chars">Chars verwalten ↓</a></div><p>Dein persönlicher Link – bitte nicht weitergeben.</p></header>
 <div class="tabbar"><div class="tabs" role="tablist" aria-label="Events">${tabs.join('')}</div></div>
 <main>
 ${panels.join('\n')}
 </main>
+${charManager(input.chars)}
 <div id="toast" role="status" aria-live="polite"></div>
 </body></html>`;
 }
