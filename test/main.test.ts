@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ButtonStyle, ChannelType, Client, ForumChannel, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
+import { ButtonStyle, ChannelType, Client, DiscordAPIError, ForumChannel, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
 import test from 'node:test';
 import { readConfig } from '../src/config.ts';
 import { CYCLE_INTERVAL_MS, createCoalescedCycleRunner, createDiscordClient, DiscordJsPort, handleChannelDelete, handleFfEventsSetup, parseCliArgs, redactToken, reconcileStoredGuilds, REMINDER_INTERVAL_MS, startHourlyScheduler, startReminderScheduler } from '../src/main.ts';
@@ -817,4 +817,26 @@ test('deleting an event channel marks setup invalid and notifies through the sur
 test('redactToken removes the Discord token from error text', () => {
   assert.equal(redactToken('login failed with abc.def.ghi!', 'abc.def.ghi'), 'login failed with [Token entfernt]!');
   assert.equal(redactToken('plain', ''), 'plain');
+});
+
+test('DiscordJsPort treats a deleted forum post (10003) as confirmed absence but propagates other errors', async () => {
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const guild = Reflect.construct(Guild as unknown as Function, [client, rawGuild('123456789012345678')]) as Guild;
+  const forum = Reflect.construct(ForumChannel as unknown as Function, [guild, rawForumChannel(guild.id, '323456789012345678', []), client]) as ForumChannel;
+  const originalFetch = client.channels.fetch.bind(client.channels);
+  client.channels.fetch = (async (id: string, options?: never) => id === forum.id ? forum : originalFetch(id, options)) as typeof client.channels.fetch;
+  let failure: unknown;
+  client.rest.get = async () => { throw failure; };
+  const apiError = (status: number, code: number) => new DiscordAPIError({ code, message: 'x' }, code, status, 'GET', '/channels/1', {});
+  try {
+    const port = new DiscordJsPort(client);
+    failure = apiError(404, 10003);
+    assert.equal(await port.fetchForumPost(forum.id, '423456789012345678'), null);
+    for (const error of [apiError(403, 50001), apiError(500, 0), new Error('network down')]) {
+      failure = error;
+      await assert.rejects(port.fetchForumPost(forum.id, '423456789012345678'), error);
+    }
+  } finally {
+    client.destroy();
+  }
 });

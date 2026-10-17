@@ -201,6 +201,8 @@ class ForumDiscord implements DiscordPort {
   }
   async editScheduledEvent(guildId: string, eventId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
     const event = { ...payload, id: eventId, guildId, status: 'SCHEDULED' as const };
+    const index = this.scheduled.findIndex((existing) => existing.id === eventId);
+    if (index >= 0) this.scheduled[index] = event;
     return event;
   }
   async listScheduledEvents(_guildId: string): Promise<ScheduledEventSnapshot[]> { return [...this.scheduled]; }
@@ -634,6 +636,31 @@ test('reminders go into the event forum post and scheduled event location is the
     await syncScheduledEvent({ event, sourceUrls: [url], guildId: 'guild-1', store: db, discord, now: NOW });
     assert.equal(discord.scheduled[0]?.location, `https://discord.com/channels/guild-1/${postId}`);
     assert.ok(discord.scheduled[0]!.location.length <= 100);
+  } finally {
+    db.close();
+  }
+});
+
+test('a deleted event post is recreated once and the scheduled event points to the new post', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/deleted';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/deleted', eventType: 'seasonal-special',
+    title: 'Geloeschtes-Event', sourceUrl: url, startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-17T08:00:00.000Z',
+  });
+  try {
+    const oldId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    await syncScheduledEvent({ event, sourceUrls: [url], guildId: 'guild-1', store: db, discord, now: NOW });
+    discord.posts.delete(oldId);
+    const newId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    await syncScheduledEvent({ event, sourceUrls: [url], guildId: 'guild-1', store: db, discord, now: NOW });
+    assert.notEqual(newId, oldId);
+    assert.equal(discord.postCreates, 2);
+    assert.equal(discord.posts.size, 1);
+    assert.equal(getGuildEventObject(db, 'guild-1', event.eventKey)?.messageId, newId);
+    assert.equal(discord.scheduled[0]?.location, `https://discord.com/channels/guild-1/${newId}`);
   } finally {
     db.close();
   }
