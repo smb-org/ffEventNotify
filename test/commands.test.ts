@@ -3,7 +3,7 @@ import { ApplicationCommand, ChannelType, Client, InteractionContextType, Permis
 import test from 'node:test';
 import { commandDefinitionSignature, createFfEventsCommand, missingSetupPermissions, registerGlobalFfEventsCommand } from '../src/commands.ts';
 
-test('/ffevents setup is a global-ready command with two required text-channel options and Manage Guild default permission', () => {
+test('/ffevents setup requires a forum event channel and a text log channel', () => {
   const command = createFfEventsCommand().toJSON();
   const setup = command.options?.find((option) => option.name === 'setup') as unknown as {
     options?: Array<{ name: string; required?: boolean; type: number; channel_types?: number[] }>;
@@ -16,9 +16,10 @@ test('/ffevents setup is a global-ready command with two required text-channel o
     { name: 'event-kanal', required: true },
     { name: 'log-kanal', required: true },
   ]);
-  for (const option of setup.options ?? []) {
-    if (option.type === 7) assert.deepEqual(option.channel_types, [ChannelType.GuildText, ChannelType.GuildAnnouncement]);
-  }
+  const eventChannel = setup.options?.find((option) => option.name === 'event-kanal');
+  const logChannel = setup.options?.find((option) => option.name === 'log-kanal');
+  assert.deepEqual(eventChannel?.channel_types, [ChannelType.GuildForum]);
+  assert.deepEqual(logChannel?.channel_types, [ChannelType.GuildText, ChannelType.GuildAnnouncement]);
 });
 
 test('registration compares a real discord.js ApplicationCommand without crashing on serialized permissions', async () => {
@@ -48,14 +49,13 @@ test('registration compares a real discord.js ApplicationCommand without crashin
   }
 });
 
-test('setup permission check requires posting and history in both channels plus pin or manage messages and Create Events', () => {
+test('setup permission check requires forum management, thread sending, and Create Events; Manage Channels stays optional', () => {
   const channelPermissions = new PermissionsBitField([
     PermissionFlagsBits.ViewChannel,
     PermissionFlagsBits.SendMessages,
     PermissionFlagsBits.EmbedLinks,
     PermissionFlagsBits.ReadMessageHistory,
-    PermissionFlagsBits.ManageMessages,
-    PermissionFlagsBits.CreatePublicThreads,
+    PermissionFlagsBits.ManageThreads,
     PermissionFlagsBits.SendMessagesInThreads,
   ]);
   assert.deepEqual(missingSetupPermissions(
@@ -68,8 +68,8 @@ test('setup permission check requires posting and history in both channels plus 
   );
   assert.ok(missing.includes('Server: Events erstellen'));
   assert.ok(missing.includes('Log-Kanal: Nachrichten senden'));
-  assert.ok(missing.includes('Log-Kanal: Nachrichten anheften oder Nachrichten verwalten'));
-  assert.ok(missingEventChannel.includes('Event-Kanal: Öffentliche Threads erstellen'));
+  assert.ok(!missing.includes('Event-Kanal: Kanäle verwalten'));
+  assert.ok(missingEventChannel.includes('Event-Kanal: Threads verwalten (anheften und archivieren)'));
   assert.ok(missingEventChannel.includes('Event-Kanal: Nachrichten in Threads senden'));
 });
 

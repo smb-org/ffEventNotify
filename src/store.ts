@@ -88,6 +88,7 @@ export interface GuildEventObject {
   messageChannelId: string | null;
   scheduledEventId: string | null;
   reminderThreadId: string | null;
+  continuationMessageIds: string[];
   firstPostAttemptAt: string | null;
   status: 'pending' | 'synced' | 'failed';
   lastError: string | null;
@@ -166,6 +167,7 @@ const SCHEMA = `
     message_channel_id TEXT,
     scheduled_event_id TEXT,
     reminder_thread_id TEXT,
+    continuation_message_ids TEXT NOT NULL DEFAULT '[]',
     first_post_attempt_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'synced', 'failed')),
     last_error TEXT,
@@ -292,7 +294,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -374,6 +376,23 @@ function migrateV4ToV5(db: Store): void {
       db.exec('ALTER TABLE guild_event_objects ADD COLUMN reminder_thread_id TEXT');
     }
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (5)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV5ToV6(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const columns = tableColumns(db, 'guild_event_objects');
+    if (columns.size > 0 && !columns.has('continuation_message_ids')) {
+      db.exec("ALTER TABLE guild_event_objects ADD COLUMN continuation_message_ids TEXT NOT NULL DEFAULT '[]'");
+    }
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -397,15 +416,21 @@ function initializeSchema(db: Store): void {
     migrateV2ToV3(db);
     migrateV3ToV4(db);
     migrateV4ToV5(db);
+    migrateV5ToV6(db);
   } else if (version === 2) {
     migrateV2ToV3(db);
     migrateV3ToV4(db);
     migrateV4ToV5(db);
+    migrateV5ToV6(db);
   } else if (version === 3) {
     migrateV3ToV4(db);
     migrateV4ToV5(db);
+    migrateV5ToV6(db);
   } else if (version === 4) {
     migrateV4ToV5(db);
+    migrateV5ToV6(db);
+  } else if (version === 5) {
+    migrateV5ToV6(db);
   } else {
     db.exec(SCHEMA);
   }
@@ -513,6 +538,10 @@ export function upsertGuildSetup(
         log_channel_id = excluded.log_channel_id,
         setup_at = excluded.setup_at,
         needs_setup = 0,
+        first_run_done = CASE
+          WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN 0
+          ELSE guilds.first_run_done
+        END,
         status_message_id = CASE
           WHEN guilds.event_channel_id IS NOT excluded.event_channel_id THEN NULL
           ELSE guilds.status_message_id
@@ -520,15 +549,13 @@ export function upsertGuildSetup(
     `).run(input.guildId, input.eventChannelId, input.logChannelId, input.setupAt ?? null);
     if (eventChannelChanged) {
       db.prepare(`UPDATE guild_event_objects
-        SET message_id = NULL, message_channel_id = NULL, reminder_thread_id = NULL, first_post_attempt_at = NULL,
-            status = 'pending', last_error = NULL
+        SET message_id = NULL, message_channel_id = NULL, reminder_thread_id = NULL,
+            continuation_message_ids = '[]', first_post_attempt_at = NULL,
+            first_run_suppressed = 0, status = 'pending', last_error = NULL
         WHERE guild_id = ?`).run(input.guildId);
     }
     if (!existing && existingGuildCount === 0) {
-      db.prepare(`INSERT INTO guild_event_objects (guild_id, event_key, message_id, message_channel_id, scheduled_event_id)
-        SELECT ?, event_key, message_id, ?, scheduled_event_id FROM legacy_discord_refs WHERE 1
-        ON CONFLICT(guild_id, event_key) DO NOTHING`).run(input.guildId, input.eventChannelId);
-      db.prepare('DELETE FROM legacy_discord_refs').run();
+      // Legacy references identify text-channel cards and are intentionally ignored by forum guilds.
       if (tableExists(db, 'legacy_warnings_sent_v1')) {
         db.prepare(`INSERT INTO warnings_sent (guild_id, key, content, status, sent_at)
           SELECT ?, key, key, 'sent', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -583,11 +610,20 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
     SELECT guild_id AS guildId, event_key AS eventKey, message_id AS messageId,
            message_channel_id AS messageChannelId, scheduled_event_id AS scheduledEventId,
            reminder_thread_id AS reminderThreadId,
+           continuation_message_ids AS continuationMessageIds,
            first_post_attempt_at AS firstPostAttemptAt,
            status, last_error AS lastError, first_run_suppressed AS firstRunSuppressed
     FROM guild_event_objects WHERE guild_id = ? AND event_key = ?
-  `).get(guildId, eventKey) as (Omit<GuildEventObject, 'firstRunSuppressed'> & { firstRunSuppressed: number }) | undefined;
-  return row ? { ...row, firstRunSuppressed: row.firstRunSuppressed === 1 } : undefined;
+  `).get(guildId, eventKey) as (Omit<GuildEventObject, 'firstRunSuppressed' | 'continuationMessageIds'> & {
+    firstRunSuppressed: number; continuationMessageIds: string;
+  }) | undefined;
+  if (!row) return undefined;
+  let continuationMessageIds: string[] = [];
+  try {
+    const decoded: unknown = JSON.parse(row.continuationMessageIds || '[]');
+    if (Array.isArray(decoded)) continuationMessageIds = decoded.filter((id): id is string => typeof id === 'string');
+  } catch { /* Invalid optional continuation metadata is ignored. */ }
+  return { ...row, continuationMessageIds, firstRunSuppressed: row.firstRunSuppressed === 1 };
 }
 
 export function ensureGuildEventFirstPostAttemptAt(
@@ -621,7 +657,7 @@ export function setGuildDiscordIds(
   db: Store,
   guildId: string,
   eventKey: string,
-  ids: { messageId?: string | null; messageChannelId?: string | null; scheduledEventId?: string | null; reminderThreadId?: string | null },
+  ids: { messageId?: string | null; messageChannelId?: string | null; scheduledEventId?: string | null; reminderThreadId?: string | null; continuationMessageIds?: readonly string[] },
 ): void {
   const assignments: string[] = [];
   const values: Array<string | null> = [];
@@ -633,6 +669,10 @@ export function setGuildDiscordIds(
       assignments.push(`${column} = ?`);
       values.push(ids[key]!);
     }
+  }
+  if (ids.continuationMessageIds !== undefined) {
+    assignments.push('continuation_message_ids = ?');
+    values.push(JSON.stringify(ids.continuationMessageIds));
   }
   if (assignments.length === 0) return;
   assignments.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");

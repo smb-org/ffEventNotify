@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks';
 import {
   Client,
   ChannelType,
+  ChannelFlags,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -24,6 +25,7 @@ import {
   type Message,
   type ThreadAutoArchiveDuration,
   type ThreadChannel,
+  type ForumChannel,
   type TextChannel,
 } from 'discord.js';
 import { readConfig } from './config.ts';
@@ -34,7 +36,7 @@ import { runGuildSyncFromStoredData } from './cycle.ts';
 import { openDb } from './store.ts';
 import { LodestoneRequestQueue } from './sources/queue.ts';
 import { collectRecentBotMessages } from './discord-history.ts';
-import { missingSetupPermissions, registerGlobalFfEventsCommand } from './commands.ts';
+import { missingSetupPermissions, registerGlobalFfEventsCommand, setupPermissionHints } from './commands.ts';
 import {
   deleteGuild,
   getAllEvents,
@@ -47,6 +49,7 @@ import {
   type Store,
 } from './store.ts';
 import { syncEventReminders } from './sync/reminders.ts';
+import { ensureForumTags } from './sync/forum.ts';
 import { formatLogContent } from './log-format.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { handleChecklistInteraction } from './interactions/checklist.ts';
@@ -58,6 +61,9 @@ import type {
   DiscordMessageHistoryOptions,
   DiscordMessageSnapshot,
   DiscordPort,
+  DiscordForumPostSnapshot,
+  DiscordForumTag,
+  DiscordForumTagData,
   DiscordThreadSnapshot,
   FetchText,
   ScheduledEventPayload,
@@ -263,16 +269,47 @@ export class DiscordJsPort implements DiscordPort {
     this.client = client;
   }
 
-  private async textChannel(channelId: string): Promise<TextChannel> {
+  private async messageChannel(channelId: string): Promise<TextChannel | ThreadChannel> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !('messages' in channel)) {
-      throw new Error(`Discord channel ${channelId} is not a text channel.`);
+      throw new Error(`Discord channel ${channelId} does not support messages.`);
     }
-    return channel as TextChannel;
+    return channel as TextChannel | ThreadChannel;
+  }
+
+  private async forumChannel(channelId: string): Promise<ForumChannel> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || channel.type !== ChannelType.GuildForum) {
+      throw new Error(`Discord channel ${channelId} is not a forum channel.`);
+    }
+    return channel as ForumChannel;
+  }
+
+  private async forumThread(channelId: string, threadId: string): Promise<ThreadChannel | null> {
+    const forum = await this.forumChannel(channelId);
+    const thread = await forum.threads.fetch(threadId, { force: true });
+    return thread && thread.parentId === forum.id ? thread : null;
+  }
+
+  private async forumPostSnapshot(thread: ThreadChannel): Promise<DiscordForumPostSnapshot> {
+    const starter = await thread.fetchStarterMessage();
+    if (!starter) throw new Error(`Forum post ${thread.id} has no starter message.`);
+    return {
+      id: thread.id,
+      parentChannelId: thread.parentId ?? '',
+      starterMessageId: starter.id,
+      name: thread.name,
+      archived: thread.archived ?? false,
+      appliedTags: [...thread.appliedTags],
+      starterMessage: messageSnapshot(starter, this.client.user?.id),
+      autoArchiveDuration: thread.autoArchiveDuration ?? 1_440,
+      locked: thread.locked ?? false,
+      pinned: thread.flags.has(ChannelFlags.Pinned),
+    };
   }
 
   async createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
-    const channel = await this.textChannel(channelId);
+    const channel = await this.messageChannel(channelId);
     const message = await channel.send({
       content: payload.content,
       embeds: payload.embeds?.map(embedBuilder),
@@ -284,7 +321,7 @@ export class DiscordJsPort implements DiscordPort {
   }
 
   async editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
-    const channel = await this.textChannel(channelId);
+    const channel = await this.messageChannel(channelId);
     const message = await channel.messages.fetch({ message: messageId, force: true });
     const edited = await message.edit({
       content: payload.content ?? null,
@@ -296,7 +333,7 @@ export class DiscordJsPort implements DiscordPort {
   }
 
   async fetchRecentBotMessages(channelId: string, limit: number, options: DiscordMessageHistoryOptions = {}): Promise<DiscordMessageHistory> {
-    const channel = await this.textChannel(channelId);
+    const channel = await this.messageChannel(channelId);
     const botId = this.client.user?.id;
     if (!botId) return { messages: [], complete: false };
     return collectRecentBotMessages(async (pageSize, before) => {
@@ -313,7 +350,7 @@ export class DiscordJsPort implements DiscordPort {
   }
 
   async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
-    const channel = await this.textChannel(channelId);
+    const channel = await this.messageChannel(channelId);
     const botId = this.client.user?.id;
     if (!botId) return [];
     const messages = await channel.messages.fetchPinned();
@@ -324,7 +361,7 @@ export class DiscordJsPort implements DiscordPort {
 
   async fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null> {
     try {
-      const channel = await this.textChannel(channelId);
+      const channel = await this.messageChannel(channelId);
       const message = await channel.messages.fetch({ message: messageId, force: true });
       return messageSnapshot(message, this.client.user?.id);
     } catch (error) {
@@ -335,7 +372,121 @@ export class DiscordJsPort implements DiscordPort {
 
   async isTextChannel(channelId: string): Promise<boolean> {
     const channel = await this.client.channels.fetch(channelId);
-    return Boolean(channel && channel.isTextBased() && 'messages' in channel);
+    return Boolean(channel && (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement));
+  }
+
+  async isForumChannel(channelId: string): Promise<boolean> {
+    const channel = await this.client.channels.fetch(channelId);
+    return channel?.type === ChannelType.GuildForum;
+  }
+
+  async fetchForumTags(channelId: string): Promise<DiscordForumTag[]> {
+    const forum = await this.forumChannel(channelId);
+    return forum.availableTags.map((tag) => ({
+      id: tag.id,
+      name: tag.name,
+      moderated: tag.moderated,
+      emoji: tag.emoji,
+    }));
+  }
+
+  async setForumTags(channelId: string, tags: readonly DiscordForumTagData[]): Promise<DiscordForumTag[]> {
+    const forum = await this.forumChannel(channelId);
+    await forum.setAvailableTags(tags);
+    return this.fetchForumTags(channelId);
+  }
+
+  async createForumPost(
+    channelId: string,
+    name: string,
+    payload: DiscordMessagePayload,
+    appliedTags: readonly string[],
+    autoArchiveDuration: number,
+  ): Promise<DiscordForumPostSnapshot> {
+    const forum = await this.forumChannel(channelId);
+    const thread = await forum.threads.create({
+      name,
+      message: {
+        content: payload.content,
+        embeds: payload.embeds?.map(embedBuilder),
+        ...(payload.components === undefined ? {} : { components: actionRowBuilders(payload.components) }),
+        allowedMentions: { parse: [], users: payload.allowedMentions?.users ?? [] },
+        ...(payload.suppressEmbeds ? { flags: MessageFlags.SuppressEmbeds } : {}),
+      },
+      appliedTags,
+      autoArchiveDuration: autoArchiveDuration as ThreadAutoArchiveDuration,
+    });
+    return this.forumPostSnapshot(thread);
+  }
+
+  async fetchForumPost(channelId: string, threadId: string): Promise<DiscordForumPostSnapshot | null> {
+    const thread = await this.forumThread(channelId, threadId);
+    return thread ? this.forumPostSnapshot(thread) : null;
+  }
+
+  async listForumPosts(channelId: string): Promise<DiscordForumPostSnapshot[]> {
+    const forum = await this.forumChannel(channelId);
+    const threads = new Map<string, ThreadChannel>();
+    const active = await forum.threads.fetchActive(false);
+    for (const [id, thread] of active.threads) threads.set(id, thread);
+
+    let page = await forum.threads.fetchArchived({ type: 'public', limit: 100 }, false);
+    while (true) {
+      for (const [id, thread] of page.threads) threads.set(id, thread);
+      if (!page.hasMore) break;
+      const ids = [...page.threads.keys()];
+      const oldest = ids.sort((left, right) => BigInt(left) < BigInt(right) ? -1 : BigInt(left) > BigInt(right) ? 1 : 0)[0];
+      if (!oldest) throw new Error('Discord returned an empty archived forum page with more results.');
+      page = await forum.threads.fetchArchived({ type: 'public', limit: 100, before: oldest }, false);
+    }
+    return Promise.all([...threads.values()].map((thread) => this.forumPostSnapshot(thread)));
+  }
+
+  async editForumStarter(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    const starter = await channel.fetchStarterMessage({ force: true });
+    if (!starter) throw new Error(`Forum post ${threadId} has no starter message.`);
+    const edited = await channel.messages.edit(starter.id, {
+      content: payload.content ?? null,
+      embeds: payload.embeds?.map(embedBuilder) ?? [],
+      components: payload.components === undefined ? starter.components : actionRowBuilders(payload.components),
+      ...(payload.allowedMentions === undefined ? {} : { allowedMentions: payload.allowedMentions }),
+    });
+    return messageSnapshot(edited, this.client.user?.id);
+  }
+
+  async setForumPostTags(threadId: string, appliedTags: readonly string[]): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    await channel.setAppliedTags(appliedTags);
+  }
+
+  async setForumPostName(threadId: string, name: string): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    await channel.setName(name);
+  }
+
+  async setForumPostArchived(threadId: string, archived: boolean): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    await channel.setArchived(archived);
+  }
+
+  async keepForumPostActive(threadId: string, autoArchiveDuration: number): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    if (channel.archived) await channel.setArchived(false);
+    if (channel.autoArchiveDuration !== autoArchiveDuration) {
+      await channel.setAutoArchiveDuration(autoArchiveDuration as ThreadAutoArchiveDuration);
+    }
+  }
+
+  async pinForumPost(threadId: string): Promise<void> {
+    const channel = await this.client.channels.fetch(threadId, { force: true });
+    if (!channel?.isThread()) throw new Error(`Discord channel ${threadId} is not a forum post.`);
+    await channel.pin();
   }
 
   private threadSnapshot(thread: ThreadChannel, starterMessageId: string | null = thread.id): DiscordThreadSnapshot {
@@ -359,7 +510,7 @@ export class DiscordJsPort implements DiscordPort {
     name: string,
     autoArchiveDuration: number,
   ): Promise<DiscordThreadSnapshot> {
-    const channel = await this.textChannel(channelId);
+    const channel = await this.messageChannel(channelId);
     const message = await channel.messages.fetch({ message: starterMessageId, force: true });
     const thread = await message.startThread({
       name,
@@ -373,7 +524,7 @@ export class DiscordJsPort implements DiscordPort {
     threadId: string | null,
     starterMessageId: string | null,
   ): Promise<DiscordThreadSnapshot | null> {
-    const parent = await this.textChannel(channelId);
+    const parent = await this.messageChannel(channelId);
     const fetchThreadChannel = async (id: string): Promise<DiscordThreadSnapshot | null> => {
       try {
         const channel = await this.client.channels.fetch(id, { force: true });
@@ -418,6 +569,12 @@ export class DiscordJsPort implements DiscordPort {
     return messageSnapshot(message, this.client.user?.id);
   }
 
+  async deleteThreadMessage(threadId: string, messageId: string): Promise<void> {
+    const channel = await this.messageChannel(threadId);
+    const message = await channel.messages.fetch({ message: messageId, force: true });
+    await message.delete();
+  }
+
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
     const guild = await this.client.guilds.fetch(guildId);
     const event = await guild.scheduledEvents.create({
@@ -451,7 +608,7 @@ export class DiscordJsPort implements DiscordPort {
   }
 
   async pinMessage(channelId: string, messageId: string): Promise<void> {
-    const channel = await this.textChannel(channelId);
+    const channel = await this.messageChannel(channelId);
     const message = await channel.messages.fetch({ message: messageId, force: true });
     await message.pin();
   }
@@ -696,7 +853,7 @@ export async function startBot(): Promise<void> {
 
     client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
-        void handleFfEventsSetup(interaction, store, runSetupSync).catch((error: unknown) => {
+        void handleFfEventsSetup(interaction, store, runSetupSync, discord).catch((error: unknown) => {
           console.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
         });
       } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
@@ -731,6 +888,7 @@ export async function handleFfEventsSetup(
   interaction: ChatInputCommandInteraction,
   store: ReturnType<typeof openDb>,
   runGuildSync: (guildId: string) => Promise<void>,
+  discordPort?: DiscordPort,
 ): Promise<void> {
   if (!interaction.inGuild() || !interaction.guild) {
     await interaction.reply({ content: 'Dieser Befehl funktioniert nur auf einem Server.', flags: MessageFlags.Ephemeral });
@@ -746,12 +904,13 @@ export async function handleFfEventsSetup(
     return;
   }
 
-  const eventChannel = interaction.options.getChannel('event-kanal', true) as TextChannel;
+  const eventChannel = interaction.options.getChannel('event-kanal', true) as ForumChannel;
   const logChannel = interaction.options.getChannel('log-kanal', true) as TextChannel;
   const isGuildText = (channel: TextChannel) => channel.guildId === interaction.guildId &&
     (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement);
-  if (!isGuildText(eventChannel) || !isGuildText(logChannel)) {
-    await interaction.reply({ content: 'Bitte wähle zwei Textkanäle dieses Servers aus.', flags: MessageFlags.Ephemeral });
+  const isGuildForum = eventChannel.guildId === interaction.guildId && eventChannel.type === ChannelType.GuildForum;
+  if (!isGuildForum || !isGuildText(logChannel)) {
+    await interaction.reply({ content: 'Bitte wähle einen Forumkanal für Events und einen Textkanal für das Log dieses Servers aus.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -764,11 +923,24 @@ export async function handleFfEventsSetup(
     await interaction.editReply({ content: 'Die Berechtigungen des Bots konnten gerade nicht geprüft werden. Bitte versuche es erneut.' });
     return;
   }
-  const missing = missingSetupPermissions(botMember.permissions,
-    eventChannel.permissionsFor(botMember), logChannel.permissionsFor(botMember));
+  const eventPermissions = eventChannel.permissionsFor(botMember);
+  const missing = missingSetupPermissions(botMember.permissions, eventPermissions, logChannel.permissionsFor(botMember));
   if (missing.length > 0) {
     await interaction.editReply({ content: `Mir fehlen noch diese Berechtigungen:\n${missing.map((permission) => `• ${permission}`).join('\n')}` });
     return;
+  }
+
+  let setupHints = setupPermissionHints(eventPermissions);
+  let forumTagSetup;
+  const discord = discordPort ?? new DiscordJsPort(interaction.client);
+  try {
+    forumTagSetup = await ensureForumTags(discord, eventChannel.id, Boolean(eventPermissions?.has(PermissionFlagsBits.ManageChannels)));
+    if (forumTagSetup.missingNames.length > 0) {
+      setupHints.push(`Im Forum fehlen diese Tags, die ich nicht anlegen konnte: ${forumTagSetup.missingNames.join(', ')}.`);
+    }
+  } catch (error) {
+    console.error('Die Forum-Tags konnten nicht vorbereitet werden.', error);
+    setupHints.push('Die Forum-Tags konnten gerade nicht vollständig vorbereitet werden; vorhandene Tags werden verwendet.');
   }
 
   try {
@@ -784,9 +956,10 @@ export async function handleFfEventsSetup(
   } catch (error) {
     console.error('Der erste Server-Abgleich ist fehlgeschlagen.', error);
   }
+  const hintText = setupHints.length > 0 ? `\nHinweis: ${setupHints.join(' ')}` : '';
   try {
     await logChannel.send({
-      content: formatLogContent(`✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>.`),
+      content: formatLogContent(`✅ Einrichtung gespeichert. Event-Forum: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>.${hintText}`),
       flags: MessageFlags.SuppressEmbeds,
       allowedMentions: { parse: [] },
     });
@@ -794,7 +967,7 @@ export async function handleFfEventsSetup(
     console.warn(`Setup-Bestätigung für Server ${interaction.guildId} konnte nicht im Log-Kanal gesendet werden.`, error);
   }
   await interaction.editReply({
-    content: `✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>. Der erste Abgleich für diesen Server startet jetzt.`,
+    content: `✅ Einrichtung gespeichert. Event-Forum: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>. Der erste Abgleich für diesen Server startet jetzt.${hintText ? `\n${hintText.trim()}` : ''}`,
   });
 }
 

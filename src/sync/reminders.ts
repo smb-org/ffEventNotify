@@ -13,7 +13,7 @@ import {
   type Store,
   type StoreEvent,
 } from '../store.ts';
-import { bestEventSourceUrl, stableEventIdentity } from '../event-identity.ts';
+import { bestEventSourceUrl, hasEventMarkerUrl, stableEventIdentity } from '../event-identity.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import type { DiscordPort, FieldStatus } from '../types.ts';
 
@@ -80,6 +80,13 @@ async function ensureReminderThread(
 ): Promise<string | undefined> {
   const card = getGuildEventObject(store, guildId, event.eventKey);
   if (!card?.messageId || card.messageChannelId !== channelId) return undefined;
+  if (discord.fetchForumPost) {
+    const post = await discord.fetchForumPost(channelId, card.messageId);
+    if (!post || !post.starterMessage.authorIsBot ||
+      !post.starterMessage.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) return undefined;
+    if (discord.keepForumPostActive) await discord.keepForumPostActive(post.id, REMINDER_THREAD_AUTO_ARCHIVE_DURATION);
+    return post.id;
+  }
   let thread = await discord.fetchThread(channelId, card.reminderThreadId, card.messageId);
   if (thread && thread.starterMessageId !== card.messageId) {
     thread = await discord.fetchThread(channelId, null, card.messageId);

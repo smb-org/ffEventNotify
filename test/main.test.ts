@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ButtonStyle, ChannelType, Client, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
+import { ButtonStyle, ChannelType, Client, ForumChannel, GatewayIntentBits, Guild, Message, MessageFlags, PermissionsBitField, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
 import test from 'node:test';
 import { readConfig } from '../src/config.ts';
 import { CYCLE_INTERVAL_MS, createCoalescedCycleRunner, createDiscordClient, DiscordJsPort, handleChannelDelete, handleFfEventsSetup, parseCliArgs, reconcileStoredGuilds, REMINDER_INTERVAL_MS, startHourlyScheduler, startReminderScheduler } from '../src/main.ts';
@@ -157,6 +157,16 @@ function rawTextChannel(guildId: string, id: string) {
   };
 }
 
+function rawForumChannel(guildId: string, id: string, availableTags: Array<{ id: string; name: string }> = []) {
+  return {
+    id, type: ChannelType.GuildForum, guild_id: guildId, name: 'offline test forum', position: 0,
+    permission_overwrites: [], topic: null, nsfw: false, rate_limit_per_user: 0, parent_id: null,
+    available_tags: availableTags.map((tag) => ({ ...tag, moderated: false, emoji_id: null, emoji_name: null })),
+    default_reaction_emoji: null, default_auto_archive_duration: 1440, default_thread_rate_per_user: 0,
+    default_sort_order: null, default_forum_layout: 0, flags: 0,
+  };
+}
+
 function rawMessage(guildId: string, channelId: string, id: string, content: string) {
   return {
     id, channel_id: channelId, guild_id: guildId,
@@ -247,6 +257,151 @@ test('DiscordJsPort starts, fetches, and sends to a public thread with real disc
     assert.deepEqual(body.allowed_mentions, { parse: [], users: ['523456789012345678'] });
     assert.equal(body.flags, MessageFlags.SuppressEmbeds);
     assert.equal(unarchivedByMessage, true, 'sending to an archived thread activates it');
+  } finally {
+    client.destroy();
+  }
+});
+
+test('DiscordJsPort forum methods use real discord.js forum and thread classes with REST stubbed', async () => {
+  const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
+  const guildId = '123456789012345678';
+  const forumId = '323456789012345678';
+  const postId = '423456789012345678';
+  const archivedA = '523456789012345678';
+  const archivedB = '623456789012345678';
+  const guild = Reflect.construct(Guild as unknown as Function, [client, rawGuild(guildId)]) as Guild;
+  const forum = Reflect.construct(ForumChannel as unknown as Function, [guild, rawForumChannel(guildId, forumId, [{ id: 'tag-1', name: 'Läuft' }]), client]) as ForumChannel;
+  const threadData = new Map<string, ReturnType<typeof rawThread> & { applied_tags: string[] }>();
+  const messages = new Map<string, ReturnType<typeof rawMessage>>();
+  const requests: Array<{ method: string; route: string; body?: Record<string, unknown> }> = [];
+  let nextPost = postId;
+  let archivedPage = 0;
+  const makeForumThread = (id: string, archived = false) => {
+    const data = { ...rawThread(guildId, forumId, id, id, archived), type: ChannelType.PublicThread, applied_tags: ['tag-1'] };
+    threadData.set(id, data);
+    messages.set(id, { ...rawMessage(guildId, forumId, id, ''), embeds: [], components: [] });
+    return data;
+  };
+  client.guilds.cache.set(guild.id, guild as never);
+  guild.channels.cache.set(forum.id, forum as never);
+  client.channels.cache.set(forum.id, forum as never);
+  client.channels.fetch = (async (id: string) => {
+    if (id === forum.id) return forum;
+    const data = threadData.get(id);
+    if (data) {
+      const cached = client.channels.cache.get(id);
+      if (cached?.isThread()) return cached;
+      const thread = Reflect.construct(ThreadChannel as unknown as Function, [guild, data, client]) as ThreadChannel;
+      client.channels.cache.set(thread.id, thread as never);
+      guild.channels.cache.set(thread.id, thread as never);
+      forum.threads.cache.set(thread.id, thread as never);
+      return thread;
+    }
+    return null;
+  }) as typeof client.channels.fetch;
+  client.rest.get = async (route) => {
+    const path = String(route);
+    requests.push({ method: 'GET', route: path });
+    if (path.includes('/threads/active')) return { threads: [threadData.get(postId) ?? makeForumThread(postId)], members: [] };
+    if (path.includes('/threads/archived/public')) {
+      archivedPage += 1;
+      if (archivedPage === 1) return { threads: [threadData.get(archivedA) ?? makeForumThread(archivedA, true)], members: [], has_more: true };
+      return { threads: [threadData.get(archivedB) ?? makeForumThread(archivedB, true)], members: [], has_more: false };
+    }
+    const messageMatch = path.match(/\/channels\/([^/]+)\/messages\/([^/?]+)/);
+    if (messageMatch) {
+      const found = messages.get(messageMatch[2]!);
+      if (found) return found;
+      throw Object.assign(new Error('Unknown Message'), { code: 10008 });
+    }
+    const channelMatch = path.match(/\/channels\/([^/?]+)(?:\?|$)/);
+    const channel = channelMatch ? threadData.get(channelMatch[1]!) : undefined;
+    if (channel) return channel;
+    throw new Error(`Unexpected forum GET ${path}`);
+  };
+  client.rest.post = async (route, options) => {
+    const path = String(route);
+    const body = (options?.body ?? {}) as Record<string, unknown>;
+    requests.push({ method: 'POST', route: path, body });
+    if (path.includes(`/channels/${forumId}/threads`)) {
+      nextPost = postId;
+      const data = makeForumThread(nextPost);
+      const messageBody = body.message as { embeds?: unknown[]; components?: unknown[] };
+      messages.set(nextPost, { ...rawMessage(guildId, forumId, nextPost, ''), embeds: messageBody.embeds ?? [], components: messageBody.components ?? [] } as ReturnType<typeof rawMessage>);
+      return data;
+    }
+    if (path.includes(`/channels/${postId}/messages`)) {
+      const id = '723456789012345678';
+      const message = { ...rawMessage(guildId, postId, id, String(body.content ?? '')), embeds: body.embeds ?? [], components: body.components ?? [] };
+      messages.set(id, message as ReturnType<typeof rawMessage>);
+      return message;
+    }
+    throw new Error(`Unexpected forum POST ${path}`);
+  };
+  client.rest.patch = async (route, options) => {
+    const path = String(route);
+    const body = (options?.body ?? {}) as Record<string, unknown>;
+    requests.push({ method: 'PATCH', route: path, body });
+    if (path.endsWith(`/channels/${forumId}`)) {
+      return rawForumChannel(guildId, forumId, (body.available_tags as Array<{ id?: string; name: string }>).map((tag, index) => ({ id: tag.id ?? `tag-added-${index}`, name: tag.name })));
+    }
+    const messageMatch = path.match(/\/channels\/([^/]+)\/messages\/([^/?]+)/);
+    if (messageMatch) {
+      const old = messages.get(messageMatch[2]!);
+      const updated = { ...old, ...Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined)), id: messageMatch[2], channel_id: messageMatch[1] };
+      messages.set(messageMatch[2]!, updated as ReturnType<typeof rawMessage>);
+      return updated;
+    }
+    const threadMatch = path.match(/\/channels\/([^/?]+)/);
+    if (threadMatch && threadData.has(threadMatch[1]!)) {
+      const old = threadData.get(threadMatch[1]!)!;
+      const updated = {
+        ...old,
+        name: typeof body.name === 'string' ? body.name : old.name,
+        applied_tags: Array.isArray(body.applied_tags) ? body.applied_tags as string[] : old.applied_tags,
+        thread_metadata: {
+          ...old.thread_metadata,
+          archived: typeof body.archived === 'boolean' ? body.archived : old.thread_metadata.archived,
+          auto_archive_duration: typeof body.auto_archive_duration === 'number' ? body.auto_archive_duration : old.thread_metadata.auto_archive_duration,
+        },
+      } as ReturnType<typeof rawThread> & { applied_tags: string[] };
+      threadData.set(threadMatch[1]!, updated);
+      return updated;
+    }
+    throw new Error(`Unexpected forum PATCH ${path}`);
+  };
+  client.rest.put = async (route) => { requests.push({ method: 'PUT', route: String(route) }); return {}; };
+  client.rest.delete = async (route) => { requests.push({ method: 'DELETE', route: String(route) }); return {}; };
+  try {
+    const port = new DiscordJsPort(client);
+    assert.equal(await port.isForumChannel(forumId), true);
+    assert.deepEqual(await port.fetchForumTags(forumId), [{ id: 'tag-1', name: 'Läuft', moderated: false, emoji: null }]);
+    await port.setForumTags(forumId, [{ id: 'tag-1', name: 'Läuft' }, { name: 'Beendet' }]);
+    assert.deepEqual((await port.fetchForumTags(forumId)).map((tag) => tag.name), ['Läuft', 'Beendet']);
+
+    const post = await port.createForumPost(forumId, 'Test-Event', {
+      embeds: [{ title: 'Test-Event', url: 'https://de.finalfantasyxiv.com/lodestone/special/2026/test#ffe-stable' }],
+      components: [{ components: [{ type: 'button', style: 'link', label: 'Zur Sonderseite', url: 'https://de.finalfantasyxiv.com/lodestone/special/2026/test' }] }],
+    }, ['tag-1'], 10_080);
+    assert.equal(post.id, postId);
+    assert.equal(post.starterMessageId, postId);
+    const createRequest = requests.find((request) => request.method === 'POST' && request.route.includes(`/channels/${forumId}/threads`));
+    assert.deepEqual(createRequest?.body?.applied_tags, ['tag-1']);
+    assert.equal(createRequest?.body?.auto_archive_duration, 10_080);
+
+    const recovered = await port.fetchForumPost(forumId, postId);
+    assert.equal(recovered?.id, postId);
+    const allPosts = await port.listForumPosts(forumId);
+    assert.deepEqual(new Set(allPosts.map((item) => item.id)), new Set([postId, archivedA, archivedB]));
+    assert.equal(archivedPage, 2);
+
+    await port.setForumPostTags(postId, ['tag-1']);
+    await port.setForumPostName(postId, 'Renamed-Event');
+    await port.setForumPostArchived(postId, true);
+    await port.keepForumPostActive(postId, 10_080);
+    await port.editForumStarter(postId, { embeds: [{ title: 'Aktualisiert' }] });
+    await port.pinForumPost(postId);
+    assert.ok(requests.some((request) => request.method === 'PATCH' && request.route.includes(`/channels/${postId}`) && request.body?.flags !== undefined));
   } finally {
     client.destroy();
   }
@@ -355,7 +510,7 @@ test('DiscordJsPort suppresses embeds and wraps URLs in log messages', async () 
   }
 });
 
-test('overlapping hourly and setup syncs create one card, one status post, and one scheduled event', async () => {
+test('a text channel is refused as the event channel and produces no event posts or schedules', async () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   const guildId = '123456789012345678';
   const channelId = '323456789012345678';
@@ -446,9 +601,8 @@ test('overlapping hourly and setup syncs create one card, one status post, and o
     ]);
 
     const posted = [...messages.values()];
-    assert.equal(posted.filter((message) => message.embeds.some((embed: { title?: string }) => embed.title === 'Gleichzeitiges Event')).length, 1);
-    assert.equal(posted.filter((message) => message.embeds.some((embed: { title?: string }) => embed.title === 'Läuft gerade')).length, 1);
-    assert.equal(schedules.size, 1);
+    assert.ok(posted.every((message) => !message.embeds.some((embed: { title?: string }) => embed.title === 'Gleichzeitiges Event' || embed.title === 'Läuft gerade')));
+    assert.equal(schedules.size, 0);
   } finally {
     db.close();
     client.destroy();
@@ -483,15 +637,15 @@ test('setup defers before fetching the bot member and completes with editReply',
   const order: string[] = [];
   const channelPermissions = new PermissionsBitField([
     PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
-    PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages,
-    PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendMessagesInThreads,
+    PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageThreads,
+    PermissionFlagsBits.SendMessagesInThreads,
   ]);
   const guildId = '123456789012345678';
   const loggedMessages: string[] = [];
   const setupLogMessages: Array<{ content?: string; flags?: MessageFlags }> = [];
   const originalLog = console.log;
   console.log = (...values: unknown[]) => { loggedMessages.push(values.map(String).join(' ')); };
-  const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
+  const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildForum, permissionsFor: () => channelPermissions };
   const logChannel = {
     id: '423456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions,
     send: async (payload: { content?: string; flags?: MessageFlags }) => { order.push('send-log'); setupLogMessages.push(payload); },
@@ -506,9 +660,14 @@ test('setup defers before fetching the bot member and completes with editReply',
     editReply: async (options: { content: string }) => { order.push('edit'); assert.match(options.content, /Einrichtung gespeichert/); },
   };
   try {
-    await handleFfEventsSetup(interaction as never, db, async (selectedGuildId) => { order.push(`sync:${selectedGuildId}`); });
+    const setupDiscord = {
+      fetchForumTags: async () => [],
+      setForumTags: async (_channelId: string, tags: readonly { name: string }[]) => tags.map((tag, index) => ({ ...tag, id: `tag-${index}` })),
+    };
+    await handleFfEventsSetup(interaction as never, db, async (selectedGuildId) => { order.push(`sync:${selectedGuildId}`); }, setupDiscord as never);
     assert.deepEqual(order, ['defer', 'fetch', `sync:${guildId}`, 'send-log', 'edit']);
-    assert.equal(setupLogMessages[0]?.content, `✅ Einrichtung gespeichert. Event-Kanal: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>.`);
+    assert.match(setupLogMessages[0]?.content ?? '', new RegExp(`Event-Forum: <#${eventChannel.id}> · Log-Kanal: <#${logChannel.id}>\\.`));
+    assert.match(setupLogMessages[0]?.content ?? '', /Kanäle verwalten/);
     assert.equal(setupLogMessages[0]?.flags, MessageFlags.SuppressEmbeds);
     assert.doesNotMatch(setupLogMessages[0]?.content ?? '', /\r|\n/);
     assert.deepEqual(loggedMessages, ['Server Testserver eingerichtet']);
@@ -527,7 +686,7 @@ test('setup reports a bot-member fetch failure after acknowledging the interacti
     PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendMessagesInThreads,
   ]);
   const guildId = '123456789012345678';
-  const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
+  const eventChannel = { id: '323456789012345678', guildId, type: ChannelType.GuildForum, permissionsFor: () => channelPermissions };
   const logChannel = { id: '423456789012345678', guildId, type: ChannelType.GuildText, permissionsFor: () => channelPermissions };
   const interaction = {
     guildId,
@@ -556,13 +715,40 @@ test('setup reports a bot-member fetch failure after acknowledging the interacti
   }
 });
 
-test('setup reply lists missing public-thread permissions in German', async () => {
+test('setup rejects a text channel selected for events', async () => {
+  const db = openDb(':memory:');
+  let reply = '';
+  const interaction = {
+    guildId: '123456789012345678',
+    guild: { name: 'Testserver' },
+    memberPermissions: new PermissionsBitField([PermissionFlagsBits.ManageGuild]),
+    inGuild: () => true,
+    options: {
+      getSubcommand: () => 'setup',
+      getChannel: (name: string) => ({
+        id: name === 'event-kanal' ? '323456789012345678' : '423456789012345678',
+        guildId: '123456789012345678',
+        type: ChannelType.GuildText,
+      }),
+    },
+    reply: async (payload: { content: string }) => { reply = payload.content; },
+  };
+  try {
+    await handleFfEventsSetup(interaction as never, db, async () => assert.fail('invalid text event channel must not sync'));
+    assert.match(reply, /Forumkanal für Events/);
+    assert.equal(getGuild(db, '123456789012345678'), undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('setup reply lists missing forum thread permissions in German', async () => {
   const db = openDb(':memory:');
   const basePermissions = new PermissionsBitField([
     PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
-    PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.ReadMessageHistory,
   ]);
-  const eventChannel = { id: '323456789012345678', guildId: '123456789012345678', type: ChannelType.GuildText, permissionsFor: () => basePermissions };
+  const eventChannel = { id: '323456789012345678', guildId: '123456789012345678', type: ChannelType.GuildForum, permissionsFor: () => basePermissions };
   const logChannel = { id: '423456789012345678', guildId: '123456789012345678', type: ChannelType.GuildText, permissionsFor: () => basePermissions };
   let reply = '';
   const interaction = {
@@ -577,7 +763,7 @@ test('setup reply lists missing public-thread permissions in German', async () =
   try {
     await handleFfEventsSetup(interaction as never, db, async () => assert.fail('sync must not run with missing thread permissions'));
     assert.match(reply, /Mir fehlen noch diese Berechtigungen:/);
-    assert.match(reply, /Event-Kanal: Öffentliche Threads erstellen/);
+    assert.match(reply, /Event-Kanal: Threads verwalten/);
     assert.match(reply, /Event-Kanal: Nachrichten in Threads senden/);
   } finally {
     db.close();

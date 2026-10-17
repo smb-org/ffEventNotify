@@ -54,6 +54,7 @@ import { runDailyWikiCrossCheck } from './sources/wiki.ts';
 import { syncEventEmbed } from './sync/embed.ts';
 import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
+import { syncForumEvent, syncForumStatus } from './sync/forum.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { SourceHealthMonitor } from './health.ts';
 import { parseGermanDateTime } from './time.ts';
@@ -1090,7 +1091,9 @@ async function drainPendingWarnings(context: CycleContext): Promise<void> {
 }
 
 async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: boolean): Promise<number> {
-  const candidates = getOpenEvents(context.store, context.currentTime)
+  const forumMode = context.discord.createForumPost !== undefined;
+  const sourceEvents = forumMode ? getAllEvents(context.store) : getOpenEvents(context.store, context.currentTime);
+  const candidates = sourceEvents
     .filter((event) => shouldPostToGuild(event, guild.guildId, context.currentTime, guild.firstRun, context.store));
   if (blind) return 0;
   let posted = 0;
@@ -1098,10 +1101,17 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
     const sourceUrls = getEventSources(context.store, event.id).map((source) => source.url);
     const errors: unknown[] = [];
     try {
-      await syncEventEmbed({
-        event, sourceUrls, guildId: guild.guildId, channelId: guild.eventChannelId,
-        discord: context.discord, store: context.store, now: context.currentTime,
-      });
+      if (forumMode) {
+        await syncForumEvent({
+          event, sourceUrls, guildId: guild.guildId, channelId: guild.eventChannelId,
+          discord: context.discord, store: context.store, now: context.currentTime,
+        });
+      } else {
+        await syncEventEmbed({
+          event, sourceUrls, guildId: guild.guildId, channelId: guild.eventChannelId,
+          discord: context.discord, store: context.store, now: context.currentTime,
+        });
+      }
     } catch (error) {
       errors.push(error);
     }
@@ -1132,16 +1142,28 @@ async function syncGuildStatus(context: CycleContext, guild: CycleGuild, blind: 
   if (!getGuild(context.store, guild.guildId)) return;
   if (blind) return;
   try {
-    await syncLiveStatusPost({
-      guildId: guild.guildId,
-      channelId: guild.eventChannelId,
-      logChannelId: guild.logChannelId,
-      events: getOpenEvents(context.store, context.currentTime),
-      discord: context.discord,
-      store: context.store,
-      now: context.currentTime,
-      suppressLogs: guild.firstRun,
-    });
+    if (context.discord.createForumPost !== undefined) {
+      await syncForumStatus({
+        guildId: guild.guildId,
+        channelId: guild.eventChannelId,
+        logChannelId: guild.logChannelId,
+        events: getOpenEvents(context.store, context.currentTime),
+        discord: context.discord,
+        store: context.store,
+        now: context.currentTime,
+      });
+    } else {
+      await syncLiveStatusPost({
+        guildId: guild.guildId,
+        channelId: guild.eventChannelId,
+        logChannelId: guild.logChannelId,
+        events: getOpenEvents(context.store, context.currentTime),
+        discord: context.discord,
+        store: context.store,
+        now: context.currentTime,
+        suppressLogs: guild.firstRun,
+      });
+    }
   } catch (error) {
     console.error(`Die Statusmeldung für Server ${guild.guildId} konnte nicht synchronisiert werden.`, error);
     await logWarning(context, 'status-post:sync-failed',
@@ -1170,7 +1192,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       let logChannel = false;
       try {
         [eventChannel, logChannel] = await Promise.all([
-          options.discord.isTextChannel(guild.eventChannelId),
+          options.discord.isForumChannel && options.discord.createForumPost
+            ? options.discord.isForumChannel(guild.eventChannelId)
+            : options.discord.isTextChannel(guild.eventChannelId),
           options.discord.isTextChannel(guild.logChannelId),
         ]);
       } catch (error) {
@@ -1301,7 +1325,9 @@ async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId
   let logChannel: boolean;
   try {
     [eventChannel, logChannel] = await Promise.all([
-      options.discord.isTextChannel(guild.eventChannelId),
+      options.discord.isForumChannel && options.discord.createForumPost
+        ? options.discord.isForumChannel(guild.eventChannelId)
+        : options.discord.isTextChannel(guild.eventChannelId),
       options.discord.isTextChannel(guild.logChannelId),
     ]);
   } catch (error) {

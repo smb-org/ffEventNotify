@@ -21,6 +21,8 @@ export interface Reward {
   itemId: string;
   name: string;
   section: string;
+  /** Verbatim cost label from the special page, when the page provides one. */
+  cost?: string;
 }
 
 export interface ResolvedItem {
@@ -203,6 +205,28 @@ export interface DiscordThreadSnapshot {
   archived: boolean;
 }
 
+export interface DiscordForumTag {
+  id: string;
+  name: string;
+  moderated?: boolean;
+  emoji?: { id: string | null; name: string | null } | null;
+}
+
+export interface DiscordForumPostSnapshot extends DiscordThreadSnapshot {
+  appliedTags: string[];
+  starterMessage: DiscordMessageSnapshot;
+  autoArchiveDuration: number;
+  locked: boolean;
+  pinned: boolean;
+}
+
+export interface DiscordForumTagData {
+  id?: string;
+  name: string;
+  moderated?: boolean;
+  emoji?: { id: string | null; name: string | null } | null;
+}
+
 export interface DiscordPort {
   createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
@@ -210,9 +234,23 @@ export interface DiscordPort {
   fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]>;
   fetchMessage(channelId: string, messageId: string): Promise<DiscordMessageSnapshot | null>;
   isTextChannel(channelId: string): Promise<boolean>;
+  /** Forum methods are optional for older in-memory adapters; the live DiscordJsPort implements all of them. */
+  isForumChannel?(channelId: string): Promise<boolean>;
+  fetchForumTags?(channelId: string): Promise<DiscordForumTag[]>;
+  setForumTags?(channelId: string, tags: readonly DiscordForumTagData[]): Promise<DiscordForumTag[]>;
+  createForumPost?(channelId: string, name: string, payload: DiscordMessagePayload, appliedTags: readonly string[], autoArchiveDuration: number): Promise<DiscordForumPostSnapshot>;
+  fetchForumPost?(channelId: string, threadId: string): Promise<DiscordForumPostSnapshot | null>;
+  listForumPosts?(channelId: string): Promise<DiscordForumPostSnapshot[]>;
+  editForumStarter?(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
+  setForumPostTags?(threadId: string, appliedTags: readonly string[]): Promise<void>;
+  setForumPostName?(threadId: string, name: string): Promise<void>;
+  setForumPostArchived?(threadId: string, archived: boolean): Promise<void>;
+  keepForumPostActive?(threadId: string, autoArchiveDuration: number): Promise<void>;
+  pinForumPost?(threadId: string): Promise<void>;
   startThreadOnMessage(channelId: string, starterMessageId: string, name: string, autoArchiveDuration: number): Promise<DiscordThreadSnapshot>;
   fetchThread(channelId: string, threadId: string | null, starterMessageId: string | null): Promise<DiscordThreadSnapshot | null>;
   sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
+  deleteThreadMessage?(threadId: string, messageId: string): Promise<void>;
   createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   editScheduledEvent(guildId: string, eventId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   listScheduledEvents(guildId: string): Promise<ScheduledEventSnapshot[]>;

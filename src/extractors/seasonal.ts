@@ -197,14 +197,14 @@ function rewardGroups($: ReturnType<typeof load>, root: any): RewardGroup[] {
   return groups;
 }
 
-function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: string }>> {
+function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: string; cost?: string }>> {
   const $ = load(html);
   const root = contentRoot($);
   if (!root.length) return { status: 'unsicher', reason: 'Der Inhaltsbereich der Sonderseite wurde nicht gefunden.' };
 
   const groups = rewardGroups($, root);
   if (groups.length === 0) return { status: 'unsicher', reason: 'Es wurden keine erkennbaren Überschriften für Belohnungsabschnitte gefunden.' };
-  const rewards: Array<{ itemId: string; section: string }> = [];
+  const rewards: Array<{ itemId: string; section: string; cost?: string }> = [];
   const representedLinks = new Set<any>();
   const ids = new Set<string>();
 
@@ -230,7 +230,11 @@ function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: s
       if (!itemId) return { status: 'unsicher', reason: 'Einem Gegenstandslink fehlt die Gegenstands-ID.' };
       if (ids.has(itemId)) return { status: 'unsicher', reason: `Die Gegenstands-ID ${itemId} kommt mehrfach vor.` };
       ids.add(itemId);
-      rewards.push({ itemId, section: group.section });
+      const row = $(link).closest('tr');
+      const tokenText = normalizedText(row.find('.item__list__token').first().text());
+      const tokenLabel = normalizedText(group.node.find('.item__list__head_num .pc_view').first().text());
+      const cost = tokenText ? (tokenLabel ? `${tokenText} ${tokenLabel}` : tokenText) : undefined;
+      rewards.push({ itemId, section: group.section, ...(cost ? { cost } : {}) });
     }
   }
 
@@ -305,7 +309,7 @@ function selectPeriod(
 }
 
 async function resolveRewards(
-  ids: readonly { itemId: string; section: string }[],
+  ids: readonly { itemId: string; section: string; cost?: string }[],
   options?: ResolveItemOptions,
 ): Promise<FieldStatus<Reward[]>> {
   if (!options) return { status: 'unsicher', reason: 'Die Abhängigkeiten zum Auflösen der Gegenstände fehlen.' };
@@ -315,7 +319,12 @@ async function resolveRewards(
     if (item.status === 'unsicher') {
       return { status: 'unsicher', reason: `Gegenstand ${entry.itemId}: ${item.reason}` };
     }
-    rewards.push({ itemId: item.value.itemId, name: item.value.name, section: entry.section });
+    rewards.push({
+      itemId: item.value.itemId,
+      name: item.value.name,
+      section: entry.section,
+      ...(entry.cost ? { cost: entry.cost } : {}),
+    });
   }
   return { status: 'ok', value: rewards };
 }

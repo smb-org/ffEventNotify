@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { getGuildEventObject, openDb, upsertGuildSetup } from '../src/store.ts';
 
-test('v1 schema migrates idempotently, preserving warnings and single-guild Discord references', () => {
+test('v1 schema migrates idempotently, preserving warnings while ignoring legacy text-card references', () => {
   const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-migration-'));
   const path = join(directory, 'v1.sqlite');
   let db: ReturnType<typeof openDb> | undefined;
@@ -19,7 +19,7 @@ test('v1 schema migrates idempotently, preserving warnings and single-guild Disc
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 6);
     assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
@@ -29,15 +29,13 @@ test('v1 schema migrates idempotently, preserving warnings and single-guild Disc
     upsertGuildSetup(db, { guildId: 'legacy-server', eventChannelId: 'events', logChannelId: 'logs' });
     assert.equal((db.prepare('SELECT guild_id AS guildId, status FROM warnings_sent WHERE key = ?').get('legacy-warning-key') as { guildId: string; status: string }).guildId, 'legacy-server');
     assert.equal((db.prepare('SELECT status FROM warnings_sent WHERE key = ?').get('legacy-warning-key') as { status: string }).status, 'sent');
-    assert.deepEqual(getGuildEventObject(db, 'legacy-server', 'legacy:event') && {
-      messageId: getGuildEventObject(db, 'legacy-server', 'legacy:event')!.messageId,
-      scheduledEventId: getGuildEventObject(db, 'legacy-server', 'legacy:event')!.scheduledEventId,
-    }, { messageId: 'old-message', scheduledEventId: 'old-schedule' });
+    assert.equal(getGuildEventObject(db, 'legacy-server', 'legacy:event'), undefined);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM legacy_discord_refs').get() as { count: number }).count, 1);
     db.close();
     db = undefined;
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM guild_event_objects').get() as { count: number }).count, 1);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM guild_event_objects').get() as { count: number }).count, 0);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM legacy_warnings_sent_v1').get() as { count: number }).count, 1);
   } finally {
     db?.close();
@@ -69,7 +67,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 6);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');
@@ -81,7 +79,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
   }
 });
 
-test('v4 schema migration adds a nullable reminder thread id without changing guild event keys', () => {
+test('v4 schema migration adds forum continuation metadata without changing guild event keys', () => {
   const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-v4-migration-'));
   const path = join(directory, 'v4.sqlite');
   let db: ReturnType<typeof openDb> | undefined;
@@ -100,8 +98,9 @@ test('v4 schema migration adds a nullable reminder thread id without changing gu
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 5);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 6);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'reminder_thread_id'));
+    assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'continuation_message_ids'));
     assert.equal((db.prepare('SELECT message_id AS messageId, reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { messageId: string; reminderThreadId: string | null }).messageId, 'card');
     assert.equal((db.prepare('SELECT reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { reminderThreadId: string | null }).reminderThreadId, null);
   } finally {

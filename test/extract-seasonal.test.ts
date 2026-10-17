@@ -51,7 +51,7 @@ test('All Saints uses Berlin DST labels and resolves all eight rewards from item
   assert.equal(result.imageUrl, 'https://lds-img.finalfantasyxiv.com/h/J/qNnMt1AmuNtGhu9r3FN_noNwRs.jpg');
   assert.equal(result.rewards.status, 'ok');
   if (result.rewards.status === 'ok') {
-    assert.deepEqual(result.rewards.value, expectedPage.rewards.map(({ section, itemId, name }: any) => ({ section, itemId, name })));
+    assert.deepEqual(result.rewards.value, expectedPage.rewards.map(({ section, itemId, name, cost }: any) => ({ section, itemId, name, ...(cost ? { cost } : {}) })));
   }
 });
 
@@ -63,7 +63,7 @@ test('Mog Mog inherits the end timezone label and keeps its featured and exchang
   assert.deepEqual(result.period, { status: 'ok', value: expectedPage.period });
   assert.equal(result.rewards.status, 'ok');
   if (result.rewards.status === 'ok') {
-    assert.deepEqual(result.rewards.value, expectedPage.rewards.map(({ section, itemId, name }: any) => ({ section, itemId, name })));
+    assert.deepEqual(result.rewards.value, expectedPage.rewards.map(({ section, itemId, name, cost }: any) => ({ section, itemId, name, ...(cost ? { cost } : {}) })));
   }
   assert.equal(result.periods.status, 'ok');
   if (result.periods.status === 'ok') {

@@ -190,9 +190,16 @@ async function syncScheduledEventUnlocked({
   const guildEventObject = getGuildEventObject(store, guildId, event.eventKey);
   if (!guild?.eventChannelId || !guildEventObject?.messageId
     || guildEventObject.messageChannelId !== guild.eventChannelId) return undefined;
-  const card = await discord.fetchMessage(guild.eventChannelId, guildEventObject.messageId);
-  if (!card?.authorIsBot || !card.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) return undefined;
-  const cardJumpLink = `https://discord.com/channels/${guildId}/${guild.eventChannelId}/${guildEventObject.messageId}`;
+  let cardJumpLink: string;
+  if (discord.fetchForumPost) {
+    const post = await discord.fetchForumPost(guild.eventChannelId, guildEventObject.messageId);
+    if (!post?.starterMessage.authorIsBot || !post.starterMessage.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) return undefined;
+    cardJumpLink = `https://discord.com/channels/${guildId}/${guildEventObject.messageId}`;
+  } else {
+    const card = await discord.fetchMessage(guild.eventChannelId, guildEventObject.messageId);
+    if (!card?.authorIsBot || !card.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) return undefined;
+    cardJumpLink = `https://discord.com/channels/${guildId}/${guild.eventChannelId}/${guildEventObject.messageId}`;
+  }
 
   const schedules = await discord.listScheduledEvents(guildId);
   const storedObject = guildEventObject;

@@ -414,11 +414,12 @@ test('setup channel changes clear only that guild message and status references 
       needsSetup: getGuild(db, 'guild-a')!.needsSetup,
       statusMessageId: getGuild(db, 'guild-a')!.statusMessageId,
     }, {
-      eventChannelId: 'new-events', logChannelId: 'new-logs', firstRunDone: true, needsSetup: false, statusMessageId: null,
+      eventChannelId: 'new-events', logChannelId: 'new-logs', firstRunDone: false, needsSetup: false, statusMessageId: null,
     });
     assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.messageId, null);
     assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.scheduledEventId, 'existing-schedule');
     assert.equal(getGuildEventObject(db, 'guild-a', 'channel-change')?.firstPostAttemptAt, null);
+    assert.deepEqual(getGuildEventObject(db, 'guild-a', 'channel-change')?.continuationMessageIds, []);
     assert.equal(getConfiguredGuilds(db).some((guild) => guild.guildId === 'guild-a'), true);
     assert.equal(getOpenEvents(db).some((event) => event.id === eventId), true);
   } finally {

@@ -440,7 +440,7 @@ function rewardSections(event: StoreEvent): string[] {
   const groups = new Map<string, string[]>();
   for (const reward of event.rewards) {
     const names = groups.get(reward.section) ?? [];
-    names.push(reward.name);
+    names.push(reward.cost ? `${reward.name} — ${reward.cost}` : reward.name);
     groups.set(reward.section, names);
   }
   return [...groups].map(([section, names]) => `  ${section}: ${names.join(', ')}`);

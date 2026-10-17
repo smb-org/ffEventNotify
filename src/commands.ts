@@ -19,7 +19,7 @@ export function createFfEventsCommand() {
       .addChannelOption((option) => option
         .setName('event-kanal')
         .setDescription('Hier veröffentlicht der Bot Events und den Live-Status')
-        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .addChannelTypes(ChannelType.GuildForum)
         .setRequired(true))
       .addChannelOption((option) => option
         .setName('log-kanal')
@@ -88,18 +88,20 @@ export function missingSetupPermissions(
     if (!eventChannelPermissions?.has(permission)) missing.push(`Event-Kanal: ${label}`);
     if (!logChannelPermissions?.has(permission)) missing.push(`Log-Kanal: ${label}`);
   }
-  if (!eventChannelPermissions?.has(PermissionFlagsBits.CreatePublicThreads)) {
-    missing.push('Event-Kanal: Öffentliche Threads erstellen');
-  }
   if (!eventChannelPermissions?.has(PermissionFlagsBits.SendMessagesInThreads)) {
     missing.push('Event-Kanal: Nachrichten in Threads senden');
   }
-  const canPinEvent = eventChannelPermissions?.has(PermissionFlagsBits.PinMessages) || eventChannelPermissions?.has(PermissionFlagsBits.ManageMessages);
-  if (!canPinEvent) missing.push('Event-Kanal: Nachrichten anheften oder Nachrichten verwalten');
-  const canPinLog = logChannelPermissions?.has(PermissionFlagsBits.PinMessages) || logChannelPermissions?.has(PermissionFlagsBits.ManageMessages);
-  if (!canPinLog) missing.push('Log-Kanal: Nachrichten anheften oder Nachrichten verwalten');
+  if (!eventChannelPermissions?.has(PermissionFlagsBits.ManageThreads)) {
+    missing.push('Event-Kanal: Threads verwalten (anheften und archivieren)');
+  }
   if (!guildPermissions?.has(PermissionFlagsBits.CreateEvents)) missing.push('Server: Events erstellen');
   return missing;
+}
+
+export function setupPermissionHints(eventChannelPermissions: PermissionsBitField | null): string[] {
+  return eventChannelPermissions?.has(PermissionFlagsBits.ManageChannels)
+    ? []
+    : ['Mir fehlt „Kanäle verwalten“, daher kann ich fehlende Forum-Tags nicht selbst anlegen.'];
 }
 
 export async function registerGlobalFfEventsCommand(
