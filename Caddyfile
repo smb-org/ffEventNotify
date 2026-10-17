@@ -1,0 +1,5 @@
+# Reverse proxy with automatic HTTPS. WEB_DOMAIN comes from .env (see docs/deploy.md).
+{$WEB_DOMAIN} {
+	reverse_proxy bot:3480
+	header -Server
+}

@@ -5,13 +5,21 @@ Ein Discord-Bot für deutsche FINAL FANTASY XIV-Events. Er soll Lodestone-Meldun
 ## Einrichtung
 
 1. Eine Discord-Anwendung anlegen und den Bot mit den unten aufgeführten Rechten einladen. Der Bot ist öffentlich und kann auf mehreren Servern verwendet werden.
-2. `.env.example` nach `.env` kopieren und `DISCORD_TOKEN` eintragen. `DB_PATH`, `FIXTURE_DUMP_DIR` und `LOG_LEVEL` sind optional; Server- und Kanal-IDs werden nicht in der `.env` gespeichert.
+2. `.env.example` nach `.env` kopieren und `DISCORD_TOKEN`, `WEB_BASE_URL` und `WEB_LINK_SECRET` eintragen (`pnpm gen-secret` erzeugt das Secret). `WEB_PORT` (Standard 3480), `DB_PATH`, `FIXTURE_DUMP_DIR` und `LOG_LEVEL` sind optional; Server- und Kanal-IDs werden nicht in der `.env` gespeichert.
 3. Mit `docker compose up -d` starten. SQLite-Daten werden in `./data` gespeichert.
 4. Auf jedem Server `/ffevents setup` ausführen und **Event-Kanal** sowie **Log-Kanal** wählen. Dafür ist „Server verwalten“ nötig. Der Bot prüft seine Rechte, speichert die Kanäle und startet direkt den Erstabgleich für diesen Server.
 
 Wer laufende Events links in der Kanalliste sehen möchte, aktiviert die Schaltfläche **„Alle Events in meiner Seitenleiste“** im angehefteten Beitrag **„Läuft gerade“** oder nutzt `/ffevents folgen status:an`. Mit `/ffevents folgen status:aus` lässt sich die Anzeige wieder ausschalten.
 
 Mit `/ffevents abgleichen` (ebenfalls „Server verwalten“) startest du sofort einen Abgleich, begrenzt auf einmal je 10 Minuten und Server. `LOG_LEVEL=debug` in der `.env` zeigt jede Anfrage im Log.
+
+## Web-Checkliste
+
+Die Schaltfläche **„Meine Checkliste“** am Event-Beitrag antwortet nur dir mit einem persönlichen Link. Die Seite zeigt alle laufenden und angekündigten Events mit ihren Belohnungen (beendete Events der letzten 60 Tage im Archiv). Du legst bis zu 12 Chars an (Freitext, 1 bis 32 Zeichen) und hakst je Char ab, was er schon hat. Eine Anmeldung gibt es nicht: Der Link ist das Geheimnis, bitte nicht teilen. `/ffevents neuer-link` erneuert ihn, der alte Link ist dann ungültig.
+
+Je Char lässt sich „erinnern“ ein- oder ausschalten. Die Erinnerungen im Event-Thread nennen pro Char, wie viele Belohnungen noch offen sind (z. B. „Mira: 3 offen, Kael: 1 offen“), und gehen nur auf Servern raus, auf denen du die Checkliste geöffnet hast.
+
+Der Webserver läuft im Bot-Prozess (Port `WEB_PORT`). Im Produktivbetrieb setzt ein Caddy-Container HTTPS davor, siehe [docs/deploy.md](docs/deploy.md). Lokal ansehen: `cp data/smoke.sqlite data/web-test.sqlite && DB_PATH=./data/web-test.sqlite pnpm web:dev` druckt einen Demo-Link (ohne Discord, nur auf der Kopie).
 
 Bot-Token und Berechtigungen einrichten: siehe [docs/discord-setup.md](docs/discord-setup.md).
 

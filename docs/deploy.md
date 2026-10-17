@@ -5,7 +5,8 @@ Der Bot läuft als Docker-Container. Das Image baut GitHub Actions bei jedem Mer
 ## Voraussetzungen
 
 - Linux-VPS mit Docker und dem Compose-Plugin (`docker compose version` muss funktionieren)
-- Ausgehender Internetzugang (Discord, Lodestone, ghcr.io); es muss **kein Port** geöffnet werden
+- Ausgehender Internetzugang (Discord, Lodestone, ghcr.io)
+- Für die Web-Checkliste: eine (Sub-)Domain und eingehend offene Ports **80 und 443** (Caddy holt das HTTPS-Zertifikat selbst)
 - Optional für Backups: `sqlite3` auf dem Host
 
 ## Einmalig einrichten
@@ -35,18 +36,29 @@ sudo chown $USER /opt/ffeventnotify
 Auf dem Mac, im Repository:
 
 ```bash
-scp compose.prod.yaml <server>:/opt/ffeventnotify/
+scp compose.prod.yaml Caddyfile <server>:/opt/ffeventnotify/
 ```
 
 Auf dem Server:
 
 ```bash
 cd /opt/ffeventnotify
-echo 'DISCORD_TOKEN=<bot-token>' > .env
+cat > .env <<'ENVFILE'
+DISCORD_TOKEN=<bot-token>
+WEB_DOMAIN=ffevents.example.de
+WEB_BASE_URL=https://ffevents.example.de
+WEB_LINK_SECRET=<ausgabe von pnpm gen-secret>
+ENVFILE
 chmod 600 .env
 ```
 
-`DB_PATH` setzt `compose.prod.yaml` selbst.
+`DB_PATH` setzt `compose.prod.yaml` selbst. `WEB_LINK_SECRET` auf dem Mac mit `pnpm gen-secret` erzeugen und gut aufbewahren: Wer es ändert, macht alle persönlichen Links ungültig.
+
+### 2a. Web-Checkliste erreichbar machen
+
+1. **DNS:** Einen A-Record (bei IPv6 zusätzlich AAAA) für `WEB_DOMAIN` auf die Server-IP setzen.
+2. **Firewall:** Eingehend 80 und 443 (TCP) erlauben, z. B. `sudo ufw allow 80,443/tcp`. Port 80 braucht Caddy für die Zertifikatsprüfung.
+3. Der Bot selbst (Port 3480) ist nur im Compose-Netz erreichbar, nicht von außen.
 
 ### 3. Datenbank übernehmen
 
@@ -73,7 +85,7 @@ docker compose -f compose.prod.yaml pull && docker compose -f compose.prod.yaml 
 docker compose -f compose.prod.yaml logs -f
 ```
 
-Erwartete Zeilen: die Versionszeile, „Verbunden als …“ und „Zyklus fertig: …“.
+Erwartete Zeilen: die Versionszeile, „Web-Checkliste lauscht auf Port 3480“, „Verbunden als …“ und „Zyklus fertig: …“. Danach antwortet `https://<WEB_DOMAIN>/` mit „Link ungültig oder erneuert“ (Caddy und Bot laufen); das Zertifikat kann beim ersten Start eine Minute dauern (`docker compose -f compose.prod.yaml logs caddy`).
 
 ## Log
 
@@ -119,4 +131,6 @@ Täglich um 03:30, 14 Tage Aufbewahrung (`crontab -e`, benötigt `sqlite3` auf d
 - **„Token ungültig“:** Im Discord Developer Portal das Bot-Token neu setzen, in `.env` eintragen, dann `docker compose -f compose.prod.yaml up -d --force-recreate`.
 - **Rechte fehlen:** `/ffevents setup` auf dem Server ausführen, es meldet fehlende Rechte (siehe [discord-setup.md](discord-setup.md)).
 - **`pull` verweigert den Zugriff:** `docker login ghcr.io` wiederholen, Token braucht `read:packages`.
+- **Checklisten-Link lädt nicht:** DNS und Ports 80/443 prüfen, dann `logs caddy`. Fehlt `WEB_DOMAIN` in der `.env`, bricht `docker compose` mit einer Meldung ab.
+- **Alle Links ungültig:** `WEB_LINK_SECRET` wurde geändert. Alten Wert wieder eintragen; sonst `/ffevents neuer-link` je Nutzer.
 - **Datenbank nicht beschreibbar:** `sudo chown -R 1000:1000 data`.

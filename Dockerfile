@@ -13,6 +13,7 @@ RUN corepack enable && pnpm install --frozen-lockfile --prod
 COPY src ./src
 
 RUN mkdir -p /data && chown node:node /data
+EXPOSE 3480
 VOLUME ["/data"]
 USER node
 
