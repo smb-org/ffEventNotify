@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { applyField, cacheItem, createEvent, openDb, setGuildDiscordIds, setGuildName, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, cacheItem, createEvent, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
 import {
   MAX_CHARS, WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, getOrCreateToken, getReminderRecipients,
   listChars, recordUserGuild, renameChar, reorderChars, rotateToken, setCharRemind, setItemDone,
@@ -360,7 +360,7 @@ test('behind the proxy the rate limit keys on X-Real-IP, then the first X-Forwar
   }, { ip: 1 });
 });
 
-test('event header links to Lodestone and to the forum post of each of the user\'s guilds', async () => {
+test('event header links to Lodestone only', async () => {
   await withServer(async ({ db, token, get }) => {
     const { eventKey } = seedEvent(db, 'link', 'Link Event', '2026-10-30T14:59:00.000Z');
     const eventId = (db.prepare('SELECT id FROM events WHERE event_key = ?').get(eventKey) as { id: number }).id;
@@ -372,30 +372,10 @@ test('event header links to Lodestone and to the forum post of each of the user\
     assert.ok(html.includes(`<a href="${lodestone}" target="_blank" rel="noopener noreferrer">Link Event</a>`), 'title links to the special page');
     assert.ok(html.includes(`href="${lodestone}" target="_blank" rel="noopener noreferrer">Lodestone ↗</a>`));
     assert.ok(!html.includes('evil.example'));
-    assert.ok(!html.includes('discord.com'), 'no guild, no Discord link');
-
     recordUserGuild(db, 'user-1', 'guild-1');
-    assert.ok(!(await (await get(`/c/${token}`)).text()).includes('discord.com'), 'guild without post');
-
     setGuildDiscordIds(db, 'guild-1', eventKey, { messageId: '555', messageChannelId: 'events' });
     html = await (await get(`/c/${token}`)).text();
-    assert.ok(html.includes('href="https://discord.com/channels/guild-1/555"') === false, 'non-numeric ids are rejected');
-
-    upsertGuildSetup(db, { guildId: '111', eventChannelId: 'ev1', logChannelId: 'lg1' });
-    setGuildDiscordIds(db, '111', eventKey, { messageId: '555', messageChannelId: 'ev1' });
-    recordUserGuild(db, 'user-1', '111');
-    html = await (await get(`/c/${token}`)).text();
-    assert.ok(html.includes('href="https://discord.com/channels/111/555" target="_blank" rel="noopener noreferrer">Discord-Beitrag ↗</a>'));
-
-    upsertGuildSetup(db, { guildId: '222', eventChannelId: 'ev2', logChannelId: 'lg2' });
-    setGuildName(db, '222', 'Zwei <b>"&"</b>');
-    setGuildName(db, '111', 'Eins');
-    setGuildDiscordIds(db, '222', eventKey, { messageId: '777', messageChannelId: 'ev2' });
-    recordUserGuild(db, 'user-1', '222');
-    html = await (await get(`/c/${token}`)).text();
-    assert.ok(html.includes('channels/111/555" target="_blank" rel="noopener noreferrer">Discord: Eins ↗</a>'));
-    assert.ok(html.includes('channels/222/777" target="_blank" rel="noopener noreferrer">Discord: Zwei &lt;b&gt;&quot;&amp;&quot;&lt;/b&gt; ↗</a>'));
-    assert.ok(!html.includes('<b>"&"</b>'));
+    assert.ok(!html.includes('discord.com'), 'no Discord link even with a forum post');
 
     db.exec('PRAGMA foreign_keys = OFF');
     db.prepare("UPDATE event_sources SET url = 'https://de.finalfantasyxiv.com.evil.example/x' WHERE kind = 'special'").run();
