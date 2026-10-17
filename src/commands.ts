@@ -29,6 +29,9 @@ export function createFfEventsCommand() {
       .setName('abgleichen')
       .setDescription('Events jetzt von Lodestone abgleichen (Server verwalten)'))
     .addSubcommand((subcommand) => subcommand
+      .setName('neuer-link')
+      .setDescription('Deinen persönlichen Checklisten-Link erneuern (der alte wird ungültig)'))
+    .addSubcommand((subcommand) => subcommand
       .setName('folgen')
       .setDescription('Alle laufenden Events in deiner Seitenleiste anzeigen')
       .addStringOption((option) => option

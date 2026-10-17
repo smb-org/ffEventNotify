@@ -54,7 +54,9 @@ import { formatLogContent } from './log-format.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { versionLine } from './version.ts';
 import { configureLog, diffActions, log, redactToken, snapshotActions, type ActionCounts } from './log.ts';
-import { handleChecklistInteraction } from './interactions/checklist.ts';
+import { handleChecklistInteraction, handleNewLinkCommand } from './interactions/checklist.ts';
+import { createWebServer } from './web/server.ts';
+import { createTokenCodec } from './web/token.ts';
 import { handleSidebarFollowButton, handleSidebarFollowCommand } from './interactions/follow.ts';
 import { SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX } from './sidebar-follow.ts';
 import type {
@@ -964,6 +966,9 @@ export async function startBot(): Promise<void> {
   configureLog({ level: config.logLevel });
   log.info(versionLine());
   const store = openDb(config.dbPath);
+  const web = { codec: createTokenCodec(config.webLinkSecret), baseUrl: config.webBaseUrl };
+  const webServer = createWebServer({ store, codec: web.codec, baseUrl: web.baseUrl, trustProxy: true });
+  webServer.listen(config.webPort, '0.0.0.0', () => log.info(`Web-Checkliste lauscht auf Port ${config.webPort}`));
   const client = createDiscordClient();
   const discord = new DiscordJsPort(client);
   configureLog({
@@ -1038,6 +1043,10 @@ export async function startBot(): Promise<void> {
           }).catch((error: unknown) => {
             log.error('Der Abgleich konnte nicht abgeschlossen werden.', error);
           });
+        } else if (subcommand === 'neuer-link') {
+          void handleNewLinkCommand(interaction, store, web).catch((error: unknown) => {
+            log.error('Der neue Checklisten-Link konnte nicht erstellt werden.', error);
+          });
         } else if (subcommand === 'folgen') {
           void handleSidebarFollowCommand(interaction, store, discord).catch((error: unknown) => {
             log.error('Die Seitenleisten-Einstellung konnte nicht abgeschlossen werden.', error);
@@ -1051,8 +1060,8 @@ export async function startBot(): Promise<void> {
         void handleSidebarFollowButton(interaction, store, discord).catch((error: unknown) => {
           log.error('Die Seitenleisten-Einstellung konnte nicht umgeschaltet werden.', error);
         });
-      } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
-        void handleChecklistInteraction(interaction, store).catch((error: unknown) => {
+      } else if (interaction.isButton() && interaction.customId.startsWith('ffe:cl:')) {
+        void handleChecklistInteraction(interaction, store, web).catch((error: unknown) => {
           log.error('Die Checkliste konnte nicht verarbeitet werden.', error);
         });
       }
@@ -1074,6 +1083,7 @@ export async function startBot(): Promise<void> {
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
+    webServer.close();
     store.close();
     client.destroy();
   }

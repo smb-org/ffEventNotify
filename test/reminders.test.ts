@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createEvent, getAllEvents, getChecklistReminderRecipients, getGuildEventObject, openDb, saveChecklistSelection, setChecklistReminderPreference, setGuildDiscordIds, upsertGuildSetup } from '../src/store.ts';
+import { createEvent, getAllEvents, getGuildEventObject, openDb, setGuildDiscordIds, upsertGuildSetup } from '../src/store.ts';
+import { createChar, getReminderRecipients, listChars, recordUserGuild, setCharRemind, setItemDone } from '../src/web/data.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { collectRecentBotMessages } from '../src/discord-history.ts';
 import type { DiscordEmbed, DiscordMessagePayload, DiscordMessageSnapshot, DiscordPort, ScheduledEventPayload, ScheduledEventSnapshot } from '../src/types.ts';
@@ -92,6 +93,15 @@ class ReminderDiscord implements DiscordPort {
   }
 }
 
+/** One character "Mira" per user; `done` replaces the finished items of the event, `remind` sets the flag when given. */
+function seed(db: ReturnType<typeof openDb>, guildId: string, userId: string, eventKey: string, done: string[], remind?: boolean) {
+  recordUserGuild(db, userId, guildId);
+  const char = listChars(db, userId)[0] ?? createChar(db, userId, 'Mira');
+  db.prepare('DELETE FROM web_checklist WHERE char_id = ? AND event_key = ?').run(char.id, eventKey);
+  for (const itemId of done) setItemDone(db, userId, { charId: char.id, eventKey, itemId, done: true });
+  if (remind !== undefined) setCharRemind(db, userId, char.id, remind);
+}
+
 function setup(db: ReturnType<typeof openDb>, userCount = 1) {
   upsertGuildSetup(db, { guildId: 'guild-1', eventChannelId: 'events', logChannelId: 'logs' });
   const eventKey = 'seasonal-special:/lodestone/special/reminders/';
@@ -108,12 +118,7 @@ function setup(db: ReturnType<typeof openDb>, userCount = 1) {
     ]), eventId);
   for (let index = 1; index <= userCount; index += 1) {
     const userId = `user-${String(index).padStart(2, '0')}`;
-    saveChecklistSelection(db, {
-      guildId: 'guild-1', userId, eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'],
-      doneItemIds: index === 2 ? ['item-a', 'item-b', 'item-c', 'item-d'] : [],
-    });
-    setChecklistReminderPreference(db, 'guild-1', userId, eventKey, index !== 3);
+    seed(db, 'guild-1', userId, eventKey, index === 2 ? ['item-a', 'item-b', 'item-c', 'item-d'] : [], index !== 3);
   }
   return { eventKey, eventId };
 }
@@ -164,11 +169,7 @@ test('reminders use one public thread per event and guild', async () => {
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     upsertGuildSetup(db, { guildId: 'guild-2', eventChannelId: 'events-2', logChannelId: 'logs-2' });
     setGuildDiscordIds(db, 'guild-2', eventKey, { messageId: 'card-2', messageChannelId: 'events-2' });
-    saveChecklistSelection(db, {
-      guildId: 'guild-2', userId: 'user-02', eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
-    });
-    setChecklistReminderPreference(db, 'guild-2', 'user-02', eventKey, true);
+    seed(db, 'guild-2', 'user-02', eventKey, [], true);
     await syncEventReminders({ guildId: 'guild-2', channelId: 'events-2', events: [event], store: db, discord, now });
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     await syncEventReminders({ guildId: 'guild-2', channelId: 'events-2', events: [event], store: db, discord, now });
@@ -192,11 +193,7 @@ test('a deleted reminder thread is recreated from the event card before a new ba
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     const deletedThreadId = discord.threadSent[0]!.threadId;
     discord.deleteThread(deletedThreadId);
-    saveChecklistSelection(db, {
-      guildId: 'guild-1', userId: 'user-02', eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
-    });
-    setChecklistReminderPreference(db, 'guild-1', 'user-02', eventKey, true);
+    seed(db, 'guild-1', 'user-02', eventKey, [], true);
 
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
 
@@ -220,11 +217,7 @@ test('a recreated event card gets a thread of its own', async () => {
     const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     setGuildDiscordIds(db, 'guild-1', eventKey, { messageId: 'recreated-card', messageChannelId: 'events' });
-    saveChecklistSelection(db, {
-      guildId: 'guild-1', userId: 'user-02', eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
-    });
-    setChecklistReminderPreference(db, 'guild-1', 'user-02', eventKey, true);
+    seed(db, 'guild-1', 'user-02', eventKey, [], true);
 
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
 
@@ -238,7 +231,7 @@ test('a recreated event card gets a thread of its own', async () => {
 
 test('reminder messages split below 2000 characters with only those users allowed to be mentioned', async () => {
   const db = openDb(':memory:');
-  const { eventId } = setup(db, 40);
+  const { eventId } = setup(db, 150);
   const discord = new ReminderDiscord();
   try {
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: getAllEvents(db).filter((event) => event.id === eventId), store: db, discord, now: new Date('2026-10-17T12:31:00.000Z') });
@@ -276,7 +269,7 @@ test('late reminder slots send the one-day notice without replaying the stale th
 
 test('current rewards without checklist rows count as unfinished for existing subscribers', () => {
   const db = openDb(':memory:');
-  const { eventKey, eventId } = setup(db);
+  const { eventId } = setup(db);
   try {
     const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
     db.prepare('UPDATE events SET rewards_json = ? WHERE id = ?').run(JSON.stringify([
@@ -284,8 +277,9 @@ test('current rewards without checklist rows count as unfinished for existing su
       { itemId: 'item-new', name: 'Neue Belohnung', section: 'Möbel' },
     ]), eventId);
 
-    assert.deepEqual(getChecklistReminderRecipients(db, 'guild-1', eventKey, ['item-a', 'item-b', 'item-c', 'item-d', 'item-new']), [
-      { userId: 'user-01', openItemIds: ['item-a', 'item-b', 'item-c', 'item-d', 'item-new'] },
+    const updated = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
+    assert.deepEqual(getReminderRecipients(db, 'guild-1', updated), [
+      { userId: 'user-01', chars: [{ name: 'Mira', open: 5 }] },
     ]);
   } finally {
     db.close();
@@ -323,25 +317,15 @@ test('sent users are not pinged again when the open recipient list changes', asy
   const now = new Date('2026-10-17T12:31:00.000Z');
   try {
     const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
-    saveChecklistSelection(db, {
-      guildId: 'guild-1', userId: 'user-02', eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
-    });
+    seed(db, 'guild-1', 'user-02', eventKey, []);
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     assert.deepEqual(discord.threadSent[0]?.payload.allowedMentions?.users, ['user-01', 'user-02']);
 
-    saveChecklistSelection(db, {
-      guildId: 'guild-1', userId: 'user-01', eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: ['item-a', 'item-b', 'item-c', 'item-d'],
-    });
+    seed(db, 'guild-1', 'user-01', eventKey, ['item-a', 'item-b', 'item-c', 'item-d']);
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
     assert.equal(discord.threadSent.length, 1, 'the remaining previously sent user must not be pinged again');
 
-    saveChecklistSelection(db, {
-      guildId: 'guild-1', userId: 'user-03', eventKey,
-      itemIds: ['item-a', 'item-b', 'item-c', 'item-d'], doneItemIds: [],
-    });
-    setChecklistReminderPreference(db, 'guild-1', 'user-03', eventKey, true);
+    seed(db, 'guild-1', 'user-03', eventKey, [], true);
     await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
 
     assert.equal(discord.threadSent.length, 2);
@@ -447,6 +431,30 @@ test('reminder catch-up sends a three-day slot up to half its lead time late', a
     } finally {
       freshDb.close();
     }
+  } finally {
+    db.close();
+  }
+});
+
+test('reminder lines list the open count per reminding character and sanitize names', async () => {
+  const db = openDb(':memory:');
+  const { eventKey, eventId } = setup(db);
+  const discord = new ReminderDiscord();
+  try {
+    const kael = createChar(db, 'user-01', 'Kael');
+    setCharRemind(db, 'user-01', kael.id, true);
+    createChar(db, 'user-01', 'Still');
+    const wild = createChar(db, 'user-01', '<@999> *Boss*');
+    setCharRemind(db, 'user-01', wild.id, true);
+    setItemDone(db, 'user-01', { charId: kael.id, eventKey, itemId: 'item-a', done: true });
+    setItemDone(db, 'user-01', { charId: kael.id, eventKey, itemId: 'item-b', done: true });
+    setItemDone(db, 'user-01', { charId: kael.id, eventKey, itemId: 'item-c', done: true });
+    const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now: new Date('2026-10-17T12:31:00.000Z') });
+    const content = discord.threadSent[0]?.payload.content ?? '';
+    assert.match(content, /• <@user-01>: Mira: 4 offen, Kael: 1 offen, 999 \\\*Boss\\\*: 4 offen/);
+    assert.ok(!content.includes('Still'));
+    assert.ok(!content.includes('<@999>'));
   } finally {
     db.close();
   }

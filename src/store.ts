@@ -45,19 +45,6 @@ export interface StoreEvent {
   createdAt: string;
 }
 
-export interface SaveChecklistSelectionInput {
-  guildId: string;
-  userId: string;
-  eventKey: string;
-  itemIds: readonly string[];
-  doneItemIds: readonly string[];
-}
-
-export interface ChecklistReminderRecipient {
-  userId: string;
-  openItemIds: string[];
-}
-
 export interface ReminderDeliveryKey {
   guildId: string;
   eventKey: string;
@@ -306,13 +293,45 @@ const SCHEMA = `
     scheduled_event_id TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS web_users (
+    user_id TEXT PRIMARY KEY,
+    token_enc TEXT NOT NULL,
+    token_hmac TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS web_user_guilds (
+    user_id TEXT NOT NULL,
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, guild_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS web_chars (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL,
+    remind INTEGER NOT NULL DEFAULT 0 CHECK (remind IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_web_chars_name ON web_chars(user_id, name COLLATE NOCASE);
+
+  CREATE TABLE IF NOT EXISTS web_checklist (
+    char_id INTEGER NOT NULL REFERENCES web_chars(id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    done_at TEXT NOT NULL,
+    PRIMARY KEY (char_id, event_key, item_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_events_end_utc ON events(end_utc);
   CREATE INDEX IF NOT EXISTS idx_event_sources_event_id ON event_sources(event_id);
   CREATE INDEX IF NOT EXISTS idx_seen_entries_first_seen_at ON seen_entries(first_seen_at);
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -445,6 +464,36 @@ function migrateV7ToV8(db: Store): void {
   try {
     db.exec(SCHEMA);
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (8)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+// The per-guild select-menu checklist became per-user characters on the web page.
+// The old tables stay as the migration source; each user's rows merge into one "Hauptchar".
+function migrateV8ToV9(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(SCHEMA);
+    const users = db.prepare(`SELECT user_id AS userId FROM checklist_items
+      UNION SELECT user_id FROM checklist_reminder_preferences ORDER BY 1`).all() as Array<{ userId: string }>;
+    const addChar = db.prepare("INSERT INTO web_chars (user_id, name, sort_order, remind) VALUES (?, 'Hauptchar', 0, ?)");
+    const addDone = db.prepare(`INSERT OR IGNORE INTO web_checklist (char_id, event_key, item_id, done_at)
+      SELECT ?, event_key, item_id, MAX(updated_at) FROM checklist_items
+      WHERE user_id = ? AND done = 1 GROUP BY event_key, item_id`);
+    const prefs = db.prepare(`SELECT COALESCE(MAX(enabled), 1) AS enabled FROM checklist_reminder_preferences WHERE user_id = ?`);
+    for (const { userId } of users) {
+      const enabled = (prefs.get(userId) as { enabled: number }).enabled;
+      const charId = Number(addChar.run(userId, enabled).lastInsertRowid);
+      addDone.run(charId, userId);
+    }
+    db.exec(`INSERT OR IGNORE INTO web_user_guilds (user_id, guild_id)
+      SELECT user_id, guild_id FROM checklist_items
+      UNION SELECT user_id, guild_id FROM checklist_reminder_preferences`);
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -463,47 +512,14 @@ function initializeSchema(db: Store): void {
   if (version === 0) {
     db.exec(SCHEMA);
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
-  } else if (version === 1) {
-    migrateV1ToV2(db);
-    migrateV2ToV3(db);
-    migrateV3ToV4(db);
-    migrateV4ToV5(db);
-    migrateV5ToV6(db);
-    migrateV6ToV7(db);
-    migrateV7ToV8(db);
-  } else if (version === 2) {
-    migrateV2ToV3(db);
-    migrateV3ToV4(db);
-    migrateV4ToV5(db);
-    migrateV5ToV6(db);
-    migrateV6ToV7(db);
-    migrateV7ToV8(db);
-  } else if (version === 3) {
-    migrateV3ToV4(db);
-    migrateV4ToV5(db);
-    migrateV5ToV6(db);
-    migrateV6ToV7(db);
-    migrateV7ToV8(db);
-  } else if (version === 4) {
-    migrateV4ToV5(db);
-    migrateV5ToV6(db);
-    migrateV6ToV7(db);
-    migrateV7ToV8(db);
-  } else if (version === 5) {
-    migrateV5ToV6(db);
-    migrateV6ToV7(db);
-    migrateV7ToV8(db);
-  } else if (version === 6) {
-    migrateV6ToV7(db);
-    migrateV7ToV8(db);
-  } else if (version === 7) {
-    migrateV7ToV8(db);
-  } else {
-    db.exec(SCHEMA);
+    return;
   }
+  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9];
+  for (const step of steps.slice(Math.max(0, version - 1))) step(db);
+  db.exec(SCHEMA);
 }
 
-function runTransaction<T>(db: Store, action: () => T): T {
+export function runTransaction<T>(db: Store, action: () => T): T {
   db.exec('BEGIN IMMEDIATE');
   try {
     const result = action();
@@ -1222,97 +1238,6 @@ export function setEventImageUrl(db: Store, eventId: number, imageUrl: string | 
   const value = imageUrl ?? null;
   if (value !== null && !isAllowedSpecialImageUrl(value)) return false;
   return db.prepare(`UPDATE events SET image_url = ? WHERE id = ? AND image_url IS NOT ?`).run(value, eventId, value).changes > 0;
-}
-
-export function ensureChecklistItems(
-  db: Store,
-  guildId: string,
-  userId: string,
-  eventKey: string,
-  itemIds: readonly string[],
-): void {
-  if (!getGuild(db, guildId)) return;
-  const insert = db.prepare(`INSERT INTO checklist_items (guild_id, user_id, event_key, item_id, done)
-    VALUES (?, ?, ?, ?, 0) ON CONFLICT(guild_id, user_id, event_key, item_id) DO NOTHING`);
-  for (const itemId of new Set(itemIds)) insert.run(guildId, userId, eventKey, itemId);
-}
-
-export function saveChecklistSelection(db: Store, selection: SaveChecklistSelectionInput): void {
-  const itemIds = [...new Set(selection.itemIds)];
-  const doneItemIds = new Set(selection.doneItemIds.filter((itemId) => itemIds.includes(itemId)));
-  runTransaction(db, () => {
-    if (!getGuild(db, selection.guildId)) return;
-    db.prepare(`DELETE FROM checklist_items
-      WHERE guild_id = ? AND user_id = ? AND event_key = ?`).run(selection.guildId, selection.userId, selection.eventKey);
-    const insert = db.prepare(`INSERT INTO checklist_items (guild_id, user_id, event_key, item_id, done)
-      VALUES (?, ?, ?, ?, ?)`);
-    for (const itemId of itemIds) {
-      insert.run(selection.guildId, selection.userId, selection.eventKey, itemId, doneItemIds.has(itemId) ? 1 : 0);
-    }
-  });
-}
-
-export function getChecklistDoneItemIds(db: Store, guildId: string, userId: string, eventKey: string): string[] {
-  return (db.prepare(`SELECT item_id AS itemId FROM checklist_items
-    WHERE guild_id = ? AND user_id = ? AND event_key = ? AND done = 1 ORDER BY rowid`)
-    .all(guildId, userId, eventKey) as Array<{ itemId: string }>).map(({ itemId }) => itemId);
-}
-
-export function ensureChecklistReminderPreference(db: Store, guildId: string, userId: string, eventKey: string): boolean {
-  if (!getGuild(db, guildId)) return false;
-  db.prepare(`INSERT INTO checklist_reminder_preferences (guild_id, user_id, event_key, enabled)
-    VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, event_key) DO NOTHING`).run(guildId, userId, eventKey);
-  return getChecklistReminderPreference(db, guildId, userId, eventKey);
-}
-
-export function getChecklistReminderPreference(db: Store, guildId: string, userId: string, eventKey: string): boolean {
-  const row = db.prepare(`SELECT enabled FROM checklist_reminder_preferences
-    WHERE guild_id = ? AND user_id = ? AND event_key = ?`).get(guildId, userId, eventKey) as { enabled: number } | undefined;
-  return row?.enabled === 1;
-}
-
-export function setChecklistReminderPreference(
-  db: Store,
-  guildId: string,
-  userId: string,
-  eventKey: string,
-  enabled: boolean,
-): void {
-  if (!getGuild(db, guildId)) return;
-  db.prepare(`INSERT INTO checklist_reminder_preferences (guild_id, user_id, event_key, enabled)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(guild_id, user_id, event_key) DO UPDATE SET
-      enabled = excluded.enabled,
-      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE checklist_reminder_preferences.enabled IS NOT excluded.enabled`)
-    .run(guildId, userId, eventKey, enabled ? 1 : 0);
-}
-
-export function getChecklistReminderRecipients(
-  db: Store,
-  guildId: string,
-  eventKey: string,
-  itemIds: readonly string[],
-): ChecklistReminderRecipient[] {
-  const uniqueItemIds = [...new Set(itemIds)];
-  if (uniqueItemIds.length === 0) return [];
-  const requested = uniqueItemIds.map((_, index) => `(${index}, ?)`).join(', ');
-  const rows = db.prepare(`WITH requested(ordinal, item_id) AS (VALUES ${requested})
-    SELECT p.user_id AS userId, requested.item_id AS itemId
-    FROM checklist_reminder_preferences p
-    CROSS JOIN requested
-    LEFT JOIN checklist_items c
-      ON c.guild_id = p.guild_id AND c.user_id = p.user_id AND c.event_key = p.event_key
-      AND c.item_id = requested.item_id
-    WHERE p.guild_id = ? AND p.event_key = ? AND p.enabled = 1 AND COALESCE(c.done, 0) = 0
-    ORDER BY p.rowid, requested.ordinal`).all(...uniqueItemIds, guildId, eventKey) as Array<{ userId: string; itemId: string }>;
-  const recipients = new Map<string, string[]>();
-  for (const row of rows) {
-    const openItemIds = recipients.get(row.userId) ?? [];
-    openItemIds.push(row.itemId);
-    recipients.set(row.userId, openItemIds);
-  }
-  return [...recipients].map(([userId, openItemIds]) => ({ userId, openItemIds }));
 }
 
 export function claimReminderSlot(db: Store, guildId: string, eventKey: string, leadHours: 24 | 72): boolean {

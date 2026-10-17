@@ -121,12 +121,16 @@ test('dry-run config works without environment while production still requires D
   const dryRunConfig = readConfig({ dryRun: true, env: {} });
 
   assert.equal(dryRunConfig.dbPath, ':memory:');
-  assert.throws(() => readConfig({ env: {} }), /DISCORD_TOKEN/);
+  assert.throws(() => readConfig({ env: {} }), /DISCORD_TOKEN.*WEB_BASE_URL.*WEB_LINK_SECRET/);
 });
 
 test('runtime configuration accepts only shared token and optional paths', () => {
-  const config = readConfig({ env: { DISCORD_TOKEN: 'token' } });
+  const secret = Buffer.alloc(32, 1).toString('base64');
+  const config = readConfig({ env: { DISCORD_TOKEN: 'token', WEB_BASE_URL: 'https://ffe.example.de/', WEB_LINK_SECRET: secret } });
   assert.equal(config.discordToken, 'token');
+  assert.equal(config.webBaseUrl, 'https://ffe.example.de');
+  assert.equal(config.webPort, 3480);
+  assert.throws(() => readConfig({ env: { DISCORD_TOKEN: 'token', WEB_BASE_URL: 'https://x.de', WEB_LINK_SECRET: 'kurz' } }), /32 bytes/);
   assert.equal(config.dbPath, './data/ffeventnotify.sqlite');
   assert.equal(config.fixtureDumpDir, undefined);
   assert.deepEqual(readConfig({ dryRun: true, env: {} }), { dbPath: ':memory:' });
