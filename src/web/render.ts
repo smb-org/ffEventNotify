@@ -1,9 +1,9 @@
 // Server-side HTML for the checklist page. Every dynamic value goes through esc().
 
 import { stableEventIdentity } from '../event-identity.ts';
-import { getCachedItem, isAllowedSpecialImageUrl, type Store, type StoreEvent } from '../store.ts';
+import { getCachedItem, getEventSources, isAllowedSpecialImageUrl, type Store, type StoreEvent } from '../store.ts';
 import { BERLIN_TIME_ZONE } from '../time.ts';
-import { MAX_CHARS, MAX_NAME_LENGTH, type WebChar } from './data.ts';
+import { MAX_CHARS, MAX_NAME_LENGTH, type EventDiscordLink, type WebChar } from './data.ts';
 
 const ARCHIVE_DAYS = 60;
 const ITEM_DB = 'https://de.finalfantasyxiv.com/lodestone/playguide/db/item/';
@@ -11,6 +11,34 @@ const ITEM_DB = 'https://de.finalfantasyxiv.com/lodestone/playguide/db/item/';
 export function esc(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 }
+
+const LODESTONE_HOST = 'de.finalfantasyxiv.com';
+const DISCORD_ID = /^\d{1,25}$/;
+const SOURCE_RANK = ['special', 'topic', 'followup', 'feed'];
+
+function httpsUrlOn(url: string, host: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && parsed.hostname === host && !parsed.username && !parsed.password ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Best Lodestone page of the event: special page first, then topic/news. */
+function lodestoneUrl(store: Store, event: StoreEvent): string | undefined {
+  const ranked = getEventSources(store, event.id)
+    .filter((source) => SOURCE_RANK.includes(source.kind))
+    .sort((a, b) => SOURCE_RANK.indexOf(a.kind) - SOURCE_RANK.indexOf(b.kind));
+  for (const source of ranked) {
+    const safe = httpsUrlOn(source.url, LODESTONE_HOST);
+    if (safe) return safe;
+  }
+  return undefined;
+}
+
+const externalLink = (href: string, label: string, cls = 'xlink') =>
+  `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`;
 
 export function eventHash(eventKey: string): string {
   return stableEventIdentity(eventKey).slice(0, 32);
@@ -60,6 +88,8 @@ export interface PageInput {
   events: readonly StoreEvent[];
   chars: readonly WebChar[];
   done: ReadonlySet<string>;
+  /** Forum posts of the user's guilds (see listEventDiscordLinks). */
+  discord?: readonly EventDiscordLink[] | undefined;
   /** Selected event (32-char hash) from /e/<hash>; unknown values fall back to the first tab. */
   focusHash?: string | undefined;
   /** True for /archiv. */
@@ -105,7 +135,16 @@ function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'clos
   }
   const empty = input.chars.length === 0 ? '<p class="hint">Lege unten deinen ersten Char an, dann kannst du hier Belohnungen abhaken.</p>' : '';
   const title = esc(event.titleStatus === 'ok' ? event.title : 'FFXIV-Event');
-  const head2 = `${banner}<span class="meta"><span class="title">${title}</span><span class="period">${esc(period(event))}</span></span><span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span>`;
+  const lodestone = lodestoneUrl(input.store, event);
+  const posts = (input.discord ?? []).filter((link) => link.eventKey === event.eventKey && DISCORD_ID.test(link.guildId) && DISCORD_ID.test(link.threadId));
+  const named = posts.length > 1;
+  const links = [
+    lodestone ? externalLink(lodestone, 'Lodestone') : '',
+    ...posts.map((link) => externalLink(`https://discord.com/channels/${link.guildId}/${link.threadId}`, named && link.guildName ? `Discord: ${link.guildName}` : 'Discord-Beitrag')),
+  ].join('');
+  const linkBox = links ? `<span class="links">${links}</span>` : '';
+  const titleHtml = lodestone ? `<a href="${esc(lodestone)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
+  const head2 = `${banner}<span class="meta"><span class="title">${titleHtml}</span><span class="period">${esc(period(event))}</span></span>${linkBox}<span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span>`;
   const body = `${empty}<div class="tablewrap"><table><thead><tr><th class="item" scope="col">Belohnung</th>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   if (mode === 'panel') return `<div class="event" data-event="${hash}"><div class="evhead">${head2}</div>
   ${body}

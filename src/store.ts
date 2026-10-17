@@ -154,7 +154,8 @@ const SCHEMA = `
     first_run_done INTEGER NOT NULL DEFAULT 0 CHECK (first_run_done IN (0, 1)),
     needs_setup INTEGER NOT NULL DEFAULT 0 CHECK (needs_setup IN (0, 1)),
     status_message_id TEXT,
-    status_last_keepalive_at TEXT
+    status_last_keepalive_at TEXT,
+    name TEXT
   );
 
   CREATE TABLE IF NOT EXISTS guild_event_objects (
@@ -517,6 +518,8 @@ function initializeSchema(db: Store): void {
   const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9];
   for (const step of steps.slice(Math.max(0, version - 1))) step(db);
   db.exec(SCHEMA);
+  // Added later without a version bump: the guild name for the web page's Discord links.
+  if (!tableColumns(db, 'guilds').has('name')) db.exec('ALTER TABLE guilds ADD COLUMN name TEXT');
 }
 
 export function runTransaction<T>(db: Store, action: () => T): T {
@@ -624,6 +627,10 @@ export function deleteGuildSidebarFollow(db: Store, guildId: string, userId: str
 export function getStoredGuildIds(db: Store): string[] {
   return (db.prepare('SELECT guild_id AS guildId FROM guilds ORDER BY guild_id').all() as Array<{ guildId: string }>)
     .map(({ guildId }) => guildId);
+}
+
+export function setGuildName(db: Store, guildId: string, name: string): void {
+  db.prepare('UPDATE guilds SET name = ? WHERE guild_id = ? AND name IS NOT ?').run(name, guildId, name);
 }
 
 export function upsertGuildSetup(

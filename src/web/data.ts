@@ -159,3 +159,14 @@ export function getReminderRecipients(db: Store, guildId: string, event: Pick<St
   }
   return [...recipients].map(([userId, chars]) => ({ userId, chars }));
 }
+
+export interface EventDiscordLink { eventKey: string; guildId: string; guildName: string | null; threadId: string }
+
+/** Forum posts (thread id = starter message id) of the user's guilds, one row per guild and event. */
+export function listEventDiscordLinks(db: Store, userId: string): EventDiscordLink[] {
+  return db.prepare(`SELECT o.event_key AS eventKey, o.guild_id AS guildId, g.name AS guildName, o.message_id AS threadId
+    FROM web_user_guilds u JOIN guilds g ON g.guild_id = u.guild_id
+    JOIN guild_event_objects o ON o.guild_id = u.guild_id
+    WHERE u.user_id = ? AND o.message_id IS NOT NULL AND o.message_channel_id IS g.event_channel_id
+    ORDER BY u.guild_id`).all(userId) as unknown as EventDiscordLink[];
+}
