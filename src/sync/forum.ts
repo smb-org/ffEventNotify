@@ -14,6 +14,7 @@ import {
 import { eventSourceLink, hasEventMarkerUrl } from '../event-identity.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import { buildEventComponents, buildEventEmbed } from './embed.ts';
+import { addSidebarFollowersToEventPost, sidebarFollowCustomId } from '../sidebar-follow.ts';
 import type {
   DiscordEmbed,
   DiscordForumPostSnapshot,
@@ -434,6 +435,10 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
     if (!visible) return post.id;
   }
 
+  if (createdPost) {
+    await addSidebarFollowersToEventPost({ db: store, discord, guildId, threadId: post.id, event, now });
+  }
+
   if (!createdPost) {
     if (post.name !== eventTitle(event) && discord.setForumPostName) await discord.setForumPostName(post.id, eventTitle(event));
     if (JSON.stringify([...post.appliedTags].sort()) !== JSON.stringify([...appliedTags].sort()) && discord.setForumPostTags) {
@@ -479,6 +484,15 @@ function statusEmbed(events: readonly StoreEvent[], now: Date, guildId: string, 
   return { title: 'Läuft gerade', description };
 }
 
+export function buildForumStatusComponents(guildId: string): NonNullable<DiscordMessagePayload['components']> {
+  return [{ components: [{
+    type: 'button',
+    style: 'secondary',
+    label: 'Alle Events in meiner Seitenleiste',
+    customId: sidebarFollowCustomId(guildId),
+  }] }];
+}
+
 function statusPostMatches(post: DiscordForumPostSnapshot): boolean {
   return post.starterMessage.authorIsBot && post.starterMessage.embeds.some((embed) => embed.title === 'Läuft gerade');
 }
@@ -498,7 +512,7 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
     throw new Error('Forum-Status wird von diesem Discord-Adapter nicht unterstützt.');
   }
   const current = statusEmbed(events, now, guildId, store);
-  const payload: DiscordMessagePayload = { embeds: [current] };
+  const payload: DiscordMessagePayload = { embeds: [current], components: buildForumStatusComponents(guildId) };
   const guild = getGuild(store, guildId);
   let post = guild?.statusMessageId ? await discord.fetchForumPost(channelId, guild.statusMessageId) : null;
   if (post && !statusPostMatches(post)) post = null;
@@ -533,7 +547,10 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   if (post.name !== 'Läuft gerade' && discord.setForumPostName) await discord.setForumPostName(post.id, 'Läuft gerade');
   if (statusTagId && !post.appliedTags.includes(statusTagId) && discord.setForumPostTags) await discord.setForumPostTags(post.id, [statusTagId]);
   if (!post.pinned && discord.pinForumPost) await discord.pinForumPost(post.id);
-  if (JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds)) await discord.editForumStarter(post.id, payload);
+  if (JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
+    JSON.stringify(post.starterMessage.components ?? []) !== JSON.stringify(payload.components ?? [])) {
+    await discord.editForumStarter(post.id, payload);
+  }
   // The status forum post is always kept active and uses Discord's maximum archive duration.
 }
 

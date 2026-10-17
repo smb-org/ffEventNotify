@@ -53,6 +53,8 @@ import { ensureForumTags } from './sync/forum.ts';
 import { formatLogContent } from './log-format.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { handleChecklistInteraction } from './interactions/checklist.ts';
+import { handleSidebarFollowButton, handleSidebarFollowCommand } from './interactions/follow.ts';
+import { SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX } from './sidebar-follow.ts';
 import type {
   DiscordActionRow,
   DiscordEmbed,
@@ -264,6 +266,7 @@ function scheduledSnapshot(event: GuildScheduledEvent): ScheduledEventSnapshot {
 
 export class DiscordJsPort implements DiscordPort {
   private readonly client: Client;
+  private threadMemberTail: Promise<void> = Promise.resolve();
 
   constructor(client: Client) {
     this.client = client;
@@ -289,6 +292,28 @@ export class DiscordJsPort implements DiscordPort {
     const forum = await this.forumChannel(channelId);
     const thread = await forum.threads.fetch(threadId, { force: true });
     return thread && thread.parentId === forum.id ? thread : null;
+  }
+
+  private queueThreadMemberOperation(action: () => Promise<void>): Promise<void> {
+    const result = this.threadMemberTail.then(action);
+    this.threadMemberTail = result.catch(() => undefined);
+    return result;
+  }
+
+  async addThreadMember(threadId: string, userId: string): Promise<void> {
+    return this.queueThreadMemberOperation(async () => {
+      const thread = await this.client.channels.fetch(threadId, { force: true });
+      if (!thread?.isThread()) throw new Error(`Discord channel ${threadId} is not a thread.`);
+      await thread.members.add(userId);
+    });
+  }
+
+  async removeThreadMember(threadId: string, userId: string): Promise<void> {
+    return this.queueThreadMemberOperation(async () => {
+      const thread = await this.client.channels.fetch(threadId, { force: true });
+      if (!thread?.isThread()) throw new Error(`Discord channel ${threadId} is not a thread.`);
+      await thread.members.remove(userId);
+    });
   }
 
   private async forumPostSnapshot(thread: ThreadChannel): Promise<DiscordForumPostSnapshot> {
@@ -877,8 +902,19 @@ export async function startBot(): Promise<void> {
 
     client.on(Events.InteractionCreate, (interaction) => {
       if (interaction.isChatInputCommand() && interaction.commandName === 'ffevents') {
-        void handleFfEventsSetup(interaction, store, runSetupSync, discord).catch((error: unknown) => {
-          console.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
+        const subcommand = interaction.options.getSubcommand();
+        if (subcommand === 'folgen') {
+          void handleSidebarFollowCommand(interaction, store, discord).catch((error: unknown) => {
+            console.error('Die Seitenleisten-Einstellung konnte nicht abgeschlossen werden.', error);
+          });
+        } else {
+          void handleFfEventsSetup(interaction, store, runSetupSync, discord).catch((error: unknown) => {
+            console.error('Die Einrichtung konnte nicht abgeschlossen werden.', error);
+          });
+        }
+      } else if (interaction.isButton() && interaction.customId.startsWith(SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX)) {
+        void handleSidebarFollowButton(interaction, store, discord).catch((error: unknown) => {
+          console.error('Die Seitenleisten-Einstellung konnte nicht umgeschaltet werden.', error);
         });
       } else if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('ffe:')) {
         void handleChecklistInteraction(interaction, store).catch((error: unknown) => {
@@ -919,15 +955,14 @@ export async function handleFfEventsSetup(
     return;
   }
   const guildName = interaction.guild.name;
+  if (interaction.options.getSubcommand() !== 'setup') {
+    await interaction.reply({ content: 'Dieser Unterbefehl ist nicht verfügbar.', flags: MessageFlags.Ephemeral });
+    return;
+  }
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     await interaction.reply({ content: 'Dafür brauchst du die Berechtigung „Server verwalten“.', flags: MessageFlags.Ephemeral });
     return;
   }
-  if (interaction.options.getSubcommand() !== 'setup') {
-    await interaction.reply({ content: 'Dieser Unterbefehl ist noch nicht verfügbar.', flags: MessageFlags.Ephemeral });
-    return;
-  }
-
   const eventChannel = interaction.options.getChannel('event-kanal', true) as ForumChannel;
   const logChannel = interaction.options.getChannel('log-kanal', true) as TextChannel;
   const isGuildText = (channel: TextChannel) => channel.guildId === interaction.guildId &&

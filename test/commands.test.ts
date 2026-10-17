@@ -9,7 +9,7 @@ test('/ffevents setup requires a forum event channel and a text log channel', ()
     options?: Array<{ name: string; required?: boolean; type: number; channel_types?: number[] }>;
   } | undefined;
   assert.equal(command.name, 'ffevents');
-  assert.equal(command.default_member_permissions, PermissionFlagsBits.ManageGuild.toString());
+  assert.equal(command.default_member_permissions, undefined);
   assert.deepEqual(command.contexts, [InteractionContextType.Guild]);
   assert.ok(setup);
   assert.deepEqual(setup.options?.map((option) => ({ name: option.name, required: 'required' in option ? option.required : false })), [
@@ -20,6 +20,15 @@ test('/ffevents setup requires a forum event channel and a text log channel', ()
   const logChannel = setup.options?.find((option) => option.name === 'log-kanal');
   assert.deepEqual(eventChannel?.channel_types, [ChannelType.GuildForum]);
   assert.deepEqual(logChannel?.channel_types, [ChannelType.GuildText, ChannelType.GuildAnnouncement]);
+  const follow = command.options?.find((option) => option.name === 'folgen') as unknown as {
+    options?: Array<{ name: string; type: number; required?: boolean; choices?: Array<{ name: string; value: string }> }>;
+  } | undefined;
+  assert.deepEqual(follow?.options?.map((option) => ({ name: option.name, required: option.required, choices: option.choices })), [
+    { name: 'status', required: true, choices: [
+      { name: 'an', value: 'an', name_localizations: undefined },
+      { name: 'aus', value: 'aus', name_localizations: undefined },
+    ] },
+  ]);
 });
 
 test('registration compares a real discord.js ApplicationCommand without crashing on serialized permissions', async () => {
@@ -30,7 +39,6 @@ test('registration compares a real discord.js ApplicationCommand without crashin
     type: 1,
     name: 'ffevents',
     description: 'FFXIV-Events für diesen Server einrichten',
-    default_member_permissions: PermissionFlagsBits.ManageGuild.toString(),
     contexts: [InteractionContextType.Guild],
     options: createFfEventsCommand().toJSON().options,
   };

@@ -124,6 +124,13 @@ export interface CachedItem {
   fetchedAt: string;
 }
 
+export interface GuildEventPost {
+  eventKey: string;
+  messageId: string;
+  endStatus: 'ok' | 'unsicher';
+  endUtc: string | null;
+}
+
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
@@ -267,6 +274,13 @@ const SCHEMA = `
     PRIMARY KEY (guild_id, user_id, event_key)
   );
 
+  CREATE TABLE IF NOT EXISTS guild_sidebar_follows (
+    guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (guild_id, user_id)
+  );
+
   CREATE TABLE IF NOT EXISTS reminder_slots (
     guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
     event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
@@ -298,7 +312,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -418,6 +432,19 @@ function migrateV6ToV7(db: Store): void {
     }
     db.exec(SCHEMA);
     db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (7)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV7ToV8(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     db.exec('COMMIT');
   } catch (error) {
@@ -443,26 +470,34 @@ function initializeSchema(db: Store): void {
     migrateV4ToV5(db);
     migrateV5ToV6(db);
     migrateV6ToV7(db);
+    migrateV7ToV8(db);
   } else if (version === 2) {
     migrateV2ToV3(db);
     migrateV3ToV4(db);
     migrateV4ToV5(db);
     migrateV5ToV6(db);
     migrateV6ToV7(db);
+    migrateV7ToV8(db);
   } else if (version === 3) {
     migrateV3ToV4(db);
     migrateV4ToV5(db);
     migrateV5ToV6(db);
     migrateV6ToV7(db);
+    migrateV7ToV8(db);
   } else if (version === 4) {
     migrateV4ToV5(db);
     migrateV5ToV6(db);
     migrateV6ToV7(db);
+    migrateV7ToV8(db);
   } else if (version === 5) {
     migrateV5ToV6(db);
     migrateV6ToV7(db);
+    migrateV7ToV8(db);
   } else if (version === 6) {
     migrateV6ToV7(db);
+    migrateV7ToV8(db);
+  } else if (version === 7) {
+    migrateV7ToV8(db);
   } else {
     db.exec(SCHEMA);
   }
@@ -545,6 +580,29 @@ export function getConfiguredGuilds(db: Store): StoredGuild[] {
     ORDER BY guild_id
   `).all() as Array<{ guildId: string }>;
   return ids.map(({ guildId }) => getGuild(db, guildId)!).filter(Boolean);
+}
+
+export function isGuildSidebarFollowEnabled(db: Store, guildId: string, userId: string): boolean {
+  return db.prepare('SELECT 1 FROM guild_sidebar_follows WHERE guild_id = ? AND user_id = ?')
+    .get(guildId, userId) !== undefined;
+}
+
+export function getGuildSidebarFollowUserIds(db: Store, guildId: string): string[] {
+  return (db.prepare('SELECT user_id AS userId FROM guild_sidebar_follows WHERE guild_id = ? ORDER BY user_id')
+    .all(guildId) as Array<{ userId: string }>).map(({ userId }) => userId);
+}
+
+export function setGuildSidebarFollow(db: Store, guildId: string, userId: string, enabled: boolean): void {
+  if (enabled) {
+    db.prepare(`INSERT INTO guild_sidebar_follows (guild_id, user_id)
+      VALUES (?, ?) ON CONFLICT(guild_id, user_id) DO NOTHING`).run(guildId, userId);
+  } else {
+    db.prepare('DELETE FROM guild_sidebar_follows WHERE guild_id = ? AND user_id = ?').run(guildId, userId);
+  }
+}
+
+export function deleteGuildSidebarFollow(db: Store, guildId: string, userId: string): void {
+  db.prepare('DELETE FROM guild_sidebar_follows WHERE guild_id = ? AND user_id = ?').run(guildId, userId);
 }
 
 export function getStoredGuildIds(db: Store): string[] {
@@ -668,6 +726,17 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
     if (Array.isArray(decoded)) continuationMessageIds = decoded.filter((id): id is string => typeof id === 'string');
   } catch { /* Invalid optional continuation metadata is ignored. */ }
   return { ...row, continuationMessageIds, firstRunSuppressed: row.firstRunSuppressed === 1 };
+}
+
+export function getGuildEventPosts(db: Store, guildId: string): GuildEventPost[] {
+  return db.prepare(`
+    SELECT objects.event_key AS eventKey, objects.message_id AS messageId,
+           events.end_status AS endStatus, events.end_utc AS endUtc
+    FROM guild_event_objects AS objects
+    JOIN events ON events.event_key = objects.event_key
+    WHERE objects.guild_id = ? AND objects.message_id IS NOT NULL
+    ORDER BY events.created_at, events.id
+  `).all(guildId) as unknown as GuildEventPost[];
 }
 
 export function ensureGuildEventFirstPostAttemptAt(

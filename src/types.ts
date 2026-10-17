@@ -251,6 +251,8 @@ export interface DiscordPort {
   refreshForumPostKeepAlive?(threadId: string, autoArchiveDuration: number): Promise<void>;
   keepForumPostActive?(threadId: string, autoArchiveDuration: number): Promise<void>;
   pinForumPost?(threadId: string): Promise<void>;
+  addThreadMember?(threadId: string, userId: string): Promise<void>;
+  removeThreadMember?(threadId: string, userId: string): Promise<void>;
   startThreadOnMessage(channelId: string, starterMessageId: string, name: string, autoArchiveDuration: number): Promise<DiscordThreadSnapshot>;
   fetchThread(channelId: string, threadId: string | null, starterMessageId: string | null): Promise<DiscordThreadSnapshot | null>;
   sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;

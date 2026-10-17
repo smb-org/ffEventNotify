@@ -8,14 +8,20 @@ import {
   createEvent,
   getAllEvents,
   getGuildEventObject,
+  getGuildSidebarFollowUserIds,
+  isGuildSidebarFollowEnabled,
   openDb,
   saveChecklistSelection,
+  setGuildSidebarFollow,
   setGuildEventLastKeepaliveAt,
   setChecklistReminderPreference,
   upsertGuildSetup,
   type StoreEvent,
 } from '../src/store.ts';
-import { FORUM_TAG_NAMES, ensureForumTags, forumTagIdsForEvent, syncForumEvent, syncForumStatus } from '../src/sync/forum.ts';
+import { FORUM_TAG_NAMES, buildForumStatusComponents, ensureForumTags, forumTagIdsForEvent, syncForumEvent, syncForumStatus } from '../src/sync/forum.ts';
+import { handleSidebarFollowButton, handleSidebarFollowCommand } from '../src/interactions/follow.ts';
+import { sidebarFollowCustomId } from '../src/sidebar-follow.ts';
+import { assertDiscordActionRows } from './component-invariants.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { syncScheduledEvent } from '../src/sync/scheduled.ts';
 import { runGuildSyncFromStoredData } from '../src/cycle.ts';
@@ -66,6 +72,9 @@ class ForumDiscord implements DiscordPort {
   readonly operations: string[] = [];
   readonly logs: Array<{ channelId: string; content: string }> = [];
   readonly sentToThreads: Array<{ threadId: string; payload: DiscordMessagePayload }> = [];
+  readonly threadMembers = new Map<string, Set<string>>();
+  readonly threadMemberOperations: Array<{ action: 'add' | 'remove'; threadId: string; userId: string }> = [];
+  readonly threadMemberFailures = new Map<string, Error>();
   tags: DiscordForumTag[] = FORUM_TAG_NAMES.map((name, index) => ({ id: `tag-${index + 1}`, name }));
   postCreates = 0;
   threadStarts = 0;
@@ -156,6 +165,20 @@ class ForumDiscord implements DiscordPort {
     this.operations.push('keep-active');
   }
   async pinForumPost(threadId: string): Promise<void> { this.posts.get(threadId)!.pinned = true; this.operations.push('pin-forum-post'); }
+  async addThreadMember(threadId: string, userId: string): Promise<void> {
+    this.threadMemberOperations.push({ action: 'add', threadId, userId });
+    const failure = this.threadMemberFailures.get(userId);
+    if (failure) throw failure;
+    const members = this.threadMembers.get(threadId) ?? new Set<string>();
+    members.add(userId);
+    this.threadMembers.set(threadId, members);
+  }
+  async removeThreadMember(threadId: string, userId: string): Promise<void> {
+    this.threadMemberOperations.push({ action: 'remove', threadId, userId });
+    const failure = this.threadMemberFailures.get(userId);
+    if (failure) throw failure;
+    this.threadMembers.get(threadId)?.delete(userId);
+  }
   async sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     const reply = makeMessage(`reply-${++this.sequence}`, threadId, payload);
     this.replies.get(threadId)!.push(reply);
@@ -432,12 +455,140 @@ test('the pinned Läuft gerade forum post is restored when archived and carries 
     assert.equal(status.autoArchiveDuration, 10_080);
     assert.deepEqual(status.appliedTags, ['tag-12']);
     assert.match(status.starterMessage.embeds[0]?.description ?? '', /discord\.com\/channels\/guild-1\/post-/);
+    assert.deepEqual(status.starterMessage.components, buildForumStatusComponents('guild-1'));
+    assertDiscordActionRows(buildForumStatusComponents('guild-1'));
+    assert.equal(buildForumStatusComponents('guild-1')[0]?.components[0]?.type === 'button'
+      ? buildForumStatusComponents('guild-1')[0]?.components[0]?.customId
+      : undefined, sidebarFollowCustomId('guild-1'));
 
     status.archived = true;
     discord.operations.length = 0;
     await syncForumStatus({ guildId: 'guild-1', channelId: 'forum-1', events: [event], discord, store: db, now: NOW });
     assert.equal(status.archived, false);
     assert.ok(discord.operations.includes('unarchive'));
+  } finally {
+    db.close();
+  }
+});
+
+test('the status button toggles guild follow and adds or removes the user from every running event post', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const running = [
+    storeEvent(db, { eventKey: 'topic-generic:sidebar-a', eventType: 'topic-generic', title: 'Läuft A', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/a', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z' }),
+    storeEvent(db, { eventKey: 'topic-generic:sidebar-b', eventType: 'topic-generic', title: 'Läuft B', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/b', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-21T14:59:00.000Z' }),
+  ];
+  const ended = storeEvent(db, { eventKey: 'topic-generic:sidebar-ended', eventType: 'topic-generic', title: 'Beendet', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/ended', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z' });
+  const userId = 'user-sidebar';
+  const replies: Array<{ content?: string }> = [];
+  const interaction = {
+    customId: sidebarFollowCustomId('guild-1'),
+    guildId: 'guild-1',
+    user: { id: userId },
+    inGuild: () => true,
+    deferReply: async () => {},
+    editReply: async (reply: { content?: string }) => { replies.push(reply); },
+  };
+  try {
+    const runningIds = [];
+    for (const event of running) {
+      runningIds.push(await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [], discord, store: db, now: NOW }));
+    }
+    const endedId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [], discord, store: db, now: NOW });
+    discord.threadMembers.set(endedId, new Set([userId]));
+
+    await handleSidebarFollowButton(interaction as never, db, discord);
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', userId), true);
+    assert.deepEqual(runningIds.map((id) => discord.threadMembers.get(id)?.has(userId)), [true, true]);
+    assert.equal(discord.threadMembers.get(endedId)?.has(userId), true, 'the ended archived post was not changed');
+    assert.equal(replies[0]?.content, 'Aktiviert: du siehst jetzt alle laufenden Events links in der Kanalliste.');
+
+    await handleSidebarFollowButton(interaction as never, db, discord);
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', userId), false);
+    assert.deepEqual(runningIds.map((id) => discord.threadMembers.get(id)?.has(userId)), [false, false]);
+    assert.equal(discord.threadMembers.get(endedId)?.has(userId), true, 'ended archived posts are left alone');
+    assert.equal(replies[1]?.content, 'Deaktiviert: du siehst jetzt keine Events mehr links in der Kanalliste.');
+    assert.equal(discord.threadMemberOperations.filter((operation) => operation.action === 'remove').length, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('/ffevents folgen applies an explicit on or off choice to the same guild preference', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const userId = 'user-command-follow';
+  const event = storeEvent(db, {
+    eventKey: 'topic-generic:command-follow', eventType: 'topic-generic', title: 'Befehl-Event',
+    sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/command-follow',
+    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [], discord, store: db, now: NOW });
+  const replies: Array<{ content?: string }> = [];
+  let status: 'an' | 'aus' = 'an';
+  const interaction = {
+    guildId: 'guild-1', user: { id: userId },
+    inGuild: () => true,
+    options: { getString: () => status },
+    deferReply: async () => {},
+    editReply: async (reply: { content?: string }) => { replies.push(reply); },
+  };
+  try {
+    await handleSidebarFollowCommand(interaction as never, db, discord);
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', userId), true);
+    assert.equal(discord.threadMembers.get(postId)?.has(userId), true);
+    assert.equal(replies[0]?.content, 'Aktiviert: du siehst jetzt alle laufenden Events links in der Kanalliste.');
+    status = 'aus';
+    await handleSidebarFollowCommand(interaction as never, db, discord);
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', userId), false);
+    assert.equal(discord.threadMembers.get(postId)?.has(userId), false);
+    assert.equal(replies[1]?.content, 'Deaktiviert: du siehst jetzt keine Events mehr links in der Kanalliste.');
+  } finally {
+    db.close();
+  }
+});
+
+test('new event posts receive existing sidebar follows and a departed member is removed from storage', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const userId = 'user-followed';
+  setGuildSidebarFollow(db, 'guild-1', userId, true);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/sidebar-new';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/sidebar-new', eventType: 'seasonal-special',
+    title: 'Neues Sidebar-Event', sourceUrl: url,
+    startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.equal(discord.threadMembers.get(postId)?.has(userId), true);
+    assert.deepEqual(getGuildSidebarFollowUserIds(db, 'guild-1'), [userId]);
+
+    const restrictedUser = 'user-restricted';
+    setGuildSidebarFollow(db, 'guild-1', restrictedUser, true);
+    discord.threadMemberFailures.set(restrictedUser, Object.assign(new Error('Missing Access'), { code: 50_001 }));
+    const restrictedEvent = storeEvent(db, {
+      eventKey: 'seasonal-special:/lodestone/special/2026/sidebar-restricted', eventType: 'seasonal-special',
+      title: 'Weiteres eingeschränktes Event', sourceUrl: `${url}-restricted`,
+      startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+    });
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: restrictedEvent, sourceUrls: [`${url}-restricted`], discord, store: db, now: NOW });
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', restrictedUser), true, 'Missing Access does not clear a guild follow');
+
+    const leftUser = 'user-left';
+    setGuildSidebarFollow(db, 'guild-1', leftUser, true);
+    discord.threadMemberFailures.set(leftUser, Object.assign(new Error('Unknown Member'), { code: 10_007 }));
+    const second = storeEvent(db, {
+      eventKey: 'seasonal-special:/lodestone/special/2026/sidebar-new-2', eventType: 'seasonal-special',
+      title: 'Weiteres Sidebar-Event', sourceUrl: `${url}-2`,
+      startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+    });
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: second, sourceUrls: [`${url}-2`], discord, store: db, now: NOW });
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', leftUser), false);
+    assert.equal(isGuildSidebarFollowEnabled(db, 'guild-1', userId), true);
   } finally {
     db.close();
   }

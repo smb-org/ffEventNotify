@@ -19,7 +19,7 @@ test('v1 schema migrates idempotently, preserving warnings while ignoring legacy
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 8);
     assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
@@ -67,7 +67,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 8);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');
@@ -98,7 +98,7 @@ test('v4 schema migration adds forum continuation metadata without changing guil
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 8);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'reminder_thread_id'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'continuation_message_ids'));
     assert.equal((db.prepare('SELECT message_id AS messageId, reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { messageId: string; reminderThreadId: string | null }).messageId, 'card');
@@ -134,7 +134,7 @@ test('v6 schema adds keep-alive timestamps for event and status forum posts', ()
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 7);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 8);
     assert.ok((db.prepare('PRAGMA table_info(guilds)').all() as Array<{ name: string }>).some(({ name }) => name === 'status_last_keepalive_at'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'last_keepalive_at'));
     assert.equal((db.prepare('SELECT message_id AS messageId, last_keepalive_at AS lastKeepaliveAt FROM guild_event_objects').get() as { messageId: string; lastKeepaliveAt: string | null }).messageId, 'post');

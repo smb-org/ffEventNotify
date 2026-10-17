@@ -11,7 +11,6 @@ export function createFfEventsCommand() {
   return new SlashCommandBuilder()
     .setName('ffevents')
     .setDescription('FFXIV-Events für diesen Server einrichten')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setContexts(InteractionContextType.Guild)
     .addSubcommand((subcommand) => subcommand
       .setName('setup')
@@ -25,6 +24,14 @@ export function createFfEventsCommand() {
         .setName('log-kanal')
         .setDescription('Hier erscheinen Warnungen und der Erststart-Bericht')
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(true)))
+    .addSubcommand((subcommand) => subcommand
+      .setName('folgen')
+      .setDescription('Alle laufenden Events in deiner Seitenleiste anzeigen')
+      .addStringOption((option) => option
+        .setName('status')
+        .setDescription('Seitenleisten-Anzeige ein- oder ausschalten')
+        .addChoices({ name: 'an', value: 'an' }, { name: 'aus', value: 'aus' })
         .setRequired(true)));
 }
 

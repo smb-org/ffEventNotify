@@ -56,6 +56,7 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'events',
       'field_provenance',
       'guild_event_objects',
+      'guild_sidebar_follows',
       'guilds',
       'items',
       'legacy_discord_refs',

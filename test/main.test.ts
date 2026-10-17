@@ -276,6 +276,8 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
   const requests: Array<{ method: string; route: string; body?: Record<string, unknown> }> = [];
   let nextPost = postId;
   let archivedPage = 0;
+  let memberRequestsActive = 0;
+  let maxMemberRequestsActive = 0;
   const makeForumThread = (id: string, archived = false) => {
     const data = { ...rawThread(guildId, forumId, id, id, archived), type: ChannelType.PublicThread, applied_tags: ['tag-1'] };
     threadData.set(id, data);
@@ -370,8 +372,28 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
     }
     throw new Error(`Unexpected forum PATCH ${path}`);
   };
-  client.rest.put = async (route) => { requests.push({ method: 'PUT', route: String(route) }); return {}; };
-  client.rest.delete = async (route) => { requests.push({ method: 'DELETE', route: String(route) }); return {}; };
+  client.rest.put = async (route) => {
+    const path = String(route);
+    requests.push({ method: 'PUT', route: path });
+    if (path.includes('/thread-members/')) {
+      memberRequestsActive += 1;
+      maxMemberRequestsActive = Math.max(maxMemberRequestsActive, memberRequestsActive);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      memberRequestsActive -= 1;
+    }
+    return {};
+  };
+  client.rest.delete = async (route) => {
+    const path = String(route);
+    requests.push({ method: 'DELETE', route: path });
+    if (path.includes('/thread-members/')) {
+      memberRequestsActive += 1;
+      maxMemberRequestsActive = Math.max(maxMemberRequestsActive, memberRequestsActive);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      memberRequestsActive -= 1;
+    }
+    return {};
+  };
   try {
     const port = new DiscordJsPort(client);
     assert.equal(await port.isForumChannel(forumId), true);
@@ -391,6 +413,12 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
 
     const recovered = await port.fetchForumPost(forumId, postId);
     assert.equal(recovered?.id, postId);
+    const memberA = '823456789012345678';
+    const memberB = '923456789012345678';
+    await Promise.all([port.addThreadMember(postId, memberA), port.removeThreadMember(postId, memberB)]);
+    assert.equal(maxMemberRequestsActive, 1, 'thread member requests are serialized through discord.js REST');
+    assert.ok(requests.some((request) => request.method === 'PUT' && request.route.endsWith(`/thread-members/${memberA}`)));
+    assert.ok(requests.some((request) => request.method === 'DELETE' && request.route.endsWith(`/thread-members/${memberB}`)));
     const allPosts = await port.listForumPosts(forumId);
     assert.deepEqual(new Set(allPosts.map((item) => item.id)), new Set([postId, archivedA, archivedB]));
     assert.equal(archivedPage, 2);
