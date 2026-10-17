@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { getAllEvents, type Store } from '../store.ts';
 import { log } from '../log.ts';
 import {
-  WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, listChars, listEventDiscordLinks, renameChar, reorderChars, setCharRemind, setItemDone,
+  WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, listChars, renameChar, reorderChars, setCharRemind, setItemDone,
 } from './data.ts';
 import { eventHash, hasChecklist, renderNotFound, renderPage } from './render.ts';
 import { TOKEN_PATTERN, type TokenCodec } from './token.ts';
@@ -160,7 +160,7 @@ export function createWebServer(options: WebServerOptions): Server {
     }
     if (method !== 'GET') return send(response, 405, 'Nicht erlaubt.', 'text/plain; charset=utf-8');
     send(response, 200, renderPage({
-      store, events: getAllEvents(store), chars: listChars(store, userId), done: getDoneKeys(store, userId), discord: listEventDiscordLinks(store, userId), focusHash, archiveTab: archiveTab !== undefined, now: now(),
+      store, events: getAllEvents(store), chars: listChars(store, userId), done: getDoneKeys(store, userId), focusHash, archiveTab: archiveTab !== undefined, now: now(),
     }), 'text/html; charset=utf-8');
   }
 

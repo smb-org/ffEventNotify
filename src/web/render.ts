@@ -13,7 +13,6 @@ export function esc(value: string): string {
 }
 
 const LODESTONE_HOST = 'de.finalfantasyxiv.com';
-const DISCORD_ID = /^\d{1,25}$/;
 const SOURCE_RANK = ['special', 'topic', 'followup', 'feed'];
 
 function httpsUrlOn(url: string, host: string): string | undefined {
@@ -88,8 +87,6 @@ export interface PageInput {
   events: readonly StoreEvent[];
   chars: readonly WebChar[];
   done: ReadonlySet<string>;
-  /** Forum posts of the user's guilds (see listEventDiscordLinks). */
-  discord?: readonly EventDiscordLink[] | undefined;
   /** Selected event (32-char hash) from /e/<hash>; unknown values fall back to the first tab. */
   focusHash?: string | undefined;
   /** True for /archiv. */
@@ -136,12 +133,7 @@ function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'clos
   const empty = input.chars.length === 0 ? '<p class="hint">Lege unten deinen ersten Char an, dann kannst du hier Belohnungen abhaken.</p>' : '';
   const title = esc(event.titleStatus === 'ok' ? event.title : 'FFXIV-Event');
   const lodestone = lodestoneUrl(input.store, event);
-  const posts = (input.discord ?? []).filter((link) => link.eventKey === event.eventKey && DISCORD_ID.test(link.guildId) && DISCORD_ID.test(link.threadId));
-  const named = posts.length > 1;
-  const links = [
-    lodestone ? externalLink(lodestone, 'Lodestone') : '',
-    ...posts.map((link) => externalLink(`https://discord.com/channels/${link.guildId}/${link.threadId}`, named && link.guildName ? `Discord: ${link.guildName}` : 'Discord-Beitrag')),
-  ].join('');
+  const links = lodestone ? externalLink(lodestone, 'Lodestone') : '';
   const linkBox = links ? `<span class="links">${links}</span>` : '';
   const titleHtml = lodestone ? `<a href="${esc(lodestone)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
   const head2 = `${banner}<span class="meta"><span class="title">${titleHtml}</span><span class="period">${esc(period(event))}</span></span>${linkBox}<span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span>`;
