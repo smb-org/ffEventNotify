@@ -226,6 +226,122 @@ function setupGuild(db: ReturnType<typeof openDb>, forumId = 'forum-1'): void {
   upsertGuildSetup(db, { guildId: 'guild-1', eventChannelId: forumId, logChannelId: 'logs-1' });
 }
 
+test('forum event starter content uses only verified Discord timestamps', async (t) => {
+  const cases: Array<{
+    name: string;
+    startUtc: string;
+    endUtc: string;
+    change?: Partial<StoreEvent>;
+    content: string;
+  }> = [
+    {
+      name: 'running with verified end',
+      startUtc: '2026-10-15T08:00:00.000Z',
+      endUtc: '2026-10-20T14:59:00.000Z',
+      content: '⏳ Endet <t:1792508340:R> · <t:1792508340:f>',
+    },
+    {
+      name: 'announced with verified start',
+      startUtc: '2026-10-17T08:00:00.000Z',
+      endUtc: '2026-10-20T14:59:00.000Z',
+      content: '🗓️ Beginnt <t:1792224000:R> · <t:1792224000:f>',
+    },
+    {
+      name: 'ended with verified end',
+      startUtc: '2026-10-15T08:00:00.000Z',
+      endUtc: '2026-10-16T11:00:00.000Z',
+      content: '✅ Beendet <t:1792148400:f>',
+    },
+    {
+      name: 'running with unverified end',
+      startUtc: '2026-10-15T08:00:00.000Z',
+      endUtc: '2026-10-20T14:59:00.000Z',
+      change: { endStatus: 'unsicher' },
+      content: '⏳ Ende unbekannt – siehe Sonderseite',
+    },
+    {
+      name: 'running with no end',
+      startUtc: '2026-10-15T08:00:00.000Z',
+      endUtc: '2026-10-20T14:59:00.000Z',
+      change: { endUtc: null, endStatus: 'unsicher' },
+      content: '⏳ Ende unbekannt – siehe Sonderseite',
+    },
+    {
+      name: 'ended with unverified end',
+      startUtc: '2026-10-15T08:00:00.000Z',
+      endUtc: '2026-10-16T11:00:00.000Z',
+      change: { endStatus: 'unsicher' },
+      content: '✅ Beendet',
+    },
+    {
+      name: 'announced with unverified start',
+      startUtc: '2026-10-17T08:00:00.000Z',
+      endUtc: '2026-10-20T14:59:00.000Z',
+      change: { startStatus: 'unsicher' },
+      content: '',
+    },
+  ];
+
+  for (const [index, scenario] of cases.entries()) {
+    await t.test(scenario.name, async () => {
+      const db = openDb(':memory:');
+      const discord = new ForumDiscord();
+      setupGuild(db);
+      const url = `https://de.finalfantasyxiv.com/lodestone/special/2026/countdown-${index}`;
+      const stored = storeEvent(db, {
+        eventKey: `seasonal-special:/lodestone/special/2026/countdown-${index}`,
+        eventType: 'seasonal-special',
+        title: `Countdown ${index}`,
+        sourceUrl: url,
+        startUtc: scenario.startUtc,
+        endUtc: scenario.endUtc,
+      });
+      const event = { ...stored, ...scenario.change };
+      try {
+        const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+        const starter = discord.posts.get(postId)?.starterMessage;
+        assert.equal(starter?.content, scenario.content);
+      } finally {
+        db.close();
+      }
+    });
+  }
+});
+
+test('forum starter content does not cause repeat edits and migrates an old starter once', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/countdown-edit';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/countdown-edit',
+    eventType: 'seasonal-special',
+    title: 'Countdown Edit',
+    sourceUrl: url,
+    startUtc: '2026-10-15T08:00:00.000Z',
+    endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+
+    discord.operations.length = 0;
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.equal(discord.operations.filter((operation) => operation === 'edit-starter').length, 0);
+
+    discord.posts.get(postId)!.starterMessage.content = '';
+    discord.operations.length = 0;
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.equal(discord.operations.filter((operation) => operation === 'edit-starter').length, 1);
+    assert.equal(discord.posts.get(postId)?.starterMessage.content, '⏳ Endet <t:1792508340:R> · <t:1792508340:f>');
+
+    discord.operations.length = 0;
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.equal(discord.operations.filter((operation) => operation === 'edit-starter').length, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test('forum type tags map fixture and live titles only when the rule is certain', () => {
   const liveTitles = new Set<string>();
   for (const report of reports) {
