@@ -332,8 +332,8 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
     if (path.includes(`/channels/${forumId}/threads`)) {
       nextPost = postId;
       const data = makeForumThread(nextPost);
-      const messageBody = body.message as { embeds?: unknown[]; components?: unknown[] };
-      messages.set(nextPost, { ...rawMessage(guildId, forumId, nextPost, ''), embeds: messageBody.embeds ?? [], components: messageBody.components ?? [] } as ReturnType<typeof rawMessage>);
+      const messageBody = body.message as { content?: string; embeds?: unknown[]; components?: unknown[] };
+      messages.set(nextPost, { ...rawMessage(guildId, forumId, nextPost, messageBody.content ?? ''), embeds: messageBody.embeds ?? [], components: messageBody.components ?? [] } as ReturnType<typeof rawMessage>);
       return data;
     }
     if (path.includes(`/channels/${postId}/messages`)) {
@@ -406,14 +406,19 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
     assert.deepEqual((await port.fetchForumTags(forumId)).map((tag) => tag.name), ['Läuft', 'Beendet']);
 
     const post = await port.createForumPost(forumId, 'Test-Event', {
+      content: '⏳ Endet <t:1792508340:R> · <t:1792508340:f>',
       embeds: [{ title: 'Test-Event', url: 'https://de.finalfantasyxiv.com/lodestone/special/2026/test#ffe-stable' }],
       components: [{ components: [{ type: 'button', style: 'link', label: 'Zur Sonderseite', url: 'https://de.finalfantasyxiv.com/lodestone/special/2026/test' }] }],
+      allowedMentions: { parse: [], users: [] },
     }, ['tag-1'], 10_080);
     assert.equal(post.id, postId);
     assert.equal(post.starterMessageId, postId);
     const createRequest = requests.find((request) => request.method === 'POST' && request.route.includes(`/channels/${forumId}/threads`));
     assert.deepEqual(createRequest?.body?.applied_tags, ['tag-1']);
     assert.equal(createRequest?.body?.auto_archive_duration, 10_080);
+    const createMessage = createRequest?.body?.message as { content?: string; allowed_mentions?: { parse?: string[] } } | undefined;
+    assert.equal(createMessage?.content, '⏳ Endet <t:1792508340:R> · <t:1792508340:f>');
+    assert.deepEqual(createMessage?.allowed_mentions?.parse, []);
 
     const recovered = await port.fetchForumPost(forumId, postId);
     assert.equal(recovered?.id, postId);
@@ -432,7 +437,14 @@ test('DiscordJsPort forum methods use real discord.js forum and thread classes w
     await port.setForumPostArchived(postId, true);
     await port.keepForumPostActive(postId, 10_080);
     await port.refreshForumPostKeepAlive(postId, 10_080);
-    await port.editForumStarter(postId, { embeds: [{ title: 'Aktualisiert' }] });
+    await port.editForumStarter(postId, {
+      content: '✅ Beendet <t:1792148400:f>',
+      embeds: [{ title: 'Aktualisiert' }],
+      allowedMentions: { parse: [], users: [] },
+    });
+    const starterEditRequest = requests.filter((request) => request.method === 'PATCH' && request.route.endsWith(`/channels/${postId}/messages/${postId}`)).at(-1);
+    assert.equal(starterEditRequest?.body?.content, '✅ Beendet <t:1792148400:f>');
+    assert.deepEqual((starterEditRequest?.body?.allowed_mentions as { parse?: string[] } | undefined)?.parse, []);
     await port.pinForumPost(postId);
     assert.ok(requests.some((request) => request.method === 'PATCH' && request.route.includes(`/channels/${postId}`) && request.body?.flags !== undefined));
     assert.deepEqual(requests.filter((request) => request.method === 'PATCH' && request.route.includes(`/channels/${postId}`)

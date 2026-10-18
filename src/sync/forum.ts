@@ -112,6 +112,21 @@ export function forumEventStatus(event: Pick<StoreEvent, 'startUtc' | 'endUtc'>,
   return 'Läuft';
 }
 
+function forumEventContent(event: StoreEvent, status: ReturnType<typeof forumEventStatus>): string {
+  if (status === 'Beendet') {
+    if (event.endStatus !== 'ok' || !event.endUtc) return '✅ Beendet';
+    return `✅ Beendet <t:${Math.floor(Date.parse(event.endUtc) / 1_000)}:f>`;
+  }
+  if (status === 'Angekündigt') {
+    if (event.startStatus !== 'ok' || !event.startUtc) return '';
+    const start = Math.floor(Date.parse(event.startUtc) / 1_000);
+    return `🗓️ Beginnt <t:${start}:R> · <t:${start}:f>`;
+  }
+  if (event.endStatus !== 'ok' || !event.endUtc) return '⏳ Ende unbekannt – siehe Sonderseite';
+  const end = Math.floor(Date.parse(event.endUtc) / 1_000);
+  return `⏳ Endet <t:${end}:R> · <t:${end}:f>`;
+}
+
 export function forumTagIdsForEvent(
   event: StoreEvent,
   sourceUrls: readonly string[],
@@ -397,10 +412,15 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
   const eventObject = getGuildEventObject(store, guildId, event.eventKey);
   let post = await findForumPost(channelId, event, eventObject?.messageId ?? null, discord);
   const card = eventCard(event, sourceUrls);
-  const payload: DiscordMessagePayload = { embeds: [card.embed], components: buildEventComponents(event, sourceUrls) };
+  const eventStatus = forumEventStatus(event, now);
+  const payload: DiscordMessagePayload = {
+    content: forumEventContent(event, eventStatus),
+    embeds: [card.embed],
+    components: buildEventComponents(event, sourceUrls),
+    allowedMentions: { parse: [], users: [] },
+  };
   const tags = await discord.fetchForumTags(channelId);
   const appliedTags = forumTagIdsForEvent(event, sourceUrls, now, tags);
-  const eventStatus = forumEventStatus(event, now);
   let createdPost = false;
 
   if (!post) {
@@ -454,7 +474,8 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
       await discord.setForumPostTags(post.id, appliedTags);
       edited = true;
     }
-    if (JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
+    if (post.starterMessage.content !== (payload.content ?? '') ||
+      JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
       JSON.stringify(post.starterMessage.components ?? []) !== JSON.stringify(payload.components ?? [])) {
       await discord.editForumStarter(post.id, payload);
       edited = true;
