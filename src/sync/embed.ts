@@ -9,7 +9,7 @@ import {
   hasEventMarkerUrl,
   stableEventIdentity,
 } from '../event-identity.ts';
-import type { DiscordActionRow, DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
+import type { DiscordActionRow, DiscordEmbed, DiscordMessagePayload, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
 
 export interface SyncEventEmbedOptions {
   event: StoreEvent;
@@ -204,8 +204,11 @@ export function buildEventEmbed(event: StoreEvent, sourceUrls: readonly string[]
   return embed;
 }
 
-function samePayload(left: DiscordEmbed, right: DiscordEmbed): boolean {
-  const normalized = (embed: DiscordEmbed) => ({
+export function samePayload(
+  left: Pick<DiscordMessagePayload, 'content' | 'embeds' | 'components'>,
+  right: Pick<DiscordMessagePayload, 'content' | 'embeds' | 'components'>,
+): boolean {
+  const normalizeEmbed = (embed: DiscordEmbed) => ({
     title: embed.title ?? null,
     url: embed.url ?? null,
     description: embed.description ?? null,
@@ -219,7 +222,34 @@ function samePayload(left: DiscordEmbed, right: DiscordEmbed): boolean {
     })),
     footer: embed.footer?.text ?? null,
   });
-  return JSON.stringify(normalized(left)) === JSON.stringify(normalized(right));
+  const normalizeComponent = (component: DiscordActionRow['components'][number]) => component.type === 'button'
+    ? {
+      type: component.type,
+      style: component.style,
+      label: component.label,
+      customId: component.customId ?? null,
+      url: component.url ?? null,
+      disabled: component.disabled ?? false,
+    }
+    : {
+      type: component.type,
+      customId: component.customId,
+      placeholder: component.placeholder || null,
+      minValues: component.minValues ?? 1,
+      maxValues: component.maxValues ?? 1,
+      options: component.options.map((option) => ({
+        label: option.label,
+        value: option.value,
+        description: option.description || null,
+        default: option.default ?? false,
+      })),
+    };
+  const normalize = (payload: Pick<DiscordMessagePayload, 'content' | 'embeds' | 'components'>) => ({
+    content: payload.content ?? '',
+    embeds: (payload.embeds ?? []).map(normalizeEmbed),
+    components: (payload.components ?? []).map((row) => row.components.map(normalizeComponent)),
+  });
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
 }
 
 function exactSourceInDescription(description: string, sourceUrls: readonly string[]): boolean {
@@ -298,7 +328,7 @@ async function syncEventEmbedUnlocked({
   if (existing) {
     setGuildDiscordIds(store, guildId, event.eventKey, { messageId: existing.id, messageChannelId: channelId });
     const currentEmbed = existing.embeds.find((candidate) => embedHasMarker(candidate, event) || hasLegacyMarker(candidate, event, sourceUrls));
-    if (!currentEmbed || !samePayload(currentEmbed, embed) || JSON.stringify(existing.components ?? []) !== JSON.stringify(components)) {
+    if (!currentEmbed || !samePayload({ embeds: [currentEmbed], components: existing.components }, payload)) {
       await discord.editMessage(channelId, existing.id, payload);
     }
     return existing.id;

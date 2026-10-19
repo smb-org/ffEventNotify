@@ -12,9 +12,10 @@ import {
   setGuildStatusMessage,
 } from '../store.ts';
 import { eventSourceLink, hasEventMarkerUrl } from '../event-identity.ts';
+import { discordErrorCode } from '../discord-errors.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import { briefError, guildLabel, log, logAction } from '../log.ts';
-import { buildEventComponents, buildEventEmbed } from './embed.ts';
+import { buildEventComponents, buildEventEmbed, samePayload } from './embed.ts';
 import { addSidebarFollowersToEventPost, sidebarFollowCustomId } from '../sidebar-follow.ts';
 import type {
   DiscordEmbed,
@@ -346,7 +347,19 @@ async function findForumPost(
   return matches[0];
 }
 
-async function syncContinuations(
+type ForumContinuationAction =
+  | { kind: 'edit'; messageId: string; payload: DiscordMessagePayload; index: number }
+  | { kind: 'create'; payload: DiscordMessagePayload; index: number };
+
+interface ForumContinuationPlan {
+  actions: ForumContinuationAction[];
+  deletes: string[];
+  nextIds: Array<string | undefined>;
+}
+
+type ForumThreadEdit = <T>(edit: () => Promise<T>) => Promise<T>;
+
+async function planContinuations(
   threadId: string,
   event: StoreEvent,
   sourceUrls: readonly string[],
@@ -354,7 +367,7 @@ async function syncContinuations(
   discord: DiscordPort,
   store: Store,
   guildId: string,
-): Promise<void> {
+): Promise<ForumContinuationPlan> {
   if (!discord.sendToThread || !discord.fetchRecentBotMessages) throw new Error('Forum-Fortsetzungen werden von diesem Discord-Adapter nicht unterstützt.');
   const object = getGuildEventObject(store, guildId, event.eventKey);
   const stored = object?.continuationMessageIds ?? [];
@@ -365,7 +378,7 @@ async function syncContinuations(
   }
 
   let recovered = byId;
-  if (byId.length < desiredBodies.length || stored.length === 0) {
+  if (byId.length < desiredBodies.length || stored.length === 0 || byId.length !== stored.length) {
     const history = await discord.fetchRecentBotMessages(threadId, 2_000, { requireChannelStart: true });
     if (!history.complete) throw new Error('Die Suche nach vorhandenen Belohnungs-Fortsetzungen ist unvollständig.');
     const marked = history.messages.filter((message) => isContinuation(message, event));
@@ -374,23 +387,49 @@ async function syncContinuations(
   }
   recovered.sort((left, right) => (left.createdAt ?? '').localeCompare(right.createdAt ?? '') || left.id.localeCompare(right.id));
 
-  const nextIds: string[] = [];
+  const plan: ForumContinuationPlan = { actions: [], deletes: [], nextIds: [] };
   for (let index = 0; index < desiredBodies.length; index += 1) {
     const desired = continuationPayload(event, sourceUrls, desiredBodies[index]!, index);
     const existing = recovered[index];
     if (existing) {
-      if (JSON.stringify(existing.embeds) !== JSON.stringify(desired.embeds)) {
-        await discord.editMessage(threadId, existing.id, desired);
+      if (!samePayload(existing, desired)) {
+        plan.actions.push({ kind: 'edit', messageId: existing.id, payload: desired, index });
       }
-      nextIds.push(existing.id);
+      plan.nextIds[index] = existing.id;
     } else {
-      const created = await discord.sendToThread(threadId, desired);
-      nextIds.push(created.id);
+      plan.actions.push({ kind: 'create', payload: desired, index });
     }
   }
   for (const extra of recovered.slice(desiredBodies.length)) {
-    if (discord.deleteThreadMessage) await discord.deleteThreadMessage(threadId, extra.id);
+    if (discord.deleteThreadMessage) plan.deletes.push(extra.id);
   }
+  return plan;
+}
+
+async function applyContinuationPlan(
+  threadId: string,
+  event: StoreEvent,
+  plan: ForumContinuationPlan,
+  discord: DiscordPort,
+  store: Store,
+  guildId: string,
+  editThread: ForumThreadEdit,
+): Promise<void> {
+  for (const action of plan.actions) {
+    if (action.kind === 'edit') {
+      await editThread(() => discord.editMessage(threadId, action.messageId, action.payload));
+    } else {
+      const created = await discord.sendToThread!(threadId, action.payload);
+      plan.nextIds[action.index] = created.id;
+    }
+  }
+  for (const messageId of plan.deletes) {
+    await discord.deleteThreadMessage!(threadId, messageId);
+  }
+  const nextIds = plan.nextIds.map((id) => {
+    if (!id) throw new Error(`Die Belohnungs-Fortsetzung für ${event.eventKey} wurde nicht gespeichert.`);
+    return id;
+  });
   setGuildDiscordIds(store, guildId, event.eventKey, { continuationMessageIds: nextIds });
 }
 
@@ -444,6 +483,22 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
     setGuildEventLastKeepaliveAt(store, guildId, event.eventKey, now.toISOString());
   }
 
+  let currentArchived = post.archived;
+  let unarchivedForUpdate = false;
+  let retriedArchivedEdit = false;
+  const editThread = async <T>(edit: () => Promise<T>): Promise<T> => {
+    try {
+      return await edit();
+    } catch (error) {
+      if (discordErrorCode(error) !== 50_083 || retriedArchivedEdit || !discord.setForumPostArchived) throw error;
+      await discord.setForumPostArchived(post.id, false);
+      currentArchived = false;
+      unarchivedForUpdate = true;
+      retriedArchivedEdit = true;
+      return edit();
+    }
+  };
+
   if (eventStatus !== 'Beendet') {
     const visible = await keepForumPostVisible({
       guildId,
@@ -458,39 +513,57 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
       now,
     });
     if (!visible) return post.id;
+    currentArchived = false;
   }
 
   if (createdPost) {
     await addSidebarFollowersToEventPost({ db: store, discord, guildId, threadId: post.id, event, now });
   }
 
-  if (!createdPost) {
-    let edited = false;
-    if (post.name !== eventTitle(event) && discord.setForumPostName) {
-      await discord.setForumPostName(post.id, eventTitle(event));
-      edited = true;
-    }
-    if (JSON.stringify([...post.appliedTags].sort()) !== JSON.stringify([...appliedTags].sort()) && discord.setForumPostTags) {
-      await discord.setForumPostTags(post.id, appliedTags);
-      edited = true;
-    }
-    if (post.starterMessage.content !== (payload.content ?? '') ||
-      JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
-      JSON.stringify(post.starterMessage.components ?? []) !== JSON.stringify(payload.components ?? [])) {
-      await discord.editForumStarter(post.id, payload);
-      edited = true;
-    }
-    if (edited) logAction(guildId, 'postEdited', `Beitrag „${eventTitle(event)}“ bearbeitet`);
+  const nameChanged = !createdPost && post.name !== eventTitle(event) && Boolean(discord.setForumPostName);
+  const tagsChanged = !createdPost && JSON.stringify([...post.appliedTags].sort()) !== JSON.stringify([...appliedTags].sort()) && Boolean(discord.setForumPostTags);
+  const starterChanged = !createdPost && !samePayload(post.starterMessage, payload);
+  const continuationPlan = await planContinuations(post.id, event, sourceUrls, card.continuationBodies, discord, store, guildId);
+  const durationChanged = eventStatus === 'Beendet' && post.autoArchiveDuration !== FORUM_AUTO_ARCHIVE_DURATION && Boolean(discord.setForumPostAutoArchiveDuration);
+  const continuationChanged = continuationPlan.actions.length > 0 || continuationPlan.deletes.length > 0;
+  const hasPostChanges = nameChanged || tagsChanged || starterChanged || continuationChanged || durationChanged;
+
+  if (eventStatus === 'Beendet' && post.archived && hasPostChanges) {
+    if (!discord.setForumPostArchived) throw new Error('Dieser Discord-Adapter kann Forum-Posts nicht entarchivieren.');
+    await discord.setForumPostArchived(post.id, false);
+    currentArchived = false;
+    unarchivedForUpdate = true;
   }
 
-  await syncContinuations(post.id, event, sourceUrls, card.continuationBodies, discord, store, guildId);
-  if (eventStatus === 'Beendet') {
-    if (post.autoArchiveDuration !== FORUM_AUTO_ARCHIVE_DURATION && discord.setForumPostAutoArchiveDuration) {
-      await discord.setForumPostAutoArchiveDuration(post.id, FORUM_AUTO_ARCHIVE_DURATION);
+  let edited = false;
+  if (!createdPost) {
+    if (nameChanged && discord.setForumPostName) {
+      await editThread(() => discord.setForumPostName!(post.id, eventTitle(event)));
+      edited = true;
     }
-    if (!post.archived && discord.setForumPostArchived) {
+    if (tagsChanged && discord.setForumPostTags) {
+      await editThread(() => discord.setForumPostTags!(post.id, appliedTags));
+      edited = true;
+    }
+    if (starterChanged) {
+      await editThread(() => discord.editForumStarter!(post.id, payload));
+      edited = true;
+    }
+  }
+
+  await applyContinuationPlan(post.id, event, continuationPlan, discord, store, guildId, editThread);
+  if (continuationChanged && !createdPost) edited = true;
+  if (durationChanged && discord.setForumPostAutoArchiveDuration) {
+    await editThread(() => discord.setForumPostAutoArchiveDuration!(post.id, FORUM_AUTO_ARCHIVE_DURATION));
+    edited ||= !createdPost;
+  }
+  if (edited) logAction(guildId, 'postEdited', `Beitrag „${eventTitle(event)}“ bearbeitet`);
+
+  if (eventStatus === 'Beendet') {
+    if (!currentArchived && discord.setForumPostArchived) {
       await discord.setForumPostArchived(post.id, true);
-      logAction(guildId, 'postArchived', `Beitrag „${eventTitle(event)}“ archiviert`);
+      currentArchived = true;
+      if (!unarchivedForUpdate) logAction(guildId, 'postArchived', `Beitrag „${eventTitle(event)}“ archiviert`);
     }
   }
   return post.id;
@@ -584,8 +657,7 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   if (post.name !== 'Läuft gerade' && discord.setForumPostName) await discord.setForumPostName(post.id, 'Läuft gerade');
   if (statusTagId && !post.appliedTags.includes(statusTagId) && discord.setForumPostTags) await discord.setForumPostTags(post.id, [statusTagId]);
   if (!post.pinned && discord.pinForumPost) await discord.pinForumPost(post.id);
-  if (JSON.stringify(post.starterMessage.embeds) !== JSON.stringify(payload.embeds) ||
-    JSON.stringify(post.starterMessage.components ?? []) !== JSON.stringify(payload.components ?? [])) {
+  if (!samePayload(post.starterMessage, payload)) {
     await discord.editForumStarter(post.id, payload);
     logAction(guildId, 'statusEdited', 'Status-Beitrag „Läuft gerade“ bearbeitet');
   }
