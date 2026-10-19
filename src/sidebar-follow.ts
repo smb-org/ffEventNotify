@@ -10,6 +10,7 @@ import {
 } from './store.ts';
 import { log } from './log.ts';
 import type { DiscordPort } from './types.ts';
+import { discordErrorCode } from './discord-errors.ts';
 
 export const SIDEBAR_FOLLOW_CUSTOM_ID_PREFIX = 'ffe:sidebar-follow:';
 
@@ -19,11 +20,6 @@ export function sidebarFollowCustomId(guildId: string): string {
 
 function isEnded(post: Pick<GuildEventPost, 'endStatus' | 'endUtc'>, now: Date): boolean {
   return post.endStatus === 'ok' && post.endUtc !== null && Date.parse(post.endUtc) <= now.getTime();
-}
-
-function discordErrorCode(error: unknown): number | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  return typeof error.code === 'number' ? error.code : undefined;
 }
 
 async function runMemberOperation(

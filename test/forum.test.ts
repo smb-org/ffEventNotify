@@ -52,6 +52,50 @@ function copyEmbeds(embeds: readonly DiscordEmbed[] | undefined): DiscordEmbed[]
   return (embeds ?? []).map((embed) => structuredClone(embed));
 }
 
+function discordEmbedSnapshot(embed: DiscordEmbed): DiscordEmbed {
+  return {
+    ...(embed.title === undefined ? {} : { title: embed.title }),
+    ...(embed.url === undefined ? {} : { url: embed.url }),
+    ...(embed.description === undefined ? {} : { description: embed.description }),
+    ...(embed.color === undefined ? {} : { color: embed.color }),
+    ...(embed.author === undefined ? {} : { author: { name: embed.author.name } }),
+    ...(embed.image === undefined ? {} : { image: { url: embed.image.url } }),
+    ...(embed.fields === undefined || embed.fields.length === 0 ? {} : {
+      fields: embed.fields.map(({ name, value, inline }) => ({ name, value, inline: inline ?? false })),
+    }),
+    ...(embed.footer === undefined ? {} : { footer: { text: embed.footer.text } }),
+  };
+}
+
+function discordMessageSnapshot(message: DiscordMessageSnapshot): DiscordMessageSnapshot {
+  return {
+    ...message,
+    embeds: message.embeds.map(discordEmbedSnapshot),
+    components: (message.components ?? []).map((row) => ({
+      components: row.components.map((component) => component.type === 'button' ? {
+        type: 'button' as const,
+        style: component.style,
+        label: component.label,
+        ...(component.customId ? { customId: component.customId } : {}),
+        ...(component.url ? { url: component.url } : {}),
+        ...(component.disabled ? { disabled: true } : {}),
+      } : {
+        type: 'string-select' as const,
+        customId: component.customId,
+        ...(component.placeholder ? { placeholder: component.placeholder } : {}),
+        minValues: component.minValues ?? 1,
+        maxValues: component.maxValues ?? 1,
+        options: component.options.map((option) => ({
+          label: option.label,
+          value: option.value,
+          ...(option.description ? { description: option.description } : {}),
+          ...(option.default ? { default: true } : {}),
+        })),
+      }),
+    })),
+  };
+}
+
 function makeMessage(id: string, channelId: string, payload: DiscordMessagePayload, pinned = false): DiscordMessageSnapshot {
   return {
     id,
@@ -79,6 +123,10 @@ class ForumDiscord implements DiscordPort {
   postCreates = 0;
   threadStarts = 0;
   failUnarchive = false;
+  historyFetches = 0;
+  staleArchiveSnapshot = false;
+  failFirstStarterEditWith50083 = false;
+  starterEditAttempts = 0;
   private sequence = 0;
 
   async createMessage(channelId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> { return makeMessage(`message-${++this.sequence}`, channelId, payload); }
@@ -92,6 +140,7 @@ class ForumDiscord implements DiscordPort {
     return updated;
   }
   async fetchRecentBotMessages(channelId: string, _limit: number): Promise<DiscordMessageHistory> {
+    this.historyFetches += 1;
     return { messages: [...(this.replies.get(channelId) ?? [])], complete: true };
   }
   async fetchPinnedBotMessages(channelId: string): Promise<DiscordMessageSnapshot[]> {
@@ -127,12 +176,20 @@ class ForumDiscord implements DiscordPort {
   }
   async fetchForumPost(channelId: string, threadId: string): Promise<DiscordForumPostSnapshot | null> {
     const post = this.posts.get(threadId);
-    return post?.parentChannelId === channelId ? post : null;
+    if (post?.parentChannelId !== channelId) return null;
+    const snapshot = structuredClone(post);
+    if (this.staleArchiveSnapshot) snapshot.archived = false;
+    return snapshot;
   }
   async listForumPosts(channelId: string): Promise<DiscordForumPostSnapshot[]> {
     return [...this.posts.values()].filter((post) => post.parentChannelId === channelId);
   }
   async editForumStarter(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    this.starterEditAttempts += 1;
+    if (this.failFirstStarterEditWith50083 && this.starterEditAttempts === 1) {
+      this.operations.push('edit-starter-50083');
+      throw Object.assign(new Error('Thread is archived'), { code: 50_083 });
+    }
     const post = this.posts.get(threadId)!;
     post.starterMessage = makeMessage(threadId, threadId, payload, post.starterMessage.pinned);
     this.operations.push('edit-starter');
@@ -433,6 +490,33 @@ test('30 Mog Mog rewards with verified costs fill the starter and continuation p
   }
 });
 
+test('forum sync treats a discord.js embed and component snapshot as unchanged', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/snapshot-roundtrip';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/mogmog-collection/202609/snapshot-roundtrip', eventType: 'seasonal-special',
+    title: 'Mog Mog-Kollektion Snapshot', sourceUrl: url,
+    startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', rewards: mogExpected.rewards,
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    const post = discord.posts.get(postId)!;
+    post.starterMessage = discordMessageSnapshot(post.starterMessage);
+    discord.replies.set(postId, discord.replies.get(postId)!.map(discordMessageSnapshot));
+    const historyFetches = discord.historyFetches;
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+
+    assert.deepEqual(discord.operations, []);
+    assert.equal(discord.historyFetches, historyFetches);
+  } finally {
+    db.close();
+  }
+});
+
 test('restart recovers active and archived event posts from their marker without duplicates', async () => {
   for (const archived of [false, true]) {
     const discord = new ForumDiscord();
@@ -549,6 +633,90 @@ test('an event ending updates its Beendet tag and card before archiving without 
     await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
     assert.equal(discord.posts.get(postId)?.archived, true);
     assert.equal(discord.operations.includes('unarchive'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('an archived ended event is unarchived before changes and archived again afterward', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  const captured = captureLog('info');
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/archived-ended-change';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/archived-ended-change', eventType: 'seasonal-special',
+    title: 'Archiviertes Event', sourceUrl: url, startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    discord.posts.get(postId)!.archived = true;
+    applyField(db, event.id, 'end', { status: 'ok', value: '2026-10-15T14:59:00.000Z' }, url);
+    const ended = getAllEvents(db).find((candidate) => candidate.id === event.id)!;
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
+
+    assert.deepEqual(discord.operations, ['unarchive', 'set-tags', 'edit-starter', 'archive']);
+    assert.equal(discord.posts.get(postId)?.archived, true);
+    assert.match(discord.posts.get(postId)?.starterMessage.content ?? '', /^✅ Beendet/);
+    assert.equal(captured.messages().filter((message) => message.includes('bearbeitet')).length, 1);
+    assert.equal(captured.messages().some((message) => message.includes('entarchiviert') || message.includes('archiviert')), false);
+  } finally {
+    captured.restore();
+    db.close();
+  }
+});
+
+test('an unchanged archived ended event does not mutate Discord or scan continuation history', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/mogmog-collection/202609/archived-unchanged';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/mogmog-collection/202609/archived-unchanged', eventType: 'seasonal-special',
+    title: 'Mog Mog-Kollektion', sourceUrl: url, startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z',
+    rewards: mogExpected.rewards,
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.ok(getGuildEventObject(db, 'guild-1', event.eventKey)!.continuationMessageIds.length > 0);
+    const historyFetches = discord.historyFetches;
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+
+    assert.deepEqual(discord.operations, []);
+    assert.equal(discord.historyFetches, historyFetches);
+    assert.equal(discord.posts.get(postId)?.archived, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('a 50083 from an edit unarchives once and retries when the fetched archive state is stale', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/stale-archive';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/stale-archive', eventType: 'seasonal-special',
+    title: 'Veralteter Status', sourceUrl: url, startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    discord.posts.get(postId)!.archived = true;
+    discord.staleArchiveSnapshot = true;
+    discord.failFirstStarterEditWith50083 = true;
+    applyField(db, event.id, 'end', { status: 'ok', value: '2026-10-15T14:59:00.000Z' }, url);
+    const ended = getAllEvents(db).find((candidate) => candidate.id === event.id)!;
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
+
+    assert.deepEqual(discord.operations, ['set-tags', 'edit-starter-50083', 'unarchive', 'edit-starter', 'archive']);
+    assert.equal(discord.starterEditAttempts, 2);
+    assert.equal(discord.posts.get(postId)?.archived, true);
   } finally {
     db.close();
   }

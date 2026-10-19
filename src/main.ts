@@ -36,6 +36,7 @@ import { runGuildSyncFromStoredData } from './cycle.ts';
 import { openDb } from './store.ts';
 import { LodestoneRequestQueue } from './sources/queue.ts';
 import { collectRecentBotMessages } from './discord-history.ts';
+import { isUnknownDiscordResource } from './discord-errors.ts';
 import { missingSetupPermissions, registerGlobalFfEventsCommand, setupPermissionHints } from './commands.ts';
 import {
   deleteGuild,
@@ -300,7 +301,7 @@ export class DiscordJsPort implements DiscordPort {
       return thread && thread.parentId === forum.id ? thread : null;
     } catch (error) {
       // A deleted forum post is reported as 10003 Unknown Channel.
-      if (this.isUnknownDiscordResource(error)) return null;
+      if (isUnknownDiscordResource(error)) return null;
       throw error;
     }
   }
@@ -412,7 +413,7 @@ export class DiscordJsPort implements DiscordPort {
       const message = await channel.messages.fetch({ message: messageId, force: true });
       return messageSnapshot(message, this.client.user?.id);
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && (error.code === 10008 || error.code === 10003)) return null;
+      if (isUnknownDiscordResource(error)) return null;
       throw error;
     }
   }
@@ -559,11 +560,6 @@ export class DiscordJsPort implements DiscordPort {
     };
   }
 
-  private isUnknownDiscordResource(error: unknown): boolean {
-    return typeof error === 'object' && error !== null && 'code' in error
-      && (error.code === 10003 || error.code === 10008);
-  }
-
   async startThreadOnMessage(
     channelId: string,
     starterMessageId: string,
@@ -592,7 +588,7 @@ export class DiscordJsPort implements DiscordPort {
         const associatedStarter = starterMessageId && id === starterMessageId ? starterMessageId : channel.id;
         return this.threadSnapshot(channel, associatedStarter);
       } catch (error) {
-        if (this.isUnknownDiscordResource(error)) return null;
+        if (isUnknownDiscordResource(error)) return null;
         throw error;
       }
     };
@@ -609,7 +605,7 @@ export class DiscordJsPort implements DiscordPort {
         return this.threadSnapshot(message.thread, starterMessageId);
       }
     } catch (error) {
-      if (!this.isUnknownDiscordResource(error)) throw error;
+      if (!isUnknownDiscordResource(error)) throw error;
     }
 
     // Message based thread IDs equal their starter message IDs, including archived threads.
