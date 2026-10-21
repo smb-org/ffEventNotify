@@ -183,6 +183,24 @@ test('reminders use one public thread per event and guild', async () => {
   }
 });
 
+test('a patch-bound end does not schedule an end reminder before maintenance resolves it', async () => {
+  const db = openDb(':memory:');
+  const { eventId } = setup(db);
+  const discord = new ReminderDiscord();
+  const now = new Date('2026-10-17T12:31:00.000Z');
+  db.prepare("UPDATE events SET end_utc = NULL, end_status = 'unsicher', end_reason = ?, end_patch = '8.0' WHERE id = ?")
+    .run('Wird mit der Wartung zu Patch 8.0 festgelegt.', eventId);
+  try {
+    const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
+    await syncEventReminders({ guildId: 'guild-1', channelId: 'events', events: [event], store: db, discord, now });
+    assert.equal(discord.threadCreateCount, 0);
+    assert.equal(discord.threadSent.length, 0);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM reminder_deliveries').get() as { count: number }).count, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test('a deleted reminder thread is recreated from the event card before a new batch is sent', async () => {
   const db = openDb(':memory:');
   const { eventKey, eventId } = setup(db);

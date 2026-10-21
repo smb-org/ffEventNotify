@@ -9,7 +9,7 @@ import test from 'node:test';
 import { createCoalescedCycleRunner, createLoggedCycleRunner, createSetupSyncRunner } from '../src/main.ts';
 import { captureLog } from './log-capture.ts';
 import { SourceHealthMonitor } from '../src/health.ts';
-import { applyField, attachSource, createEvent, deleteGuild, getAllEvents, getEventSources, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, attachSource, createEvent, deleteGuild, getAllEvents, getEventSources, getFieldProvenanceSourceUrl, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
   DiscordEmbed,
   DiscordMessagePayload,
@@ -379,6 +379,58 @@ test('FFXV period from the topic supplies the seasonal event when its special pa
     } finally {
       db.close();
     }
+  }
+});
+
+test('a patch-bound seasonal event stays active without a schedule, then resolves from verified patch maintenance', async () => {
+  const topicUrl = '/lodestone/topics/detail/keybound-patch80';
+  const specialUrl = '/lodestone/special/keybound_brawler/';
+  const maintenanceUrl = '/lodestone/news/detail/patch-8-0-maintenance';
+  const topicDetail = `<article class="news__detail"><div class="news__detail__wrapper"><a href="https://de.finalfantasyxiv.com${specialUrl}">Tastenschläger</a></div></article>`;
+  const fetchFor = (includeMaintenance: boolean): FetchText => controlledFetcher({
+    topicList: topicListHtml([{ title: 'Tastenschläger, ein Tippspiel für bis zu 4 Spieler!', url: topicUrl }]),
+    maintenanceList: maintenanceListHtml([
+      { tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored-maintenance' },
+      ...(includeMaintenance ? [{ tag: 'Wartung' as const, title: 'Wartung aller Welten: Patch 8.0 (3. Nov.)', url: maintenanceUrl }] : []),
+    ]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (requestedUrl) => {
+      const { pathname } = new URL(requestedUrl);
+      if (pathname === topicUrl) return { status: 200, body: topicDetail, finalUrl: requestedUrl };
+      if (pathname === specialUrl) return { status: 200, body: fixture('./fixtures/special/keybound-202610.html'), finalUrl: requestedUrl };
+      if (pathname === maintenanceUrl) return { status: 200, body: fixture('./fixtures/maintenance/patch-8.0-verified.html'), finalUrl: requestedUrl };
+      return undefined;
+    },
+  });
+
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const now = new Date('2026-11-01T12:00:00.000Z');
+  setMetaValue(db, 'wiki_checked_utc_day', now.toISOString().slice(0, 10));
+  try {
+    await runCycle({ ...cycleOptions(db, discord), fetchText: fetchFor(false), now: () => now });
+    let event = getAllEvents(db).find((candidate) => candidate.eventKey.includes('/keybound_brawler/'))!;
+    assert.ok(event, JSON.stringify({ events: getAllEvents(db), logs: discord.logs }));
+    assert.equal(event.startStatus, 'ok');
+    assert.equal(event.startUtc, '2026-10-28T08:00:00Z');
+    assert.equal(event.endStatus, 'unsicher');
+    assert.equal(event.endUtc, null);
+    assert.equal(event.endPatch, '8.0');
+    assert.equal(discord.createScheduledCount, 0);
+    const eventCard = discord.messages.find((message) => message.embeds.some((embed) => embed.title === event.title));
+    assert.ok(eventCard, 'a first-run patch-bound event with a verified start gets its event card');
+    const liveStatus = discord.messages.find((message) => message.embeds.some((embed) => embed.title === 'Läuft gerade'));
+    assert.match(liveStatus?.embeds[0]?.description ?? '', /Tastenschläger.*— bis Patch 8\.0/);
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: fetchFor(true), now: () => now });
+    event = getAllEvents(db).find((candidate) => candidate.eventKey.includes('/keybound_brawler/'))!;
+    assert.equal(event.endStatus, 'ok');
+    assert.equal(event.endUtc, '2026-11-03T02:00:00Z');
+    assert.equal(event.endPatch, '8.0');
+    assert.equal(getFieldProvenanceSourceUrl(db, event.id, 'end'), 'https://de.finalfantasyxiv.com/lodestone/news/detail/patch-8-0-maintenance');
+    assert.equal(discord.scheduledEvents.filter((schedule) => schedule.name === event.title).length, 1);
+  } finally {
+    db.close();
   }
 });
 

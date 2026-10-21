@@ -1,0 +1,29 @@
+{
+  "period": {
+    "startUtc": "2026-10-28T08:00:00Z",
+    "endUtc": null,
+    "endPatch": "8.0"
+  },
+  "rewards": [
+    { "section": "Eintauschbare Gegenstände", "itemId": "511859ea2ce", "name": "Avalanche-Oberteil der Kämpferin", "cost": "430 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "5e2a4ed4b0e", "name": "Avalanche-Kurzfingerhandschuhe der Kämpferin", "cost": "260 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "e12789541d2", "name": "Avalanche-Rock der Kämpferin", "cost": "430 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "980c3e5f414", "name": "Avalanche-Stiefel der Kämpferin", "cost": "260 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "c1766421d89", "name": "Avalanche-Ohrring der Kämpferin", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "932fca593a1", "name": "Avalanche-Sonnenbrille des Anführers", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "4d7f2035072", "name": "Avalanche-Weste des Anführers", "cost": "430 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "ebf15e03e89", "name": "Avalanche-Kurzfingerhandschuhe des Anführers", "cost": "260 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "338d2213263", "name": "Avalanche-Cargohose des Anführers", "cost": "430 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "449af49f9bf", "name": "Avalanche-Stiefel des Anführers", "cost": "260 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "c2b6282ebe7", "name": "Avalanche-Ohrring des Anführers", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "4b688ca7c63", "name": "Avalanche-Gatling-Gewehr", "cost": "430 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "455a23febee", "name": "Wachskorpion-Kennschlüssel", "cost": "430 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "f1f07edc4c8", "name": "Aufzieh-Barret", "cost": "260 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "51f76d0b69d", "name": "Notenrolle von „Welcome to the Gold Saucer“", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "7e863704d72", "name": "Notenrolle von „Let the Battles Begin!“", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "899a0f07d36", "name": "Notenrolle von „Fight On!“", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "5639bd41f53", "name": "Portraitmaterial (Tastenschläger)", "cost": "190 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "1cb28682df0", "name": "Ballsaal-Etikette: Magitipp-Tastatur", "cost": "260 MGM" },
+    { "section": "Eintauschbare Gegenstände", "itemId": "79ed0bf1a9d", "name": "Tastenschläger-Schatulle", "cost": "910 MGM" }
+  ]
+}

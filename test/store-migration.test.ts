@@ -19,7 +19,7 @@ test('v1 schema migrates idempotently, preserving warnings while ignoring legacy
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
     assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
@@ -37,6 +37,29 @@ test('v1 schema migrates idempotently, preserving warnings while ignoring legacy
     db = openDb(path);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM guild_event_objects').get() as { count: number }).count, 0);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM legacy_warnings_sent_v1').get() as { count: number }).count, 1);
+  } finally {
+    db?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('v9 schema adds the patch-bound end column without changing existing event data', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-v9-migration-'));
+  const path = join(directory, 'v9.sqlite');
+  let db: ReturnType<typeof openDb> | undefined;
+  try {
+    const seeded = new DatabaseSync(path);
+    seeded.exec(readFileSync(new URL('./fixtures/schema/v1.sql', import.meta.url), 'utf8'));
+    seeded.exec('CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version (version) VALUES (9)');
+    seeded.prepare('INSERT INTO events (event_key, event_type, title) VALUES (?, ?, ?)')
+      .run('legacy:event', 'seasonal-special', 'Vorhandenes Event');
+    seeded.close();
+
+    db = openDb(path);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.ok((db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>).some(({ name }) => name === 'end_patch'));
+    assert.ok((db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>).some(({ name }) => name === 'end_patch_source_url'));
+    assert.equal((db.prepare('SELECT title FROM events WHERE event_key = ?').get('legacy:event') as { title: string }).title, 'Vorhandenes Event');
   } finally {
     db?.close();
     rmSync(directory, { recursive: true, force: true });
@@ -67,7 +90,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');
@@ -98,7 +121,7 @@ test('v4 schema migration adds forum continuation metadata without changing guil
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'reminder_thread_id'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'continuation_message_ids'));
     assert.equal((db.prepare('SELECT message_id AS messageId, reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { messageId: string; reminderThreadId: string | null }).messageId, 'card');
@@ -134,7 +157,7 @@ test('v6 schema adds keep-alive timestamps for event and status forum posts', ()
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
     assert.ok((db.prepare('PRAGMA table_info(guilds)').all() as Array<{ name: string }>).some(({ name }) => name === 'status_last_keepalive_at'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'last_keepalive_at'));
     assert.equal((db.prepare('SELECT message_id AS messageId, last_keepalive_at AS lastKeepaliveAt FROM guild_event_objects').get() as { messageId: string; lastKeepaliveAt: string | null }).messageId, 'post');

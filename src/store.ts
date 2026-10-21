@@ -35,6 +35,7 @@ export interface StoreEvent {
   endUtc: string | null;
   endStatus: 'ok' | 'unsicher';
   endReason: string | null;
+  endPatch: string | null;
   rewards: Reward[];
   rewardsStatus: 'ok' | 'unsicher' | 'n/a';
   rewardsReason: string | null;
@@ -136,6 +137,8 @@ const SCHEMA = `
     end_utc TEXT,
     end_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (end_status IN ('ok', 'unsicher')),
     end_reason TEXT DEFAULT 'Nicht extrahiert',
+    end_patch TEXT,
+    end_patch_source_url TEXT,
     rewards_json TEXT NOT NULL DEFAULT '[]',
     rewards_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (rewards_status IN ('ok', 'unsicher')),
     rewards_reason TEXT DEFAULT 'Nicht extrahiert',
@@ -332,7 +335,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -495,7 +498,23 @@ function migrateV8ToV9(db: Store): void {
       SELECT user_id, guild_id FROM checklist_items
       UNION SELECT user_id, guild_id FROM checklist_reminder_preferences`);
     db.prepare('DELETE FROM schema_version').run();
-    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
+    db.prepare('INSERT INTO schema_version (version) VALUES (9)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function migrateV9ToV10(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const columns = tableColumns(db, 'events');
+    if (!columns.has('end_patch')) db.exec('ALTER TABLE events ADD COLUMN end_patch TEXT');
+    if (!columns.has('end_patch_source_url')) db.exec('ALTER TABLE events ADD COLUMN end_patch_source_url TEXT');
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (10)').run();
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -515,7 +534,7 @@ function initializeSchema(db: Store): void {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     return;
   }
-  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9];
+  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10];
   for (const step of steps.slice(Math.max(0, version - 1))) step(db);
   db.exec(SCHEMA);
   // Added later without a version bump: the guild name for the web page's Discord links.
@@ -1026,7 +1045,7 @@ export function applyField(
     const eventResult = update.status === 'ok'
       ? db.prepare(`
           UPDATE events
-          SET ${columns.value} = ?, ${columns.status} = 'ok', ${columns.reason} = NULL
+          SET ${columns.value} = ?, ${columns.status} = 'ok', ${columns.reason} = NULL${field === 'end' ? ', end_patch = NULL, end_patch_source_url = NULL' : ''}
           WHERE id = ? AND (${columns.value} IS NOT ? OR ${columns.status} IS NOT 'ok' OR ${columns.reason} IS NOT NULL)
         `).run(serializedValue(field, update.value), eventId, serializedValue(field, update.value))
       : db.prepare(`
@@ -1046,6 +1065,67 @@ export function applyField(
     `).run(eventId, field, candidate.sourceUrl, candidate.sourceTime);
 
     return eventResult.changes > 0 || provenanceResult.changes > 0;
+  });
+}
+
+function putEndProvenance(db: Store, eventId: number, sourceUrl: string, sourceTime: string): boolean {
+  return db.prepare(`
+    INSERT INTO field_provenance (event_id, field, source_url, source_time)
+    VALUES (?, 'end', ?, ?)
+    ON CONFLICT(event_id, field) DO UPDATE SET source_url = excluded.source_url, source_time = excluded.source_time
+    WHERE field_provenance.source_url IS NOT excluded.source_url OR field_provenance.source_time IS NOT excluded.source_time
+  `).run(eventId, sourceUrl, sourceTime).changes > 0;
+}
+
+/** Retains a verified start while marking an end that will be resolved by matching patch maintenance. */
+export function bindEventEndToPatch(db: Store, eventId: number, patch: string, sourceUrl: string, sourceTime?: string): boolean {
+  if (!/^\d+\.\d+$/.test(patch)) throw new Error(`Invalid patch version: ${patch}`);
+  return runTransaction(db, () => {
+    const source = db.prepare(`SELECT kind, published_at AS publishedAt, first_seen_at AS firstSeenAt
+      FROM event_sources WHERE url = ? AND event_id = ?`).get(sourceUrl, eventId) as SourceRecord | undefined;
+    if (!source) throw new Error(`Source ${sourceUrl} is not attached to event ${eventId}`);
+    const event = db.prepare('SELECT end_utc AS endUtc, end_status AS endStatus, end_patch AS endPatch FROM events WHERE id = ?')
+      .get(eventId) as { endUtc: string | null; endStatus: 'ok' | 'unsicher'; endPatch: string | null } | undefined;
+    if (!event) throw new Error(`Event ${eventId} does not exist`);
+    // Preserve any previously verified deadline; an open phrase cannot make it less certain.
+    if (event.endUtc !== null || event.endStatus === 'ok') return false;
+
+    const candidate: ProvenanceRecord = { sourceUrl, sourceTime: sourceTime ?? source.publishedAt ?? source.firstSeenAt, kind: source.kind };
+    const current = db.prepare(`SELECT field_provenance.source_url AS sourceUrl, field_provenance.source_time AS sourceTime,
+      event_sources.kind AS kind FROM field_provenance JOIN event_sources ON event_sources.url = field_provenance.source_url
+      WHERE field_provenance.event_id = ? AND field_provenance.field = 'end'`).get(eventId) as ProvenanceRecord | undefined;
+    if (!candidateWins(db, eventId, 'end', candidate, current)) return false;
+
+    const reason = `Wird mit der Wartung zu Patch ${patch} festgelegt.`;
+    const updated = db.prepare(`UPDATE events SET end_status = 'unsicher', end_reason = ?, end_patch = ?, end_patch_source_url = NULL
+      WHERE id = ? AND end_utc IS NULL AND (end_patch IS NOT ? OR end_status IS NOT 'unsicher' OR end_reason IS NOT ?)`)
+      .run(reason, patch, eventId, patch, reason).changes > 0;
+    return putEndProvenance(db, eventId, sourceUrl, candidate.sourceTime) || updated;
+  });
+}
+
+/** Resolves a patch-bound end from the verified start of that patch's maintenance. */
+export function resolvePatchBoundEnd(
+  db: Store,
+  eventId: number,
+  patch: string,
+  maintenanceStartUtc: string,
+  sourceUrl: string,
+  sourceTime?: string,
+): boolean {
+  if (!/^\d+\.\d+$/.test(patch) || !Number.isFinite(Date.parse(maintenanceStartUtc))) return false;
+  return runTransaction(db, () => {
+    const source = db.prepare(`SELECT published_at AS publishedAt, first_seen_at AS firstSeenAt
+      FROM event_sources WHERE url = ?`).get(sourceUrl) as Pick<SourceRecord, 'publishedAt' | 'firstSeenAt'> | undefined;
+    if (!source) throw new Error(`Source ${sourceUrl} is not attached to a stored event`);
+    const event = db.prepare(`SELECT end_patch AS endPatch, end_status AS endStatus, end_utc AS endUtc
+      FROM events WHERE id = ?`).get(eventId) as { endPatch: string | null; endStatus: 'ok' | 'unsicher'; endUtc: string | null } | undefined;
+    if (!event || event.endPatch !== patch || event.endStatus !== 'unsicher' || event.endUtc !== null) return false;
+    const resolved = db.prepare(`UPDATE events SET end_utc = ?, end_status = 'ok', end_reason = NULL, end_patch_source_url = ?
+      WHERE id = ? AND end_patch = ? AND end_status = 'unsicher' AND end_utc IS NULL`)
+      .run(maintenanceStartUtc, sourceUrl, eventId, patch).changes > 0;
+    const provenance = putEndProvenance(db, eventId, sourceUrl, sourceTime ?? source.publishedAt ?? source.firstSeenAt);
+    return resolved || provenance;
   });
 }
 
@@ -1078,6 +1158,7 @@ export function getOpenEvents(db: Store, now: Date | string = new Date()): Store
            end_utc AS endUtc,
            end_status AS endStatus,
            end_reason AS endReason,
+           end_patch AS endPatch,
            rewards_json AS rewardsJson,
            rewards_status AS rewardsStatus,
            rewards_reason AS rewardsReason,
@@ -1109,6 +1190,7 @@ export function getAllEvents(db: Store): StoreEvent[] {
            end_utc AS endUtc,
            end_status AS endStatus,
            end_reason AS endReason,
+           end_patch AS endPatch,
            rewards_json AS rewardsJson,
            rewards_status AS rewardsStatus,
            rewards_reason AS rewardsReason,
@@ -1138,6 +1220,11 @@ export function getEventSources(db: Store, eventId: number): StoreEventSource[] 
 }
 
 export function getFieldProvenanceSourceUrl(db: Store, eventId: number, field: StoreField): string | undefined {
+  if (field === 'end') {
+    const resolution = db.prepare('SELECT end_patch_source_url AS sourceUrl FROM events WHERE id = ?')
+      .get(eventId) as { sourceUrl: string | null } | undefined;
+    if (resolution?.sourceUrl) return resolution.sourceUrl;
+  }
   const row = db.prepare('SELECT source_url AS sourceUrl FROM field_provenance WHERE event_id = ? AND field = ?')
     .get(eventId, field) as { sourceUrl: string } | undefined;
   return row?.sourceUrl;

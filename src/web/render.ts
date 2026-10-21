@@ -72,6 +72,7 @@ function period(event: StoreEvent): string {
   const end = format(event.endUtc, event.endStatus);
   if (start && end) return `${start} – ${end} Uhr`;
   if (end) return `bis ${end} Uhr`;
+  if (start && event.endStatus === 'unsicher' && event.endPatch) return `ab ${start.replace(',', '')} bis Patch ${event.endPatch}`;
   if (start) return `ab ${start} Uhr, Ende offen`;
   return 'Zeitraum offen';
 }

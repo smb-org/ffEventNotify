@@ -365,6 +365,46 @@ test('forum event starter content uses only verified Discord timestamps', async 
   }
 });
 
+test('patch-bound running events show their maintenance end and follow known ends in the live forum status', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const patchUrl = 'https://de.finalfantasyxiv.com/lodestone/special/keybound_brawler/';
+  const knownUrl = 'https://de.finalfantasyxiv.com/lodestone/special/known-end/';
+  const patchEvent = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/keybound_brawler/', eventType: 'seasonal-special',
+    title: 'Tastenschläger', sourceUrl: patchUrl,
+    startUtc: '2026-10-28T08:00:00.000Z', endUtc: '2026-11-08T14:59:00.000Z',
+  });
+  const knownEvent = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/known-end/', eventType: 'seasonal-special',
+    title: 'Bekanntes Ende', sourceUrl: knownUrl,
+    startUtc: '2026-10-28T08:00:00.000Z', endUtc: '2026-11-10T14:59:00.000Z',
+  });
+  db.prepare("UPDATE events SET end_utc = NULL, end_status = 'unsicher', end_reason = ?, end_patch = '8.0' WHERE id = ?")
+    .run('Wird mit der Wartung zu Patch 8.0 festgelegt.', patchEvent.id);
+  try {
+    const currentPatch = getAllEvents(db).find((event) => event.id === patchEvent.id)!;
+    const postId = await syncForumEvent({
+      guildId: 'guild-1', channelId: 'forum-1', event: currentPatch, sourceUrls: [patchUrl], discord, store: db, now: new Date('2026-11-01T12:00:00.000Z'),
+    });
+    const card = discord.posts.get(postId)!.starterMessage;
+    assert.equal(card.content, '⏳ Läuft bis Patch 8.0');
+    assert.equal(card.embeds[0]?.fields?.find((field) => field.name === 'Ende')?.value, 'mit der Wartung zu Patch 8.0 (Datum folgt)');
+
+    await syncForumStatus({
+      guildId: 'guild-1', channelId: 'forum-1', events: [currentPatch, knownEvent], discord, store: db,
+      now: new Date('2026-11-01T12:00:00.000Z'),
+    });
+    const status = [...discord.posts.values()].find((post) => post.starterMessage.embeds.some((embed) => embed.title === 'Läuft gerade'))!;
+    const description = status.starterMessage.embeds[0]?.description ?? '';
+    assert.ok(description.indexOf('Bekanntes Ende') < description.indexOf('Tastenschläger'));
+    assert.match(description, /Tastenschläger.*— bis Patch 8\.0/);
+  } finally {
+    db.close();
+  }
+});
+
 test('forum starter content does not cause repeat edits and migrates an old starter once', async () => {
   const db = openDb(':memory:');
   const discord = new ForumDiscord();
@@ -762,8 +802,8 @@ test('the status button toggles guild follow and adds or removes the user from e
   const discord = new ForumDiscord();
   setupGuild(db);
   const running = [
-    storeEvent(db, { eventKey: 'topic-generic:sidebar-a', eventType: 'topic-generic', title: 'Läuft A', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/a', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z' }),
-    storeEvent(db, { eventKey: 'topic-generic:sidebar-b', eventType: 'topic-generic', title: 'Läuft B', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/b', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-21T14:59:00.000Z' }),
+    storeEvent(db, { eventKey: 'topic-generic:sidebar-a', eventType: 'topic-generic', title: 'Läuft A', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/a', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-11-20T14:59:00.000Z' }),
+    storeEvent(db, { eventKey: 'topic-generic:sidebar-b', eventType: 'topic-generic', title: 'Läuft B', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/b', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-11-21T14:59:00.000Z' }),
   ];
   const ended = storeEvent(db, { eventKey: 'topic-generic:sidebar-ended', eventType: 'topic-generic', title: 'Beendet', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/ended', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z' });
   const userId = 'user-sidebar';
@@ -809,7 +849,7 @@ test('/ffevents folgen applies an explicit on or off choice to the same guild pr
   const event = storeEvent(db, {
     eventKey: 'topic-generic:command-follow', eventType: 'topic-generic', title: 'Befehl-Event',
     sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/command-follow',
-    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-11-20T14:59:00.000Z',
   });
   const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [], discord, store: db, now: NOW });
   const replies: Array<{ content?: string }> = [];

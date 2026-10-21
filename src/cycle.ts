@@ -4,6 +4,7 @@ import { load } from 'cheerio';
 import {
   applyField,
   attachSource,
+  bindEventEndToPatch,
   createEvent,
   deliverWarning,
   getConfiguredGuilds,
@@ -24,6 +25,7 @@ import {
   markGuildNeedsSetup,
   markFirstRunDone,
   markSeen,
+  resolvePatchBoundEnd,
   setMetaValue,
   setGuildEventSyncStatus,
   setEventImageUrl,
@@ -228,6 +230,10 @@ function rememberPendingDiscovery(context: CycleContext, entry: ListEntry): void
   persistPendingDiscoveries(context);
 }
 
+function hasVerifiedPatchBoundEnd(event: StoreEvent): boolean {
+  return event.startStatus === 'ok' && event.startUtc !== null && event.endStatus === 'unsicher' && event.endPatch !== null;
+}
+
 function finishPendingDiscovery(context: CycleContext, url: string, eventId?: number): void {
   const normalizedUrl = normalizeLodestoneUrl(url);
   const pending = context.pendingDiscoveries.get(normalizedUrl);
@@ -238,7 +244,7 @@ function finishPendingDiscovery(context: CycleContext, url: string, eventId?: nu
   if (!pending.firstRun || eventId === undefined) return;
   const event = getAllEvents(context.store).find((candidate) => candidate.id === eventId);
   if (!event || (event.endStatus === 'ok' && event.endUtc !== null
-    && Date.parse(event.endUtc) > context.currentTime.getTime())) return;
+    && Date.parse(event.endUtc) > context.currentTime.getTime()) || hasVerifiedPatchBoundEnd(event)) return;
   for (const guildId of pending.firstRunGuildIds ?? []) {
     markGuildEventFirstRunSuppressed(context.store, guildId, event.eventKey);
   }
@@ -434,7 +440,13 @@ function applyExtract(
   if (!options.skipPeriod) {
     if (result.period.status === 'ok') {
       applyField(context.store, eventId, 'start', { status: 'ok', value: result.period.value.startUtc }, periodSourceUrl, periodSourceMoment);
-      applyField(context.store, eventId, 'end', { status: 'ok', value: result.period.value.endUtc }, periodSourceUrl, periodSourceMoment);
+      if (result.period.value.endUtc !== null) {
+        applyField(context.store, eventId, 'end', { status: 'ok', value: result.period.value.endUtc }, periodSourceUrl, periodSourceMoment);
+      } else if ('endPatch' in result.period.value) {
+        bindEventEndToPatch(context.store, eventId, result.period.value.endPatch, periodSourceUrl, periodSourceMoment);
+      } else {
+        applyField(context.store, eventId, 'end', { status: 'unsicher', reason: 'Das Zeitraumende ist nicht bekannt.' }, periodSourceUrl, periodSourceMoment);
+      }
     } else {
       applyField(context.store, eventId, 'start', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
       applyField(context.store, eventId, 'end', { status: 'unsicher', reason: result.period.reason }, periodSourceUrl, periodSourceMoment);
@@ -444,6 +456,48 @@ function applyExtract(
     applyStatus(context, eventId, 'rewards', result.rewards, sourceUrl, sourceMoment);
   }
   applyStatus(context, eventId, 'description', result.description, sourceUrl, sourceMoment);
+}
+
+function mentionedPatches(...texts: Array<string | undefined>): string[] {
+  return [...new Set(texts.flatMap((text) => text ? [...text.matchAll(/\bPatch\s+(\d+\.\d+)\b/giu)].map((match) => match[1]!) : []))];
+}
+
+function resolveBoundEndsFromMaintenance(
+  context: CycleContext,
+  input: { title?: string; description?: string; period: ExtractResult['period']; sourceUrl: string; sourceTime: string },
+): void {
+  if (input.period.status !== 'ok') return;
+  for (const patch of mentionedPatches(input.title, input.description)) {
+    for (const event of getAllEvents(context.store)) {
+      if (event.endPatch !== patch || event.endStatus !== 'unsicher' || event.endUtc !== null) continue;
+      if (!resolvePatchBoundEnd(context.store, event.id, patch, input.period.value.startUtc, input.sourceUrl, input.sourceTime)) continue;
+      const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+      log.info(`Ende für „${title}“ aus der Wartung zu Patch ${patch} übernommen (Quelle: ${input.sourceUrl}).`);
+    }
+  }
+}
+
+function resolveBoundEndsFromStoredMaintenance(context: CycleContext): void {
+  for (const maintenance of getAllEvents(context.store)) {
+    if (maintenance.eventType !== 'maintenance' || maintenance.startStatus !== 'ok' || !maintenance.startUtc) continue;
+    const title = maintenance.titleStatus === 'ok' ? maintenance.title : undefined;
+    const description = maintenance.descriptionStatus === 'ok' && maintenance.description !== null ? maintenance.description : undefined;
+    if (!title && !description) continue;
+    const patches = mentionedPatches(title, description);
+    if (patches.length === 0) continue;
+    const sourceUrl = getFieldProvenanceSourceUrl(context.store, maintenance.id, 'start');
+    if (!sourceUrl) continue;
+    const source = getEventSources(context.store, maintenance.id).find((candidate) => candidate.url === sourceUrl);
+    const sourceTime = source?.publishedAt ?? source?.firstSeenAt ?? context.currentTime.toISOString();
+    for (const patch of patches) {
+      for (const event of getAllEvents(context.store)) {
+        if (event.endPatch !== patch || event.endStatus !== 'unsicher' || event.endUtc !== null) continue;
+        if (!resolvePatchBoundEnd(context.store, event.id, patch, maintenance.startUtc, sourceUrl, sourceTime)) continue;
+        const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+        log.info(`Ende für „${title}“ aus der Wartung zu Patch ${patch} übernommen (Quelle: ${sourceUrl}).`);
+      }
+    }
+  }
 }
 
 function applyGeneric(
@@ -733,7 +787,15 @@ async function processMaintenance(
 
   if (detailHtml !== undefined) {
     const result = extractMaintenance(detailHtml, entry.title);
-    applyExtract(context, eventId, sourceUrl, publishedAt(entry, context.currentTime), result, { rewardsApplicable: false });
+    const sourceTime = publishedAt(entry, context.currentTime);
+    applyExtract(context, eventId, sourceUrl, sourceTime, result, { rewardsApplicable: false });
+    resolveBoundEndsFromMaintenance(context, {
+      title: entry.title,
+      description: result.description.status === 'ok' ? result.description.value : undefined,
+      period: result.period,
+      sourceUrl,
+      sourceTime,
+    });
     finishPendingDiscovery(context, sourceUrl, eventId);
   } else {
     if (!alreadyKnown) {
@@ -976,7 +1038,15 @@ async function refreshStoredSource(context: CycleContext, event: StoreEvent, sou
   if (event.eventType === 'maintenance' || source.kind === 'maintenance' || source.kind === 'followup' || source.kind === 'feed') {
     try {
       const html = await fetchDetailPage(source.url, context.fetchText);
-      applyExtract(context, eventId, source.url, sourceMoment, extractMaintenance(html, event.title), { rewardsApplicable: false });
+      const result = extractMaintenance(html, event.title);
+      applyExtract(context, eventId, source.url, sourceMoment, result, { rewardsApplicable: false });
+      resolveBoundEndsFromMaintenance(context, {
+        title: result.title.status === 'ok' ? result.title.value : event.title,
+        description: result.description.status === 'ok' ? result.description.value : undefined,
+        period: result.period,
+        sourceUrl: source.url,
+        sourceTime: sourceMoment,
+      });
     } catch (error) {
       await logSourceFailure(context, source.url, error);
     }
@@ -1125,8 +1195,9 @@ function logEventChanges(store: Store, before: ReadonlyMap<number, StoreEvent>):
 
 function shouldPostToGuild(event: StoreEvent, guildId: string, now: Date, firstRun: boolean, store: Store): boolean {
   const object = getGuildEventObject(store, guildId, event.eventKey);
-  if (object?.firstRunSuppressed && !(event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime())) return false;
-  if (firstRun) return event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime();
+  const patchBound = hasVerifiedPatchBoundEnd(event);
+  if (object?.firstRunSuppressed && !(event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime()) && !patchBound) return false;
+  if (firstRun) return (event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime()) || patchBound;
   if (object?.messageId) return true;
   if (event.endUtc !== null && Date.parse(event.endUtc) <= now.getTime()) return false;
   return event.endStatus === 'unsicher' || event.endUtc !== null;
@@ -1318,6 +1389,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     await processBannerRail(context, lists.bannerHtml);
     await logNewUnclassifiedTopics(context);
     await refreshOpenEvents(context);
+    resolveBoundEndsFromStoredMaintenance(context);
     await warnForUnmatchedFollowups(context);
   }
   const newEvents = logEventChanges(options.store, eventsBefore);

@@ -123,6 +123,7 @@ function forumEventContent(event: StoreEvent, status: ReturnType<typeof forumEve
     const start = Math.floor(Date.parse(event.startUtc) / 1_000);
     return `🗓️ Beginnt <t:${start}:R> · <t:${start}:f>`;
   }
+  if ((event.endStatus !== 'ok' || !event.endUtc) && event.endPatch) return `⏳ Läuft bis Patch ${event.endPatch}`;
   if (event.endStatus !== 'ok' || !event.endUtc) return '⏳ Ende unbekannt – siehe Sonderseite';
   const end = Math.floor(Date.parse(event.endUtc) / 1_000);
   return `⏳ Endet <t:${end}:R> · <t:${end}:f>`;
@@ -575,15 +576,23 @@ export function syncForumEvent(options: SyncForumEventOptions): Promise<string> 
 
 function statusEmbed(events: readonly StoreEvent[], now: Date, guildId: string, store: Store): DiscordEmbed {
   const running = events
-    .filter((event) => event.startStatus === 'ok' && event.endStatus === 'ok' && event.startUtc && event.endUtc)
-    .filter((event) => Date.parse(event.startUtc!) <= now.getTime() && now.getTime() < Date.parse(event.endUtc!))
-    .sort((left, right) => Date.parse(left.endUtc!) - Date.parse(right.endUtc!) || left.title.localeCompare(right.title));
+    .filter((event) => event.startStatus === 'ok' && event.startUtc && (
+      event.endStatus === 'ok' && event.endUtc || event.endStatus === 'unsicher' && event.endPatch
+    ))
+    .filter((event) => Date.parse(event.startUtc!) <= now.getTime() && (
+      event.endStatus === 'ok' && event.endUtc ? now.getTime() < Date.parse(event.endUtc) : true
+    ))
+    .sort((left, right) => (left.endStatus === 'ok' && left.endUtc ? Date.parse(left.endUtc) : Number.POSITIVE_INFINITY) -
+      (right.endStatus === 'ok' && right.endUtc ? Date.parse(right.endUtc) : Number.POSITIVE_INFINITY) || left.title.localeCompare(right.title));
   const lines: string[] = [];
   for (const event of running) {
     const object = getGuildEventObject(store, guildId, event.eventKey);
     const title = (event.titleStatus === 'ok' ? event.title : 'FFXIV-Event').slice(0, 200).replace(/[\[\]()*_~`|>]/g, '\\$&');
     const link = object?.messageId ? `https://discord.com/channels/${guildId}/${object.messageId}` : undefined;
-    lines.push(`• ${link ? `[${title}](<${link}>)` : title} — endet <t:${Math.floor(Date.parse(event.endUtc!) / 1_000)}:R>`);
+    const ending = event.endStatus === 'ok' && event.endUtc
+      ? `endet <t:${Math.floor(Date.parse(event.endUtc) / 1_000)}:R>`
+      : `bis Patch ${event.endPatch}`;
+    lines.push(`• ${link ? `[${title}](<${link}>)` : title} — ${ending}`);
   }
   const overflow = '… Weitere Events sind im Event-Kanal aufgeführt.';
   while (lines.join('\n').length > MAX_EMBED_DESCRIPTION - overflow.length - 1) lines.pop();

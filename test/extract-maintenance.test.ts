@@ -47,3 +47,14 @@ test('missing the date and time label does not fall back to other article times'
 
   assert.equal(result.period.status, 'unsicher');
 });
+
+test('the synthetic Patch 8.0 notice supplies a verified maintenance start and patch wording in its body', () => {
+  const html = fixture('./fixtures/maintenance/patch-8.0-verified.html');
+  const result = extractMaintenance(html);
+  assert.deepEqual(result.period, {
+    status: 'ok',
+    value: { startUtc: '2026-11-03T02:00:00Z', endUtc: '2026-11-03T04:00:00Z' },
+  });
+  assert.equal(result.description.status, 'ok');
+  if (result.description.status === 'ok') assert.match(result.description.value, /Patch 8\.0/);
+});

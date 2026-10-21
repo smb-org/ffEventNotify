@@ -4,12 +4,12 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { applyField, cacheItem, createEvent, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, cacheItem, createEvent, getAllEvents, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
 import {
   MAX_CHARS, WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, getOrCreateToken, getReminderRecipients,
   listChars, recordUserGuild, renameChar, reorderChars, rotateToken, setCharRemind, setItemDone,
 } from '../src/web/data.ts';
-import { eventHash } from '../src/web/render.ts';
+import { eventHash, renderPage } from '../src/web/render.ts';
 import { createWebServer } from '../src/web/server.ts';
 import { createTokenCodec } from '../src/web/token.ts';
 
@@ -134,7 +134,7 @@ test('migration turns old per-guild checklist rows into a Hauptchar', () => {
     db.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
     const one = listChars(db, 'user-1');
     assert.deepEqual(one.map(({ name, remind }) => [name, remind]), [['Hauptchar', true]]);
     assert.deepEqual([...getDoneKeys(db, 'user-1')].sort(), [`${one[0]!.id}|${eventKey}|m-1`, `${one[0]!.id}|${eventKey}|m-2`]);
@@ -234,6 +234,22 @@ test('the overview lists running and announced events by end date, archive last,
     assert.ok(!/\.tablewrap\s*\{[^}]*max-height/.test(css), 'no inner vertical scroll');
 
   });
+});
+
+test('a patch-bound event stays in the current checklist with its German open-end period', async () => {
+  const db = fresh();
+  try {
+    seedEvent(db, 'known', 'Bekanntes Ende', '2026-11-20T14:59:00.000Z');
+    const { eventKey } = seedEvent(db, 'keybound', 'Tastenschläger', '2026-11-20T14:59:00.000Z', 3, '2026-10-28T08:00:00.000Z');
+    db.prepare("UPDATE events SET end_utc = NULL, end_status = 'unsicher', end_reason = ?, end_patch = '8.0' WHERE event_key = ?")
+      .run('Wird mit der Wartung zu Patch 8.0 festgelegt.', eventKey);
+    const html = renderPage({ store: db, events: getAllEvents(db), chars: [], done: new Set(), now: NOW });
+    assert.ok(html.includes('ab 28.10.2026 09:00 bis Patch 8.0'));
+    assert.ok(html.indexOf('Bekanntes Ende') < html.indexOf('Tastenschläger'));
+    assert.ok(html.includes('angekündigt'));
+  } finally {
+    db.close();
+  }
 });
 
 test('tabs: one per running event plus Archiv, selection by URL, escaped labels', async () => {

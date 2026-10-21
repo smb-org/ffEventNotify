@@ -43,6 +43,8 @@ function timeFields(event: StoreEvent): EmbedField[] {
       { name: 'Ende', value: timestamp(event.endUtc, 'f'), inline: true },
       { name: 'Endet', value: timestamp(event.endUtc, 'R'), inline: true },
     );
+  } else if (event.endStatus === 'unsicher' && event.endPatch) {
+    fields.push({ name: 'Ende', value: `mit der Wartung zu Patch ${event.endPatch} (Datum folgt)`, inline: true });
   }
   return fields;
 }

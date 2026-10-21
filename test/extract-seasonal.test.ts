@@ -119,6 +119,46 @@ test('Fall Guys parses every historical period and selects the period running at
   assert.equal(hasPeriod(html, NOW), 'yes');
 });
 
+test('a patch maintenance end is a selectable event period for all approved German phrasings', async () => {
+  const starts = 'Mittwoch, den 28. Oktober 2026 um 9:00 Uhr (MEZ)';
+  const variants = [
+    'bis zu den Wartungsarbeiten für Patch 8.0',
+    'bis zur Wartung für Patch 8.0',
+    'bis zur Wartung der Welten für Patch 8.0',
+    'bis zum Beginn der Wartungsarbeiten für Patch 8.0',
+  ];
+  for (const end of variants) {
+    const result = await extract(`<main><p>Von ${starts} ${end}</p></main>`);
+    const expectedPeriod = { startUtc: '2026-10-28T08:00:00Z', endUtc: null, endPatch: '8.0' };
+    assert.deepEqual(result.period, { status: 'ok', value: expectedPeriod }, end);
+    assert.deepEqual(result.periods, { status: 'ok', value: [expectedPeriod] }, end);
+    assert.deepEqual(result.eventState, { status: 'ok', value: 'upcoming' }, end);
+    assert.equal(hasPeriod(`<main><p>Von ${starts} ${end}</p></main>`, NOW), 'yes', end);
+  }
+});
+
+test('the Tastenschläger page resolves its patch-bound start and all twenty exchange rewards', async () => {
+  const html = fixture('./fixtures/special/keybound-202610.html');
+  const expectedPage = expected('keybound-202610.json');
+  const result = await extract(html);
+
+  assert.deepEqual(result.period, { status: 'ok', value: expectedPage.period });
+  assert.deepEqual(result.eventState, { status: 'ok', value: 'upcoming' });
+  assert.equal(result.rewards.status, 'ok');
+  if (result.rewards.status === 'ok') assert.deepEqual(result.rewards.value, expectedPage.rewards);
+  assert.equal(expectedPage.rewards.length, 20);
+  assert.deepEqual([...new Set(expectedPage.rewards.map(({ section }: any) => section))], ['Eintauschbare Gegenstände']);
+  assert.deepEqual([...new Set(expectedPage.rewards.map(({ cost }: any) => cost))].sort(), ['190 MGM', '260 MGM', '430 MGM', '910 MGM']);
+});
+
+test('a date with an unrelated open-end phrase stays uncertain', async () => {
+  for (const end of ['bis auf Weiteres', 'bis zur Wartung für Patch 8.0 geplant']) {
+    const result = await extract(`<main><p>Von Mittwoch, den 28. Oktober 2026 um 9:00 Uhr (MEZ) ${end}</p></main>`);
+    assert.equal(result.period.status, 'unsicher', end);
+    assert.equal(result.eventState.status, 'unsicher', end);
+  }
+});
+
 test('one bad historical timezone label keeps the 2026 Fall Guys page seasonal', async () => {
   const html = fixture('./fixtures/special/fallguys.html')
     .replace('27. November 2025 um 15:59 Uhr (MEZ)', '27. November 2025 um 15:59 Uhr (MESZ)');
