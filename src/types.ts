@@ -17,6 +17,12 @@ export interface Period {
   endUtc: string;
 }
 
+export interface PatchBoundPeriod {
+  startUtc: string;
+  endUtc: null;
+  endPatch: string;
+}
+
 export interface Reward {
   itemId: string;
   name: string;
@@ -34,13 +40,14 @@ export interface ResolvedItem {
 export interface SeasonalPeriod {
   startUtc: string;
   endUtc: string | null;
+  endPatch?: string;
 }
 
 export type SeasonalEventState = 'active' | 'upcoming' | 'ended' | 'not-an-event' | 'ambiguous';
 
 export interface ExtractResult {
   title: FieldStatus<string>;
-  period: FieldStatus<Period>;
+  period: FieldStatus<Period | PatchBoundPeriod>;
   rewards: FieldStatus<Reward[]> | NotApplicable;
   description: FieldStatus<string>;
 }

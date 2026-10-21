@@ -6,6 +6,7 @@ import { isAllowedSpecialImageUrl } from '../store.ts';
 import { parseGermanDateTime, type BerlinTimezoneLabel } from '../time.ts';
 import type {
   FieldStatus,
+  PatchBoundPeriod,
   Period,
   PeriodEvidence,
   Reward,
@@ -29,12 +30,15 @@ interface ParsedPeriods {
 interface RewardGroup {
   node: any;
   section: string;
+  cost?: string;
 }
 
 export type SeasonalPeriodExtraction = Pick<SeasonalExtractResult, 'period' | 'periods' | 'eventState'>;
 
-const dateTimePrefix = /^(?:(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag),?\s*)?(?:den\s+)?(\d{1,2})\.\s*([\p{L}]+)\.?\s+(\d{4})\s+um\s+(\d{1,2})(?::(\d{2}))?\s*(?:Uhr)?\s*(?:\((MESZ|MEZ)\))?/iu;
+const dateTimePrefix = /^(?:(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag),?\s*)?(?:den\s+)?(\d{1,2})\.\s*([\p{L}]+|\d{1,2})\.?\s+(\d{4})\s+um\s+(\d{1,2})(?::(\d{2}))?\s*(?:Uhr)?\s*(?:\((MESZ|MEZ)\))?/iu;
 const itemHref = /\/lodestone\/playguide\/db\/item\/([A-Za-z0-9_-]+)\/?(?:[?#].*)?$/i;
+const germanMonths = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const patchEnd = /^(?:(?:zu den Wartungsarbeiten|zum Beginn der Wartungsarbeiten)\s+für|zur Wartung(?:sarbeiten)?(?:\s+[\p{L}\p{N}'’().,–—…-]+)*)\s+Patch\s+(\d+\.\d+)[.!]?$/iu;
 
 function normalizedText(value: string): string {
   return value
@@ -59,7 +63,7 @@ function periodTexts(html: string): string[] {
     const content = $(element).attr('content');
     if (content) texts.push(normalizedText(content));
   });
-  $('.content__span__period, .content__span, .content__section, .fgs__contents, .fgs__history, .news__detail__wrapper').each((_, element) => {
+  $('.content__span__period, .content__span, .content__section, .fgs__contents, .fgs__history, .ktg__overview__period, .news__detail__wrapper').each((_, element) => {
     const markup = ($(element).html() ?? '').replace(/<br\s*\/?>/gi, ' ');
     const text = nodeText(markup);
     if (/\bVon\b/i.test(text)) texts.push(text);
@@ -77,7 +81,9 @@ function periodTexts(html: string): string[] {
 function parseDateTimePrefix(value: string): DateTimePrefix | undefined {
   const match = dateTimePrefix.exec(value);
   if (!match) return undefined;
-  const date = `${Number(match[1])}. ${match[2]} ${match[3]}`;
+  const monthText = /^\d{1,2}$/.test(match[2]!) ? germanMonths[Number(match[2]) - 1] : match[2];
+  if (!monthText) return undefined;
+  const date = `${Number(match[1])}. ${monthText} ${match[3]}`;
   const time = `${Number(match[4])}:${match[5] ?? '00'}`;
   const parsed: DateTimePrefix = { date, time, length: match[0].length };
   if (match[6] !== undefined) parsed.label = match[6] as BerlinTimezoneLabel;
@@ -123,6 +129,7 @@ function parsePeriods(html: string): ParsedPeriods {
         continue;
       }
 
+      const boundPatch = patchEnd.exec(endText)?.[1];
       const end = parseDateTimePrefix(endText.replace(/^(?:(?:zu|zum|zur)\s+)+/i, ''));
       let endUtc: string | null = null;
       if (end) {
@@ -136,10 +143,10 @@ function parsePeriods(html: string): ParsedPeriods {
         errors.push('Das angegebene Zeitraumende konnte nicht gelesen werden.');
       }
 
-      const key = `${startUtc.value}|${endUtc ?? '<open>'}`;
+      const key = `${startUtc.value}|${endUtc ?? `<open:${boundPatch ?? ''}>`}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      result.push({ startUtc: startUtc.value, endUtc });
+      result.push({ startUtc: startUtc.value, endUtc, ...(boundPatch ? { endPatch: boundPatch } : {}) });
     }
   }
 
@@ -159,11 +166,73 @@ function titleStatus(html: string): FieldStatus<string> {
 function contentRoot($: ReturnType<typeof load>): any {
   const fallGuys = $('.fgs').first();
   if (fallGuys.length) return fallGuys;
-  const content = $('.content, .content__section, .content__wrapper, .content__main-art').filter((_, element) =>
+  const content = $('.ktg, .content, .content__section, .content__wrapper, .content__main-art').filter((_, element) =>
     $(element).find('a[href*="/lodestone/playguide/db/item/"]').length > 0,
   ).first();
   if (content.length) return content;
-  return $('main').first();
+  return $('main').first().length ? $('main').first() : $('body').first();
+}
+
+function rewardRowsFromGenericMarkup($: ReturnType<typeof load>, root: any): FieldStatus<RewardGroup[]> {
+  const groups: RewardGroup[] = [];
+  const candidates: any[] = [];
+  root.find('tr, li').each((_: number, element: any) => { candidates.push(element); });
+  for (const element of candidates) {
+    const node = $(element);
+    const links: any[] = [];
+    node.find('a[href]').each((_: number, link: any) => {
+      if (itemHref.test($(link).attr('href') ?? '')) links.push(link);
+    });
+    if (links.length === 0) continue;
+    if (links.length !== 1) return { status: 'unsicher', reason: 'Eine Belohnungszeile enthält mehr als einen Gegenstandslink.' };
+    const iconCount = node.find('img[src*="/itemicon/"]').length;
+    if (iconCount !== 1) return { status: 'unsicher', reason: `Ein Belohnungslink hat ${iconCount} passende Gegenstands-Icons statt genau einem.` };
+
+    const table = node.closest('table');
+    const headers = table.find('thead tr').first().children('th, td');
+    const section = normalizedText(headers.first().text()) || precedingHeading($, node);
+    const cost = genericRowCost($, node, links[0], headers);
+    groups.push({ node, section: section || 'Belohnungen', ...(cost ? { cost } : {}) });
+  }
+  return { status: 'ok', value: groups };
+}
+
+function precedingHeading($: ReturnType<typeof load>, node: any): string {
+  const selectors = 'h1, h2, h3, h4, h5, h6';
+  const table = node.closest('table');
+  const previous = (table.length ? table : node).prevAll(selectors).first();
+  if (previous.length) return normalizedText(previous.text());
+  const parent = node.parent();
+  return normalizedText(parent.prevAll(selectors).first().text());
+}
+
+function genericRowCost($: ReturnType<typeof load>, row: any, itemLink: any, headers: any): string | undefined {
+  const cells = row.children('td, th');
+  let itemCell = -1;
+  let numericCell = -1;
+  let numericText: string | undefined;
+  cells.each((index: number, element: any) => {
+    const cell = $(element);
+    if (cell.find(itemLink).length > 0) itemCell = index;
+    const text = normalizedText(cell.text());
+    if (index !== itemCell && /^\d[\d.,]*$/.test(text)) {
+      if (numericCell !== -1) {
+        numericCell = -2;
+        return;
+      }
+      numericCell = index;
+      numericText = text;
+    }
+  });
+  if (numericCell < 0 || numericText === undefined) return undefined;
+  const header = normalizedText(headers.eq(numericCell).text());
+  if (!header) return undefined;
+  const needsUnit = /^Benötigte\s+/i.test(header);
+  const unit = header.replace(/^Benötigte\s+/i, '').trim();
+  if (needsUnit && unit) return `${numericText} ${unit}`;
+  if (/^(?:MGM|MGP|Gil|Gils|Steine|Token|Marken|Punkte|Münzen)$/i.test(header)) return `${numericText} ${header}`;
+  if (/(?:kosten|preis|benötig|rate|menge|aufwand|punkte|token|stein|mgm|mgp)/i.test(header)) return numericText;
+  return undefined;
 }
 
 function rewardGroups($: ReturnType<typeof load>, root: any): RewardGroup[] {
@@ -202,7 +271,13 @@ function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: s
   const root = contentRoot($);
   if (!root.length) return { status: 'unsicher', reason: 'Der Inhaltsbereich der Sonderseite wurde nicht gefunden.' };
 
-  const groups = rewardGroups($, root);
+  let groups = rewardGroups($, root);
+  const genericFallback = groups.length === 0;
+  if (genericFallback) {
+    const fallback = rewardRowsFromGenericMarkup($, root);
+    if (fallback.status === 'unsicher') return fallback;
+    groups = fallback.value;
+  }
   if (groups.length === 0) return { status: 'unsicher', reason: 'Es wurden keine erkennbaren Überschriften für Belohnungsabschnitte gefunden.' };
   const rewards: Array<{ itemId: string; section: string; cost?: string }> = [];
   const representedLinks = new Set<any>();
@@ -233,7 +308,7 @@ function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: s
       const row = $(link).closest('tr');
       const tokenText = normalizedText(row.find('.item__list__token').first().text());
       const tokenLabel = normalizedText(group.node.find('.item__list__head_num .pc_view').first().text());
-      const cost = tokenText ? (tokenLabel ? `${tokenText} ${tokenLabel}` : tokenText) : undefined;
+      const cost = group.cost ?? (tokenText ? (tokenLabel ? `${tokenText} ${tokenLabel}` : tokenText) : undefined);
       rewards.push({ itemId, section: group.section, ...(cost ? { cost } : {}) });
     }
   }
@@ -251,7 +326,7 @@ function rewardIds(html: string): FieldStatus<Array<{ itemId: string; section: s
 function selectPeriod(
   periods: readonly SeasonalPeriod[],
   now: Date,
-): { period: FieldStatus<Period>; eventState: FieldStatus<SeasonalEventState> } {
+): { period: FieldStatus<Period | PatchBoundPeriod>; eventState: FieldStatus<SeasonalEventState> } {
   const timestamp = now.getTime();
   if (!Number.isFinite(timestamp)) {
     return {
@@ -262,7 +337,8 @@ function selectPeriod(
 
   const complete = periods.filter((period): period is Period => period.endUtc !== null);
   const running = complete.filter((period) => Date.parse(period.startUtc) <= timestamp && timestamp < Date.parse(period.endUtc));
-  if (running.length > 1) {
+  const runningPatchBound = periods.filter((period) => period.endUtc === null && period.endPatch !== undefined && Date.parse(period.startUtc) <= timestamp);
+  if (running.length + runningPatchBound.length > 1) {
     return {
       period: { status: 'unsicher', reason: 'Zum Bezugszeitpunkt laufen mehrere Zeiträume gleichzeitig.' },
       eventState: { status: 'ok', value: 'ambiguous' },
@@ -274,10 +350,35 @@ function selectPeriod(
       eventState: { status: 'ok', value: 'active' },
     };
   }
+  if (runningPatchBound.length === 1) {
+    const period = runningPatchBound[0]!;
+    return {
+      period: { status: 'ok', value: { startUtc: period.startUtc, endUtc: null, endPatch: period.endPatch! } },
+      eventState: { status: 'ok', value: 'active' },
+    };
+  }
+
+  const upcomingPatchBound = periods.filter((period) => period.endUtc === null && period.endPatch !== undefined && Date.parse(period.startUtc) > timestamp)
+    .sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc));
+  const upcomingUnknown = periods.some((period) => period.endUtc === null && period.endPatch === undefined && Date.parse(period.startUtc) <= timestamp);
+  if (upcomingUnknown) {
+    const reason = 'Ein möglicherweise noch laufender Zeitraum hat kein bekanntes Ende.';
+    return { period: { status: 'unsicher', reason }, eventState: { status: 'unsicher', reason } };
+  }
 
   const upcoming = complete
     .filter((period) => Date.parse(period.startUtc) > timestamp)
     .sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc));
+  if (upcoming.length > 0 && upcomingPatchBound.length > 0) {
+    const firstComplete = upcoming[0]!;
+    const firstPatchBound = upcomingPatchBound[0]!;
+    if (Date.parse(firstPatchBound.startUtc) <= Date.parse(firstComplete.startUtc)) {
+      return {
+        period: { status: 'ok', value: { startUtc: firstPatchBound.startUtc, endUtc: null, endPatch: firstPatchBound.endPatch! } },
+        eventState: { status: 'ok', value: 'upcoming' },
+      };
+    }
+  }
   if (upcoming.length > 0) {
     const earliest = upcoming[0]!;
     const openBeforeNext = periods.some((period) =>
@@ -289,6 +390,14 @@ function selectPeriod(
     }
     return {
       period: { status: 'ok', value: earliest },
+      eventState: { status: 'ok', value: 'upcoming' },
+    };
+  }
+
+  if (upcomingPatchBound.length > 0) {
+    const period = upcomingPatchBound[0]!;
+    return {
+      period: { status: 'ok', value: { startUtc: period.startUtc, endUtc: null, endPatch: period.endPatch! } },
       eventState: { status: 'ok', value: 'upcoming' },
     };
   }
@@ -345,6 +454,7 @@ export function hasPeriod(html: string, now: Date = new Date()): PeriodEvidence 
   const timestamp = now.getTime();
   const datedStart = hasDatedStart(periodTexts(html));
   if (parsed.problem !== undefined) return datedStart ? 'unsicher' : 'no';
+  if (parsed.periods.some((period) => period.endPatch !== undefined)) return 'yes';
   if (parsed.periods.some((period) => period.endUtc !== null && Date.parse(period.endUtc) > timestamp)) {
     return 'yes';
   }

@@ -10,7 +10,8 @@ import type { FetchText } from '../src/types.ts';
 const readFixture = (path: string): string => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const expectedSaints = JSON.parse(readFixture('./fixtures/expected/all-saints-wake-2026.json'));
 const expectedMogmog = JSON.parse(readFixture('./fixtures/expected/mogmog-202609.json'));
-const expectedRewards = [...expectedSaints.rewards, ...expectedMogmog.rewards];
+const expectedKeybound = JSON.parse(readFixture('./fixtures/expected/keybound-202610.json'));
+const expectedRewards = [...expectedSaints.rewards, ...expectedMogmog.rewards, ...expectedKeybound.rewards];
 
 function fixtureFetch(counter?: { count: number }): FetchText {
   return async (url) => {
@@ -26,9 +27,9 @@ function fixtureFetch(counter?: { count: number }): FetchText {
   };
 }
 
-test('all 38 compressed item fixtures resolve the expected German names and icons', async () => {
+test('all 58 compressed item fixtures resolve the expected German names and icons', async () => {
   const ids = readdirSync(fileURLToPath(new URL('./fixtures/items/', import.meta.url))).filter((name) => name.endsWith('.html.gz'));
-  assert.equal(ids.length, 38);
+  assert.equal(ids.length, 58);
   assert.deepEqual(new Set(expectedRewards.map((reward: any) => `${reward.itemId}.html.gz`)), new Set(ids));
 
   const store = openDb(':memory:');

@@ -27,9 +27,14 @@ async function statusEmbed(
 ): Promise<DiscordEmbed> {
   const nowMs = now.getTime();
   const running = events
-    .filter((event) => event.startStatus === 'ok' && event.endStatus === 'ok' && event.startUtc !== null && event.endUtc !== null)
-    .filter((event) => Date.parse(event.startUtc!) <= nowMs && nowMs < Date.parse(event.endUtc!))
-    .sort((left, right) => Date.parse(left.endUtc!) - Date.parse(right.endUtc!) || left.title.localeCompare(right.title));
+    .filter((event) => event.startStatus === 'ok' && event.startUtc !== null && (
+      event.endStatus === 'ok' && event.endUtc !== null || event.endStatus === 'unsicher' && event.endPatch !== null
+    ))
+    .filter((event) => Date.parse(event.startUtc!) <= nowMs && (
+      event.endStatus === 'ok' && event.endUtc ? nowMs < Date.parse(event.endUtc) : true
+    ))
+    .sort((left, right) => (left.endStatus === 'ok' && left.endUtc ? Date.parse(left.endUtc) : Number.POSITIVE_INFINITY) -
+      (right.endStatus === 'ok' && right.endUtc ? Date.parse(right.endUtc) : Number.POSITIVE_INFINITY) || left.title.localeCompare(right.title));
   const lines: string[] = [];
   for (const event of running) {
     const displayTitle = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
@@ -44,7 +49,10 @@ async function statusEmbed(
       }
     }
     const linkedTitle = cardLink ? `[${title}](<${cardLink}>)` : title;
-    lines.push(`• ${linkedTitle} — endet <t:${Math.floor(Date.parse(event.endUtc!) / 1_000)}:R>`);
+    const ending = event.endStatus === 'ok' && event.endUtc
+      ? `endet <t:${Math.floor(Date.parse(event.endUtc) / 1_000)}:R>`
+      : `bis Patch ${event.endPatch}`;
+    lines.push(`• ${linkedTitle} — ${ending}`);
   }
   const overflow = '… Weitere Events sind im Event-Kanal aufgeführt.';
   let description = lines.join('\n');
