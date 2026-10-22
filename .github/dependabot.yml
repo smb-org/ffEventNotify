@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Keeps the pinned Node base image in the Dockerfile on the latest patch.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
