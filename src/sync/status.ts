@@ -1,7 +1,7 @@
 // Keeps the single pinned live status message current without needless edits.
 
 import type { StoreEvent } from '../store.ts';
-import { deliverWarning, getGuild, getGuildEventObject, setGuildStatusMessage, type Store } from '../store.ts';
+import { deliverWarning, getGuild, getGuildEventObject, isEventRetracting, setGuildStatusMessage, type Store } from '../store.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import { hasEventMarkerUrl } from '../event-identity.ts';
 import type { DiscordEmbed, DiscordMessageSnapshot, DiscordPort } from '../types.ts';
@@ -27,6 +27,7 @@ async function statusEmbed(
 ): Promise<DiscordEmbed> {
   const nowMs = now.getTime();
   const running = events
+    .filter((event) => !isEventRetracting(store, event.id))
     .filter((event) => event.startStatus === 'ok' && event.startUtc !== null && (
       event.endStatus === 'ok' && event.endUtc !== null || event.endStatus === 'unsicher' && event.endPatch !== null
     ))
@@ -78,8 +79,8 @@ async function syncLiveStatusPostUnlocked({
   suppressLogs = false,
   guildId,
 }: SyncLiveStatusOptions): Promise<void> {
-  const desired = await statusEmbed(events, now, guildId, channelId, store, discord);
-  const payload = { embeds: [desired] };
+  let desired = await statusEmbed(events, now, guildId, channelId, store, discord);
+  let payload = { embeds: [desired] };
   const guild = getGuild(store, guildId);
   let existing: DiscordMessageSnapshot | null = null;
   if (guild?.statusMessageId) {
@@ -104,6 +105,8 @@ async function syncLiveStatusPostUnlocked({
   }
 
   if (!existing) {
+    desired = await statusEmbed(events, now, guildId, channelId, store, discord);
+    payload = { embeds: [desired] };
     const created = await discord.createMessage(channelId, payload);
     await discord.pinMessage(channelId, created.id);
     setGuildStatusMessage(store, guildId, created.id);
@@ -118,6 +121,8 @@ async function syncLiveStatusPostUnlocked({
   const current = existing.embeds.find((embed) => embed.title === 'Läuft gerade');
   if (!existing.pinned) await discord.pinMessage(channelId, existing.id);
   setGuildStatusMessage(store, guildId, existing.id);
+  desired = await statusEmbed(events, now, guildId, channelId, store, discord);
+  payload = { embeds: [desired] };
   if (current && !sameEmbed(current, desired)) {
     await discord.editMessage(channelId, existing.id, payload);
   }

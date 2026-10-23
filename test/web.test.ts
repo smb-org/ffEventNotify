@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { applyField, cacheItem, createEvent, getAllEvents, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, cacheItem, createEvent, getAllEvents, markEventRetracting, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
 import {
   MAX_CHARS, WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, getOrCreateToken, getReminderRecipients,
   listChars, recordUserGuild, renameChar, reorderChars, rotateToken, setCharRemind, setItemDone,
@@ -134,7 +134,7 @@ test('migration turns old per-guild checklist rows into a Hauptchar', () => {
     db.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
     const one = listChars(db, 'user-1');
     assert.deepEqual(one.map(({ name, remind }) => [name, remind]), [['Hauptchar', true]]);
     assert.deepEqual([...getDoneKeys(db, 'user-1')].sort(), [`${one[0]!.id}|${eventKey}|m-1`, `${one[0]!.id}|${eventKey}|m-2`]);
@@ -234,6 +234,20 @@ test('the overview lists running and announced events by end date, archive last,
     assert.ok(!/\.tablewrap\s*\{[^}]*max-height/.test(css), 'no inner vertical scroll');
 
   });
+});
+
+test('the web checklist excludes events marked retracting', () => {
+  const db = fresh();
+  try {
+    const { eventKey } = seedEvent(db, 'retracting', 'Zurückgezogenes Event', '2026-10-20T14:59:00.000Z');
+    const event = getAllEvents(db).find((candidate) => candidate.eventKey === eventKey)!;
+    markEventRetracting(db, event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+
+    const html = renderPage({ store: db, events: getAllEvents(db), chars: [], done: new Set(), now: NOW });
+    assert.doesNotMatch(html, /Zurückgezogenes Event/);
+  } finally {
+    db.close();
+  }
 });
 
 test('a patch-bound event stays in the current checklist with its German open-end period', async () => {

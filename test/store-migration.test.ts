@@ -19,7 +19,7 @@ test('v1 schema migrates idempotently, preserving warnings while ignoring legacy
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
     assert.ok((db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'short_links'").get()));
     assert.equal((db.prepare('SELECT key FROM legacy_warnings_sent_v1').get() as { key: string }).key, 'legacy-warning-key');
     assert.deepEqual((db.prepare('PRAGMA table_info(warnings_sent)').all() as Array<{ name: string }>).map(({ name }) => name), [
@@ -31,6 +31,9 @@ test('v1 schema migrates idempotently, preserving warnings while ignoring legacy
     assert.equal((db.prepare('SELECT status FROM warnings_sent WHERE key = ?').get('legacy-warning-key') as { status: string }).status, 'sent');
     assert.equal(getGuildEventObject(db, 'legacy-server', 'legacy:event'), undefined);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM legacy_discord_refs').get() as { count: number }).count, 1);
+    const eventColumns = new Set((db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>).map(({ name }) => name));
+    assert.ok(eventColumns.has('retracted_at'));
+    assert.ok(eventColumns.has('retraction_reason'));
     db.close();
     db = undefined;
 
@@ -56,10 +59,39 @@ test('v9 schema adds the patch-bound end column without changing existing event 
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
     assert.ok((db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>).some(({ name }) => name === 'end_patch'));
     assert.ok((db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>).some(({ name }) => name === 'end_patch_source_url'));
     assert.equal((db.prepare('SELECT title FROM events WHERE event_key = ?').get('legacy:event') as { title: string }).title, 'Vorhandenes Event');
+  } finally {
+    db?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('v10 schema adds retraction state without changing existing event data', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ffeventnotify-v10-migration-'));
+  const path = join(directory, 'v10.sqlite');
+  let db: ReturnType<typeof openDb> | undefined;
+  try {
+    db = openDb(path);
+    db.prepare('INSERT INTO events (event_key, event_type, title) VALUES (?, ?, ?)')
+      .run('existing:event', 'topic-generic', 'Vorhandenes Event');
+    db.close();
+    db = undefined;
+
+    const seeded = new DatabaseSync(path);
+    seeded.exec(`ALTER TABLE events DROP COLUMN retraction_reason;
+      ALTER TABLE events DROP COLUMN retracted_at;
+      UPDATE schema_version SET version = 10;`);
+    seeded.close();
+
+    db = openDb(path);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
+    const columns = new Set((db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string }>).map(({ name }) => name));
+    assert.ok(columns.has('retracted_at'));
+    assert.ok(columns.has('retraction_reason'));
+    assert.equal((db.prepare('SELECT title FROM events WHERE event_key = ?').get('existing:event') as { title: string }).title, 'Vorhandenes Event');
   } finally {
     db?.close();
     rmSync(directory, { recursive: true, force: true });
@@ -90,7 +122,7 @@ test('v2 schema adds event post attempts and preserves legacy batch reminder del
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>)
       .some(({ name }) => name === 'first_post_attempt_at'));
     assert.equal((db.prepare('SELECT batch_key FROM legacy_reminder_deliveries_v2').get() as { batch_key: string }).batch_key, 'old-batch');
@@ -121,7 +153,7 @@ test('v4 schema migration adds forum continuation metadata without changing guil
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'reminder_thread_id'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'continuation_message_ids'));
     assert.equal((db.prepare('SELECT message_id AS messageId, reminder_thread_id AS reminderThreadId FROM guild_event_objects').get() as { messageId: string; reminderThreadId: string | null }).messageId, 'card');
@@ -157,7 +189,7 @@ test('v6 schema adds keep-alive timestamps for event and status forum posts', ()
     seeded.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
     assert.ok((db.prepare('PRAGMA table_info(guilds)').all() as Array<{ name: string }>).some(({ name }) => name === 'status_last_keepalive_at'));
     assert.ok((db.prepare('PRAGMA table_info(guild_event_objects)').all() as Array<{ name: string }>).some(({ name }) => name === 'last_keepalive_at'));
     assert.equal((db.prepare('SELECT message_id AS messageId, last_keepalive_at AS lastKeepaliveAt FROM guild_event_objects').get() as { messageId: string; lastKeepaliveAt: string | null }).messageId, 'post');

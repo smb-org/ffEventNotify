@@ -79,13 +79,15 @@ export async function addSidebarFollowersToEventPost(options: {
   guildId: string;
   threadId: string;
   event: Pick<StoreEvent, 'endStatus' | 'endUtc'>;
+  shouldContinue?: () => boolean;
   now?: Date;
 }): Promise<void> {
-  const { db, discord, guildId, threadId, event } = options;
+  const { db, discord, guildId, threadId, event, shouldContinue = () => true } = options;
   const now = options.now ?? new Date();
   if (!discord.addThreadMember || isEnded(event, now)) return;
 
   for (const userId of getGuildSidebarFollowUserIds(db, guildId)) {
+    if (!shouldContinue()) return;
     const result = await runMemberOperation(db, guildId, userId, 'add', threadId, discord);
     if (result === 'left') continue;
   }

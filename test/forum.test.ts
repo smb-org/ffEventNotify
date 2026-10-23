@@ -10,6 +10,7 @@ import {
   getGuildEventObject,
   getGuildSidebarFollowUserIds,
   isGuildSidebarFollowEnabled,
+  markEventRetracting,
   openDb,
   setGuildSidebarFollow,
   setGuildEventLastKeepaliveAt,
@@ -757,6 +758,38 @@ test('a 50083 from an edit unarchives once and retries when the fetched archive 
     assert.deepEqual(discord.operations, ['set-tags', 'edit-starter-50083', 'unarchive', 'edit-starter', 'archive']);
     assert.equal(discord.starterEditAttempts, 2);
     assert.equal(discord.posts.get(postId)?.archived, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('an archived edit retry stops if retraction is marked while the post is unarchived', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/retracting-archive';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/retracting-archive', eventType: 'seasonal-special',
+    title: 'Archiviertes Event', sourceUrl: url, startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    discord.posts.get(postId)!.archived = true;
+    discord.staleArchiveSnapshot = true;
+    discord.failFirstStarterEditWith50083 = true;
+    applyField(db, event.id, 'end', { status: 'ok', value: '2026-10-15T14:59:00.000Z' }, url);
+    const ended = getAllEvents(db).find((candidate) => candidate.id === event.id)!;
+    const setArchived = discord.setForumPostArchived.bind(discord);
+    discord.setForumPostArchived = async (threadId, archived) => {
+      await setArchived(threadId, archived);
+      if (!archived) markEventRetracting(db, event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+    };
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
+
+    assert.equal(discord.starterEditAttempts, 1);
+    assert.equal(discord.operations.includes('edit-starter'), false);
   } finally {
     db.close();
   }

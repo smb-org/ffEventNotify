@@ -18,8 +18,16 @@ import {
   getGuildEventObject,
   getGuild,
   getPendingWarnings,
+  getRetractingEvents,
+  getGuildEventObjectsForEvent,
+  getStoredGuildIds,
+  getSeenClassification,
   isSeen,
+  isEventRetracting,
   isFirstRun,
+  clearEventRetraction,
+  markEventRetracting,
+  deleteEvent,
   markGuildFirstRunDone,
   markGuildEventFirstRunSuppressed,
   markGuildNeedsSetup,
@@ -58,6 +66,7 @@ import { syncEventEmbed } from './sync/embed.ts';
 import { syncScheduledEvent } from './sync/scheduled.ts';
 import { syncLiveStatusPost } from './sync/status.ts';
 import { syncForumEvent, syncForumStatus } from './sync/forum.ts';
+import { deleteGuildEventObjects } from './sync/retract.ts';
 import { withGuildDiscordLock } from './guild-lock.ts';
 import { briefError, guildLabel, log, snapshotActions } from './log.ts';
 import { SourceHealthMonitor } from './health.ts';
@@ -160,6 +169,8 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
   pendingFollowupWarnings: Array<{ eventId: number; entry: ListEntry; ambiguity: 'missing' | 'multiple' }>;
   specialPages: Map<string, Promise<string | undefined>>;
   pendingDiscoveries: Map<string, PendingDiscovery>;
+  pendingRetractions: Map<string, string>;
+  allowRetractions: boolean;
 }
 
 interface PendingDiscovery {
@@ -350,9 +361,15 @@ async function readLists(context: CycleContext, firstRun: boolean): Promise<Load
 }
 
 async function logWarning(context: CycleContext, key: string, message: string, targetGuildId?: string): Promise<void> {
-  const recipients = targetGuildId === undefined
+  let recipients = targetGuildId === undefined
     ? context.guilds
     : context.guilds.filter((guild) => guild.guildId === targetGuildId);
+  if (targetGuildId !== undefined && recipients.length === 0) {
+    const stored = getGuild(context.store, targetGuildId);
+    if (stored?.logChannelId) {
+      recipients = [{ guildId: targetGuildId, eventChannelId: stored.eventChannelId ?? '', logChannelId: stored.logChannelId, firstRun: !stored.firstRunDone }];
+    }
+  }
   for (const guild of recipients) {
     try {
       await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
@@ -363,15 +380,38 @@ async function logWarning(context: CycleContext, key: string, message: string, t
   }
 }
 
-async function logWarningToEstablishedGuilds(context: CycleContext, key: string, message: string): Promise<void> {
-  for (const guild of context.guilds.filter((candidate) => !candidate.firstRun)) {
+async function logWarningToEstablishedGuilds(
+  context: CycleContext,
+  key: string,
+  message: string,
+  includeStoredGuilds = false,
+): Promise<void> {
+  const recipients = new Map(context.guilds.filter((candidate) => !candidate.firstRun).map((guild) => [guild.guildId, guild]));
+  if (includeStoredGuilds) {
+    for (const guildId of getStoredGuildIds(context.store)) {
+      const stored = getGuild(context.store, guildId);
+      if (stored?.firstRunDone && stored.logChannelId) {
+        recipients.set(guildId, {
+          guildId,
+          eventChannelId: stored.eventChannelId ?? '',
+          logChannelId: stored.logChannelId,
+          firstRun: false,
+        });
+      }
+    }
+  }
+  for (const guild of recipients.values()) {
     try {
-      await deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
-        (channelId, content) => context.discord.sendLog(channelId, content));
+      await withGuildDiscordLock(guild.guildId, () => deliverWarning(context.store, guild.guildId, guild.logChannelId, key, message,
+        (channelId, content) => context.discord.sendLog(channelId, content)));
     } catch (error) {
       log.warn(`Log-Meldung für Server ${guildLabel(guild.guildId)} konnte nicht gesendet werden.`, error);
     }
   }
+}
+
+function recordIgnoredSource(context: CycleContext, url: string, reason: string, previousClassification: string | undefined): void {
+  if (context.allowRetractions && previousClassification === 'ignored') context.pendingRetractions.set(url, reason);
 }
 
 async function logSourceFailure(context: CycleContext, url: string, error: unknown): Promise<void> {
@@ -408,12 +448,19 @@ function rememberEvent(context: CycleContext, eventId: number): void {
   context.capturedEventIds.add(eventId);
 }
 
+function restoreEventIfRetracting(context: CycleContext, eventId: number): number {
+  if (isEventRetracting(context.store, eventId)) clearEventRetraction(context.store, eventId);
+  return eventId;
+}
+
 function eventForType(context: CycleContext, eventKey: string, eventType: EventType, title: string, sourceUrl: string, preferredEventId?: number): number {
   const attached = findEventBySourceUrl(context.store, sourceUrl);
-  if (attached !== undefined) return attached;
-  if (preferredEventId !== undefined) return preferredEventId;
+  if (attached !== undefined) return restoreEventIfRetracting(context, attached);
+  if (preferredEventId !== undefined) return restoreEventIfRetracting(context, preferredEventId);
   const byKey = findEventByKey(context.store, eventKey);
-  return byKey ?? createEvent(context.store, { eventKey, eventType, title });
+  return byKey === undefined
+    ? createEvent(context.store, { eventKey, eventType, title })
+    : restoreEventIfRetracting(context, byKey);
 }
 
 function applyStatus<T>(
@@ -609,7 +656,9 @@ async function classifyAndLog(
   const unresolvedShortLink = classification.status === 'unclassified'
     && classification.reason === 'Ein Kurzlink konnte nicht aufgelöst werden.';
   const newlySeen = !isSeen(context.store, url);
-  if (!unresolvedShortLink) markSeen(context.store, url, classification.status, context.currentTime.toISOString());
+  const previousClassification = getSeenClassification(context.store, url);
+  const ignoredTopicInUnhealthyCycle = entry.source === 'topic' && classification.status === 'ignored' && !context.allowRetractions;
+  if (!unresolvedShortLink && !ignoredTopicInUnhealthyCycle) markSeen(context.store, url, classification.status, context.currentTime.toISOString());
   const title = displayEntryTitle(entry);
   const hasEstablishedGuild = context.guilds.some((guild) => !guild.firstRun);
   if (classification.status === 'unclassified') {
@@ -623,6 +672,7 @@ async function classifyAndLog(
     }
   } else if (classification.status === 'ignored') {
     context.ignoredUrls.add(url);
+    if (entry.source === 'topic') recordIgnoredSource(context, url, classification.reason, previousClassification);
     if (entry.source === 'banner' && (newlySeen || hasEstablishedGuild)) {
       await logWarningToEstablishedGuilds(
         context,
@@ -1091,6 +1141,82 @@ async function warnForUnmatchedFollowups(context: CycleContext): Promise<void> {
   }
 }
 
+function hasOnlyIgnoredTopicSource(context: CycleContext, event: StoreEvent, sourceUrl?: string): sourceUrl is string {
+  const sources = getEventSources(context.store, event.id);
+  return sources.length === 1 && sources[0]!.url === sourceUrl && sources[0]!.kind === 'topic'
+    && getSeenClassification(context.store, sourceUrl) === 'ignored';
+}
+
+async function decideRetractions(context: CycleContext): Promise<void> {
+  if (!context.allowRetractions) return;
+  for (const [sourceUrl, reason] of context.pendingRetractions) {
+    const eventId = findEventBySourceUrl(context.store, sourceUrl);
+    if (eventId === undefined) continue;
+    const event = getAllEvents(context.store).find((candidate) => candidate.id === eventId)
+      ?? getRetractingEvents(context.store).find((candidate) => candidate.id === eventId);
+    if (!event) continue;
+    const sources = getEventSources(context.store, eventId);
+    if (sources.length > 1) {
+      clearEventRetraction(context.store, eventId);
+      const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
+      const key = `ignored-source-kept:${stableEventIdentity(`${event.eventKey}\u0000${sourceUrl}`)}`;
+      await logWarningToEstablishedGuilds(context,
+        key,
+        `Quelle ignoriert, Event bleibt: „${title}“ (${sourceUrl}) — ${reason}`);
+    } else if (hasOnlyIgnoredTopicSource(context, event, sourceUrl)) {
+      markEventRetracting(context.store, eventId, reason, context.currentTime.toISOString());
+    } else {
+      clearEventRetraction(context.store, eventId);
+    }
+  }
+}
+
+async function cleanupRetractingEvents(context: CycleContext): Promise<void> {
+  for (const pending of getRetractingEvents(context.store)) {
+    let failed = false;
+    let restored = false;
+    for (const object of getGuildEventObjectsForEvent(context.store, pending.eventKey)) {
+      try {
+        const deleted = await deleteGuildEventObjects({
+          event: pending,
+          guildId: object.guildId,
+          discord: context.discord,
+          store: context.store,
+        });
+        if (!deleted) {
+          restored = true;
+          const sourceUrl = getEventSources(context.store, pending.id).find((source) => source.kind === 'topic')?.url;
+          if (sourceUrl) {
+            const title = displayTitleOf(pending);
+            const key = `ignored-source-kept:${stableEventIdentity(`${pending.eventKey}\u0000${sourceUrl}`)}`;
+            await logWarningToEstablishedGuilds(context, key,
+              `Quelle ignoriert, Event bleibt: „${title}“ (${sourceUrl}) — ${pending.retractionReason ?? 'Die Quelle wird nicht mehr berücksichtigt.'}`);
+          }
+          break;
+        }
+      } catch (error) {
+        failed = true;
+        log.warn(`Discord-Objekte für „${displayTitleOf(pending)}“ auf Server ${guildLabel(object.guildId)} konnten nicht vollständig gelöscht werden.`, error);
+        await logWarning(context, `event-retract-failed:${pending.eventKey}`,
+          `Der Discord-Abgleich für das zurückgezogene Event „${displayTitleOf(pending)}“ konnte auf ${guildLabel(object.guildId)} nicht abgeschlossen werden. Der Bot versucht es erneut.`,
+          object.guildId);
+      }
+    }
+    if (failed || restored) continue;
+    const sourceUrl = getEventSources(context.store, pending.id)[0]?.url;
+    if (!hasOnlyIgnoredTopicSource(context, pending, sourceUrl)) {
+      clearEventRetraction(context.store, pending.id);
+      continue;
+    }
+    const title = displayTitleOf(pending);
+    const key = `event-retracted:${stableEventIdentity(pending.eventKey)}`;
+    await logWarningToEstablishedGuilds(context, key,
+      `Event zurückgezogen: „${title}“ (${sourceUrl}) — ${pending.retractionReason ?? 'Die Quelle wird nicht mehr berücksichtigt.'}`,
+      true);
+    deleteEvent(context.store, pending.id);
+  }
+}
+
 async function warnForUncertainFields(
   context: CycleContext,
   guild: CycleGuild,
@@ -1230,6 +1356,7 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
   }
   let posted = 0;
   for (const event of candidates) {
+    if (isEventRetracting(context.store, event.id)) continue;
     const sourceUrls = getEventSources(context.store, event.id).map((source) => source.url);
     const errors: unknown[] = [];
     try {
@@ -1247,6 +1374,7 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
     } catch (error) {
       errors.push(error);
     }
+    if (isEventRetracting(context.store, event.id)) continue;
     try {
       await syncScheduledEvent({
         event, sourceUrls, guildId: guild.guildId, discord: context.discord,
@@ -1255,6 +1383,7 @@ async function syncGuildEvents(context: CycleContext, guild: CycleGuild, blind: 
     } catch (error) {
       errors.push(error);
     }
+    if (isEventRetracting(context.store, event.id)) continue;
     if (errors.length > 0) {
       const details = errors.map((error) => error instanceof Error ? error.message : String(error)).join('; ');
       setGuildEventSyncStatus(context.store, guild.guildId, event.eventKey, 'failed', details);
@@ -1372,6 +1501,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     pendingFollowupWarnings: [],
     specialPages: new Map(),
     pendingDiscoveries: loadPendingDiscoveries(options.store),
+    pendingRetractions: new Map(),
+    allowRetractions: false,
   };
   await drainPendingWarnings(context);
   const eventsBefore = new Map(getAllEvents(options.store).map((event) => [event.id, event]));
@@ -1379,6 +1510,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
 
   const lists = await readLists(context, globalFirstRun);
   const health = context.health.recordCycleHealth(lists.counts, lists.succeeded, currentTime);
+  context.allowRetractions = lists.succeeded && !health.isBlind;
   await logHealthTransition(context);
 
   if (!health.isBlind) {
@@ -1395,6 +1527,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     resolveBoundEndsFromStoredMaintenance(context);
     await warnForUnmatchedFollowups(context);
   }
+  await decideRetractions(context);
+  await cleanupRetractingEvents(context);
   const newEvents = logEventChanges(options.store, eventsBefore);
 
   for (const guild of guilds) {
@@ -1505,6 +1639,8 @@ async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId
     pendingFollowupWarnings: [],
     specialPages: new Map(),
     pendingDiscoveries: loadPendingDiscoveries(options.store),
+    pendingRetractions: new Map(),
+    allowRetractions: false,
   };
   await drainPendingWarnings(context);
   for (const event of getAllEvents(options.store)) await warnForUncertainFields(context, guild, event);

@@ -631,6 +631,19 @@ export class DiscordJsPort implements DiscordPort {
     await message.delete();
   }
 
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    const channel = await this.client.channels.fetch(channelId, { force: true });
+    if (!channel || !channel.isTextBased() || !('messages' in channel)) return;
+    const message = await (channel as TextChannel | ThreadChannel).messages.fetch({ message: messageId, force: true });
+    await message.delete();
+  }
+
+  async deleteDiscordThread(threadId: string): Promise<void> {
+    const thread = await this.client.channels.fetch(threadId, { force: true });
+    if (!thread?.isThread()) return;
+    await thread.delete();
+  }
+
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
     const guild = await this.client.guilds.fetch(guildId);
     const event = await guild.scheduledEvents.create({
@@ -655,6 +668,11 @@ export class DiscordJsPort implements DiscordPort {
       description: payload.description,
     });
     return scheduledSnapshot(event);
+  }
+
+  async deleteScheduledEvent(guildId: string, eventId: string): Promise<void> {
+    const guild = await this.client.guilds.fetch(guildId);
+    await guild.scheduledEvents.delete(eventId);
   }
 
   async listScheduledEvents(guildId: string): Promise<ScheduledEventSnapshot[]> {
