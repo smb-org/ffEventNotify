@@ -101,6 +101,10 @@ export async function classifyEntry(
   }
 
   if (entry.source === 'topic' && keywords.some((keyword) => entry.title.includes(keyword))) {
+    // Community contest announcements reuse event keywords ("Fan Festival") but are no in-game events.
+    if (/gewinnspiel|wettbewerb/i.test(entry.title)) {
+      return { status: 'ignored', reason: 'Der Beitrag kündigt ein Community-Gewinnspiel an.' };
+    }
     // Shop announcements reuse event keywords ("Neue Gegenstände zum Fan Festival …") but are no in-game events.
     // Only pure shop posts link the store itself; patch notes merely mention it.
     if (detailHtml !== undefined && articleBodyLinks(detailHtml).some((link) => /sqex\.to\/ffxivstore|store\.finalfantasyxiv\.com/i.test(link))) {
