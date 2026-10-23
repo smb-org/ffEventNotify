@@ -702,7 +702,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Fall Guys/);
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Mog Mog-Kollektion/);
     assert.deepEqual(discord.logs, [
-      'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404.',
+      'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404. (<https://de.finalfantasyxiv.com/lodestone/special/fallguys/>)',
       'Erststart: 8 erfasst, 3 gepostet, 14 unklassifiziert, 37 ignoriert',
     ]);
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 3);

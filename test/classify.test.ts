@@ -141,6 +141,15 @@ test('a LIVE-letter topic with site-wide special banners is not classified as se
   });
 });
 
+test('a shop announcement with an event keyword is ignored', async () => {
+  const result = await classify({
+    title: 'Neue Gegenstände zum Fan Festival 2026 (Teil 3) & Rabattaktion!',
+    url: '/lodestone/topics/detail/b726db23f28d44f6051a9920d65ebadf6098c1e3',
+    source: 'topic',
+  }, detailHtml('topics/b726db23f28d44f6051a9920d65ebadf6098c1e3.html'));
+  assert.equal(result.status, 'ignored');
+});
+
 test('a special link without a parsed period falls through keyword classification', async () => {
   const entry = classifyFixture.topicsP1.find((item) => item.note?.includes('without period'))!;
   const result = await classify({ title: entry.title, url: entry.url, source: 'topic' }, detailHtml(entry.fixture));
