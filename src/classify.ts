@@ -101,6 +101,11 @@ export async function classifyEntry(
   }
 
   if (entry.source === 'topic' && keywords.some((keyword) => entry.title.includes(keyword))) {
+    // Shop announcements reuse event keywords ("Neue Gegenstände zum Fan Festival …") but are no in-game events.
+    // Only pure shop posts link the store itself; patch notes merely mention it.
+    if (detailHtml !== undefined && articleBodyLinks(detailHtml).some((link) => /sqex\.to\/ffxivstore|store\.finalfantasyxiv\.com/i.test(link))) {
+      return { status: 'ignored', reason: 'Der Beitrag bewirbt Artikel aus dem Online Store.' };
+    }
     return { status: 'classified', eventType: 'topic-generic' };
   }
 

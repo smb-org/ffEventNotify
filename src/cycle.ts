@@ -32,6 +32,7 @@ import {
   type Store,
   type StoreEvent,
   type StoreEventSource,
+  type StoreField,
   type StoredGuild,
 } from './store.ts';
 import { classifyEntry, maintenanceStem, maintenanceTarget } from './classify.ts';
@@ -1100,17 +1101,19 @@ async function warnForUncertainFields(
   if (ended || (guildEvent?.firstRunSuppressed && !shouldPostToGuild(event, guild.guildId, context.currentTime, false, context.store))
     || (guild.firstRun && !shouldPostToGuild(event, guild.guildId, context.currentTime, true, context.store))) return;
 
-  const fields: Array<[string, string | null]> = [
-    ['Titel', event.titleStatus === 'unsicher' ? event.titleReason : null],
-    ['Start', event.startStatus === 'unsicher' ? event.startReason : null],
-    ['Ende', event.endStatus === 'unsicher' ? event.endReason : null],
-    ['Belohnungen', event.rewardsStatus === 'unsicher' ? event.rewardsReason : null],
-    ['Beschreibung', event.descriptionStatus === 'unsicher' ? event.descriptionReason : null],
+  const fields: Array<[string, StoreField, string | null]> = [
+    ['Titel', 'title', event.titleStatus === 'unsicher' ? event.titleReason : null],
+    ['Start', 'start', event.startStatus === 'unsicher' ? event.startReason : null],
+    ['Ende', 'end', event.endStatus === 'unsicher' ? event.endReason : null],
+    ['Belohnungen', 'rewards', event.rewardsStatus === 'unsicher' ? event.rewardsReason : null],
+    ['Beschreibung', 'description', event.descriptionStatus === 'unsicher' ? event.descriptionReason : null],
   ];
-  for (const [field, reason] of fields) {
+  for (const [field, storeField, reason] of fields) {
     if (reason) {
+      const url = getFieldProvenanceSourceUrl(context.store, event.id, storeField)
+        ?? getEventSources(context.store, event.id)[0]?.url;
       await logWarning(context, `event:${event.eventKey}:field:${field}`,
-        `Unsicheres Feld „${field}“ bei „${event.titleStatus === 'ok' ? event.title : 'FFXIV-Event'}“: ${reason}`, guild.guildId);
+        `Unsicheres Feld „${field}“ bei „${event.titleStatus === 'ok' ? event.title : 'FFXIV-Event'}“: ${reason}${url ? ` (${normalizeLodestoneUrl(url)})` : ''}`, guild.guildId);
     }
   }
 }
