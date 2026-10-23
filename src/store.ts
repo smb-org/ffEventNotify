@@ -46,6 +46,11 @@ export interface StoreEvent {
   createdAt: string;
 }
 
+export interface RetractingEvent extends StoreEvent {
+  retractedAt: string;
+  retractionReason: string | null;
+}
+
 export interface ReminderDeliveryKey {
   guildId: string;
   eventKey: string;
@@ -139,6 +144,8 @@ const SCHEMA = `
     end_reason TEXT DEFAULT 'Nicht extrahiert',
     end_patch TEXT,
     end_patch_source_url TEXT,
+    retracted_at TEXT,
+    retraction_reason TEXT,
     rewards_json TEXT NOT NULL DEFAULT '[]',
     rewards_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (rewards_status IN ('ok', 'unsicher')),
     rewards_reason TEXT DEFAULT 'Nicht extrahiert',
@@ -335,7 +342,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -522,6 +529,22 @@ function migrateV9ToV10(db: Store): void {
   }
 }
 
+function migrateV10ToV11(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const columns = tableColumns(db, 'events');
+    if (!columns.has('retracted_at')) db.exec('ALTER TABLE events ADD COLUMN retracted_at TEXT');
+    if (!columns.has('retraction_reason')) db.exec('ALTER TABLE events ADD COLUMN retraction_reason TEXT');
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (11)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 function initializeSchema(db: Store): void {
   const hadEvents = tableExists(db, 'events');
   const version = tableExists(db, 'schema_version')
@@ -534,7 +557,7 @@ function initializeSchema(db: Store): void {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     return;
   }
-  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10];
+  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10, migrateV10ToV11];
   for (const step of steps.slice(Math.max(0, version - 1))) step(db);
   db.exec(SCHEMA);
   // Added later without a version bump: the guild name for the web page's Discord links.
@@ -770,13 +793,19 @@ export function getGuildEventObject(db: Store, guildId: string, eventKey: string
   return { ...row, continuationMessageIds, firstRunSuppressed: row.firstRunSuppressed === 1 };
 }
 
+export function getGuildEventObjectsForEvent(db: Store, eventKey: string): GuildEventObject[] {
+  const guildIds = db.prepare(`SELECT guild_id AS guildId FROM guild_event_objects
+    WHERE event_key = ? ORDER BY guild_id`).all(eventKey) as Array<{ guildId: string }>;
+  return guildIds.map(({ guildId }) => getGuildEventObject(db, guildId, eventKey)!).filter(Boolean);
+}
+
 export function getGuildEventPosts(db: Store, guildId: string): GuildEventPost[] {
   return db.prepare(`
     SELECT objects.event_key AS eventKey, objects.message_id AS messageId,
            events.end_status AS endStatus, events.end_utc AS endUtc
     FROM guild_event_objects AS objects
     JOIN events ON events.event_key = objects.event_key
-    WHERE objects.guild_id = ? AND objects.message_id IS NOT NULL
+    WHERE objects.guild_id = ? AND objects.message_id IS NOT NULL AND events.retracted_at IS NULL
     ORDER BY events.created_at, events.id
   `).all(guildId) as unknown as GuildEventPost[];
 }
@@ -903,6 +932,26 @@ export function findEventBySourceUrl(db: Store, url: string): number | undefined
 export function findEventByKey(db: Store, eventKey: string): number | undefined {
   const row = db.prepare('SELECT id FROM events WHERE event_key = ?').get(eventKey) as { id: number } | undefined;
   return row?.id;
+}
+
+export function isEventRetracting(db: Store, eventId: number): boolean {
+  return db.prepare('SELECT 1 FROM events WHERE id = ? AND retracted_at IS NULL').get(eventId) === undefined;
+}
+
+export function clearEventRetraction(db: Store, eventId: number): boolean {
+  return db.prepare('UPDATE events SET retracted_at = NULL, retraction_reason = NULL WHERE id = ? AND retracted_at IS NOT NULL')
+    .run(eventId).changes > 0;
+}
+
+export function markEventRetracting(db: Store, eventId: number, reason: string, retractedAt = new Date().toISOString()): boolean {
+  return db.prepare(`UPDATE events SET retracted_at = COALESCE(retracted_at, ?),
+      retraction_reason = COALESCE(retraction_reason, ?)
+    WHERE id = ? AND (retracted_at IS NULL OR retraction_reason IS NULL)`)
+    .run(retractedAt, reason, eventId).changes > 0;
+}
+
+export function deleteEvent(db: Store, eventId: number): boolean {
+  return runTransaction(db, () => db.prepare('DELETE FROM events WHERE id = ?').run(eventId).changes > 0);
 }
 
 export function createEvent(db: Store, input: CreateEventInput): number {
@@ -1168,8 +1217,9 @@ export function getOpenEvents(db: Store, now: Date | string = new Date()): Store
            image_url AS imageUrl,
            created_at AS createdAt
     FROM events
-    WHERE end_status = 'unsicher'
-       OR (end_utc IS NOT NULL AND julianday(end_utc) > julianday(?) - 2)
+    WHERE retracted_at IS NULL
+      AND (end_status = 'unsicher'
+       OR (end_utc IS NOT NULL AND julianday(end_utc) > julianday(?) - 2))
     ORDER BY created_at, id
   `).all(nowValue) as unknown as RawStoreEvent[];
 
@@ -1200,10 +1250,46 @@ export function getAllEvents(db: Store): StoreEvent[] {
            image_url AS imageUrl,
            created_at AS createdAt
     FROM events
+    WHERE retracted_at IS NULL
     ORDER BY created_at, id
   `).all() as unknown as RawStoreEvent[];
 
   return rows.map(mapStoreEvent);
+}
+
+export function getRetractingEvents(db: Store): RetractingEvent[] {
+  const rows = db.prepare(`
+    SELECT id,
+           event_key AS eventKey,
+           event_type AS eventType,
+           title,
+           title_status AS titleStatus,
+           title_reason AS titleReason,
+           start_utc AS startUtc,
+           start_status AS startStatus,
+           start_reason AS startReason,
+           end_utc AS endUtc,
+           end_status AS endStatus,
+           end_reason AS endReason,
+           end_patch AS endPatch,
+           rewards_json AS rewardsJson,
+           rewards_status AS rewardsStatus,
+           rewards_reason AS rewardsReason,
+           description,
+           description_status AS descriptionStatus,
+           description_reason AS descriptionReason,
+           image_url AS imageUrl,
+           created_at AS createdAt,
+           retracted_at AS retractedAt,
+           retraction_reason AS retractionReason
+    FROM events
+    WHERE retracted_at IS NOT NULL
+    ORDER BY retracted_at, id
+  `).all() as unknown as Array<RawStoreEvent & { retractedAt: string; retractionReason: string | null }>;
+
+  return rows.map(({ retractedAt, retractionReason, ...event }) => ({
+    ...mapStoreEvent(event), retractedAt, retractionReason,
+  }));
 }
 
 export function getEventSources(db: Store, eventId: number): StoreEventSource[] {
@@ -1277,6 +1363,11 @@ export function markSeen(db: Store, url: string, classification: string, firstSe
 
 export function isSeen(db: Store, url: string): boolean {
   return db.prepare('SELECT 1 FROM seen_entries WHERE url = ?').get(url) !== undefined;
+}
+
+export function getSeenClassification(db: Store, url: string): string | undefined {
+  const row = db.prepare('SELECT classification FROM seen_entries WHERE url = ?').get(url) as { classification: string } | undefined;
+  return row?.classification;
 }
 
 export function cacheItem(

@@ -1,7 +1,7 @@
 // Synchronizes Discord-managed external scheduled events without setting status.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { getGuild, getGuildEventObject, setGuildDiscordIds } from '../store.ts';
+import { getGuild, getGuildEventObject, isEventRetracting, setGuildDiscordIds } from '../store.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import { logAction } from '../log.ts';
 import {
@@ -140,7 +140,7 @@ function hasLegacyDescription(description: string, marker: string, sourceUrls: r
   });
 }
 
-function findByMarker(
+export function findByMarker(
   events: readonly ScheduledEventSnapshot[],
   event: StoreEvent,
   sourceUrls: readonly string[],
@@ -169,8 +169,10 @@ async function createReplacement(
   clock?: () => Date,
   cardJumpLink?: string,
 ): Promise<string | undefined> {
+  if (isEventRetracting(store, event.id)) return undefined;
   const payload = scheduledEventPayloadFor(event, sourceUrls, clock?.() ?? now, cardJumpLink);
   if (!payload) return undefined;
+  if (isEventRetracting(store, event.id)) return undefined;
   const created = await discord.createScheduledEvent(guildId, payload);
   setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
   logAction(guildId, 'scheduledCreated', `Geplantes Event „${event.title}“ neu angelegt (Ersatz)`);
@@ -186,7 +188,7 @@ async function syncScheduledEventUnlocked({
   now = new Date(),
   clock,
 }: SyncScheduledEventOptions): Promise<string | undefined> {
-  if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
+  if (isEventRetracting(store, event.id) || event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
 
   const guild = getGuild(store, guildId);
   const guildEventObject = getGuildEventObject(store, guildId, event.eventKey);
@@ -213,6 +215,7 @@ async function syncScheduledEventUnlocked({
   const initialPayload = scheduledEventPayloadFor(event, sourceUrls, currentTime, cardJumpLink);
   if (!initialPayload) return undefined;
   if (!matched) {
+    if (isEventRetracting(store, event.id)) return undefined;
     const created = await discord.createScheduledEvent(guildId, initialPayload);
     setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: created.id });
     logAction(guildId, 'scheduledCreated', `Geplantes Event „${event.title}“ angelegt`);
@@ -231,6 +234,7 @@ async function syncScheduledEventUnlocked({
   if (!payload || sameSchedule(matched, payload)) return matched.id;
 
   try {
+    if (isEventRetracting(store, event.id)) return undefined;
     const edited = await discord.editScheduledEvent(guildId, matched.id, payload);
     setGuildDiscordIds(store, guildId, event.eventKey, { scheduledEventId: edited.id });
     logAction(guildId, 'scheduledUpdated', `Geplantes Event „${event.title}“ aktualisiert`);

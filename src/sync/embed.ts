@@ -1,7 +1,7 @@
 // Renders player-facing German event embeds and synchronizes one message per event.
 
 import type { Store, StoreEvent } from '../store.ts';
-import { ensureGuildEventFirstPostAttemptAt, getGuildEventObject, isAllowedSpecialImageUrl, setGuildDiscordIds } from '../store.ts';
+import { ensureGuildEventFirstPostAttemptAt, getGuildEventObject, isAllowedSpecialImageUrl, isEventRetracting, setGuildDiscordIds } from '../store.ts';
 import { withGuildDiscordLock } from '../guild-lock.ts';
 import {
   bestEventSourceUrl,
@@ -283,6 +283,11 @@ function embedHasMarker(embed: DiscordEmbed, event: StoreEvent): boolean {
   return embed.url !== undefined && hasEventMarkerUrl(embed.url, event.eventKey);
 }
 
+export function hasEventMessageMarker(message: DiscordMessageSnapshot, event: StoreEvent, sourceUrls: readonly string[]): boolean {
+  return message.authorIsBot && message.embeds.some((candidate) => embedHasMarker(candidate, event)
+    || hasLegacyMarker(candidate, event, sourceUrls));
+}
+
 async function syncEventEmbedUnlocked({
   event,
   sourceUrls,
@@ -292,6 +297,7 @@ async function syncEventEmbedUnlocked({
   store,
   now,
 }: SyncEventEmbedOptions): Promise<string> {
+  if (isEventRetracting(store, event.id)) return getGuildEventObject(store, guildId, event.eventKey)?.messageId ?? '';
   const syncNow = now ?? new Date();
   const embed = buildEventEmbed(event, sourceUrls);
   const components = buildEventComponents(event, sourceUrls);
@@ -331,6 +337,7 @@ async function syncEventEmbedUnlocked({
     setGuildDiscordIds(store, guildId, event.eventKey, { messageId: existing.id, messageChannelId: channelId });
     const currentEmbed = existing.embeds.find((candidate) => embedHasMarker(candidate, event) || hasLegacyMarker(candidate, event, sourceUrls));
     if (!currentEmbed || !samePayload({ embeds: [currentEmbed], components: existing.components }, payload)) {
+      if (isEventRetracting(store, event.id)) return existing.id;
       await discord.editMessage(channelId, existing.id, payload);
     }
     return existing.id;
@@ -338,6 +345,7 @@ async function syncEventEmbedUnlocked({
 
   const firstPostAttemptAt = ensureGuildEventFirstPostAttemptAt(store, guildId, event.eventKey, syncNow.toISOString());
   if (!firstPostAttemptAt) throw new Error('Der erste Post-Versuch konnte nicht gespeichert werden.');
+  if (isEventRetracting(store, event.id)) return '';
   const created = await discord.createMessage(channelId, payload);
   setGuildDiscordIds(store, guildId, event.eventKey, { messageId: created.id, messageChannelId: channelId });
   return created.id;

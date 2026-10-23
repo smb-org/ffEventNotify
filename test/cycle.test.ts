@@ -9,9 +9,11 @@ import test from 'node:test';
 import { createCoalescedCycleRunner, createLoggedCycleRunner, createSetupSyncRunner } from '../src/main.ts';
 import { captureLog } from './log-capture.ts';
 import { SourceHealthMonitor } from '../src/health.ts';
-import { applyField, attachSource, createEvent, deleteGuild, getAllEvents, getEventSources, getFieldProvenanceSourceUrl, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markFirstRunDone, markGuildFirstRunDone, openDb, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, attachSource, createEvent, deleteEvent, deleteGuild, getAllEvents, getEventSources, getFieldProvenanceSourceUrl, getGuild, getGuildEventObject, getMetaValue, getOpenEvents, isFirstRun, isSeen, markEventRetracting, markFirstRunDone, markGuildFirstRunDone, markSeen, openDb, setGuildDiscordIds, setMetaValue, upsertGuildSetup, type Store } from '../src/store.ts';
 import type {
   DiscordEmbed,
+  DiscordForumPostSnapshot,
+  DiscordForumTag,
   DiscordMessagePayload,
   DiscordMessageSnapshot,
   DiscordPort,
@@ -22,8 +24,11 @@ import type {
 } from '../src/types.ts';
 import { runCycle, runGuildSyncFromStoredData } from '../src/cycle.ts';
 import { runDryRunCycle } from '../src/dry-run.ts';
-import { stableEventIdentity } from '../src/event-identity.ts';
+import { eventSourceLink, stableEventIdentity } from '../src/event-identity.ts';
 import { formatLogContent } from '../src/log-format.ts';
+import { deleteGuildEventObjects } from '../src/sync/retract.ts';
+import { syncForumEvent } from '../src/sync/forum.ts';
+import { withGuildDiscordLock } from '../src/guild-lock.ts';
 import { assertDiscordActionRows } from './component-invariants.ts';
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
@@ -59,10 +64,21 @@ class FakeDiscordPort implements DiscordPort {
   readonly scheduledEvents: ScheduledEventSnapshot[] = [];
   readonly logs: string[] = [];
   createMessageCount = 0;
+  private messageSequence = 0;
   editMessageCount = 0;
   createScheduledCount = 0;
   editScheduledCount = 0;
   pinCount = 0;
+  readonly deletedMessages: Array<{ channelId: string; messageId: string }> = [];
+  readonly deletedThreads: string[] = [];
+  readonly deletedScheduledEvents: Array<{ guildId: string; eventId: string }> = [];
+  readonly forumChannelIds = new Set<string>();
+  failDeleteMessageOnce = false;
+  failHistoryOnce = false;
+  deleteMessageErrors: unknown[] = [];
+  deleteThreadErrors: unknown[] = [];
+  deleteScheduledErrors: unknown[] = [];
+  readonly editedMessageIds: string[] = [];
   failScheduledNameOnce: string | undefined;
   readonly logChannels: Array<{ channelId: string; content: string }> = [];
 
@@ -75,6 +91,7 @@ class FakeDiscordPort implements DiscordPort {
 
   async editMessage(channelId: string, messageId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     this.editMessageCount += 1;
+    this.editedMessageIds.push(messageId);
     const index = this.messages.findIndex((message) => message.id === messageId && message.channelId === channelId);
     assert.notEqual(index, -1);
     const old = this.messages[index]!;
@@ -89,6 +106,10 @@ class FakeDiscordPort implements DiscordPort {
   }
 
   async fetchRecentBotMessages(channelId: string, limit: number) {
+    if (this.failHistoryOnce) {
+      this.failHistoryOnce = false;
+      throw new Error('simulated history recovery failure');
+    }
     return { messages: this.messages.filter((message) => message.channelId === channelId).slice().reverse()
       .filter((message) => message.authorIsBot).slice(0, limit), complete: true };
   }
@@ -105,6 +126,10 @@ class FakeDiscordPort implements DiscordPort {
     return true;
   }
 
+  async isForumChannel(channelId: string): Promise<boolean> {
+    return this.forumChannelIds.has(channelId);
+  }
+
   async startThreadOnMessage(channelId: string, starterMessageId: string, name: string): Promise<DiscordThreadSnapshot> {
     return { id: `thread-${starterMessageId}`, parentChannelId: channelId, starterMessageId, name, archived: false };
   }
@@ -115,6 +140,32 @@ class FakeDiscordPort implements DiscordPort {
 
   async sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
     return this.makeMessage(threadId, payload);
+  }
+
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    this.deletedMessages.push({ channelId, messageId });
+    const deleteError = this.deleteMessageErrors.shift();
+    if (deleteError) throw deleteError;
+    if (this.failDeleteMessageOnce) {
+      this.failDeleteMessageOnce = false;
+      throw Object.assign(new Error('simulated Discord 503'), { status: 503 });
+    }
+    const index = this.messages.findIndex((message) => message.channelId === channelId && message.id === messageId);
+    if (index !== -1) this.messages.splice(index, 1);
+  }
+
+  async deleteDiscordThread(threadId: string): Promise<void> {
+    this.deletedThreads.push(threadId);
+    const deleteError = this.deleteThreadErrors.shift();
+    if (deleteError) throw deleteError;
+  }
+
+  async deleteScheduledEvent(guildId: string, eventId: string): Promise<void> {
+    this.deletedScheduledEvents.push({ guildId, eventId });
+    const deleteError = this.deleteScheduledErrors.shift();
+    if (deleteError) throw deleteError;
+    const index = this.scheduledEvents.findIndex((event) => event.guildId === guildId && event.id === eventId);
+    if (index !== -1) this.scheduledEvents.splice(index, 1);
   }
 
   async createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot> {
@@ -161,7 +212,7 @@ class FakeDiscordPort implements DiscordPort {
 
   private makeMessage(channelId: string, payload: DiscordMessagePayload): DiscordMessageSnapshot {
     return {
-      id: `message-${this.messages.length + 1}`,
+      id: `message-${++this.messageSequence}`,
       channelId,
       authorIsBot: true,
       pinned: false,
@@ -170,6 +221,38 @@ class FakeDiscordPort implements DiscordPort {
       components: componentSnapshots(payload.components),
     };
   }
+}
+
+class ForumGuardDiscordPort extends FakeDiscordPort {
+  forumPostCreateCount = 0;
+  forumKeepaliveCount = 0;
+  forumUnarchiveCount = 0;
+  forumPost: DiscordForumPostSnapshot | null = null;
+
+  async fetchForumTags(_channelId: string): Promise<DiscordForumTag[]> { return []; }
+
+  async createForumPost(
+    _channelId: string,
+    _name: string,
+    _payload: DiscordMessagePayload,
+    _appliedTags: readonly string[],
+    _autoArchiveDuration: number,
+  ): Promise<DiscordForumPostSnapshot> {
+    this.forumPostCreateCount += 1;
+    throw new Error('unexpected forum post creation');
+  }
+
+  async fetchForumPost(_channelId: string, _threadId: string): Promise<DiscordForumPostSnapshot | null> { return this.forumPost; }
+
+  async listForumPosts(_channelId: string): Promise<DiscordForumPostSnapshot[]> { return []; }
+
+  async editForumStarter(_threadId: string, _payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot> {
+    throw new Error('unexpected forum starter edit');
+  }
+
+  async keepForumPostActive(_threadId: string, _autoArchiveDuration: number): Promise<void> { this.forumKeepaliveCount += 1; }
+
+  async setForumPostArchived(_threadId: string, _archived: boolean): Promise<void> { this.forumUnarchiveCount += 1; }
 }
 
 function fixtureFetcher(): FetchText {
@@ -336,6 +419,583 @@ function controlledFetcher(options: {
     return intercepted ?? base(url, fetchOptions);
   };
 }
+
+const retractableTopicPath = '/lodestone/topics/detail/retractable-shop';
+const retractableTopicTitle = 'Fan Festival: Ankündigung zum Ingame-Event';
+
+function retractableTopicFetcher(options: { ignored: boolean; includeUnrelatedTopic?: boolean; includeValidSameKey?: boolean; detailStatus?: number }): FetchText {
+  const entries = options.includeUnrelatedTopic
+    ? [{ title: 'Eine Meldung ohne Klassifikation', url: '/lodestone/topics/detail/unrelated' }]
+    : [
+      { title: retractableTopicTitle, url: retractableTopicPath },
+      ...(options.includeValidSameKey ? [{ title: retractableTopicTitle, url: '/lodestone/topics/detail/retractable-valid' }] : []),
+    ];
+  return controlledFetcher({
+    topicList: topicListHtml(entries),
+    maintenanceList: maintenanceListHtml([{
+      tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored-maintenance',
+    }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => {
+      const pathname = new URL(url).pathname;
+      if (pathname === retractableTopicPath) {
+        if (options.detailStatus !== undefined) return { status: options.detailStatus, body: '', finalUrl: url };
+        const storeLink = options.ignored
+          ? '<p><a href="https://store.finalfantasyxiv.com/ffxivstore/en-us/product/123">Zum Online Store</a></p>'
+          : '';
+        return {
+          status: 200,
+          body: `<article class="news__detail"><header class="news__header"><h1>${retractableTopicTitle}</h1></header><div class="news__detail__wrapper"><p>Eine Ankündigung.${storeLink}</p></div></article>`,
+          finalUrl: url,
+        };
+      }
+      if (pathname === '/lodestone/topics/detail/retractable-valid') {
+        return {
+          status: 200,
+          body: `<article class="news__detail"><header class="news__header"><h1>${retractableTopicTitle}</h1></header><div class="news__detail__wrapper"><p>Eine Ankündigung.</p></div></article>`,
+          finalUrl: url,
+        };
+      }
+      if (pathname === '/lodestone/topics/detail/unrelated') {
+        return {
+          status: 200,
+          body: '<article class="news__detail"><div class="news__detail__wrapper">Keine Klassifikation.</div></article>',
+          finalUrl: url,
+        };
+      }
+      return undefined;
+    },
+  });
+}
+
+async function createRetractableTopicEvent(db: Store, discord: FakeDiscordPort) {
+  markFirstRunDone(db);
+  const normalFetcher = retractableTopicFetcher({ ignored: false });
+  await runCycle({ ...cycleOptions(db, discord), fetchText: normalFetcher });
+  const event = getAllEvents(db).find((candidate) => candidate.title === retractableTopicTitle);
+  assert.ok(event, 'the topic should create a stored event before it is ignored');
+  const sourceUrl = `https://de.finalfantasyxiv.com${retractableTopicPath}`;
+  applyField(db, event.id, 'start', { status: 'ok', value: '2026-10-16T11:00:00.000Z' }, sourceUrl);
+  applyField(db, event.id, 'end', { status: 'ok', value: '2026-10-20T12:00:00.000Z' }, sourceUrl);
+  await runGuildSyncFromStoredData({ store: db, discord, fetchText: normalFetcher, now: () => new Date(NOW) }, 'guild');
+  const post = discord.messages.find((message) => message.embeds.some((embed) => embed.title === retractableTopicTitle));
+  assert.ok(post, 'the stored event should have a Discord post before it is ignored');
+  const schedule = discord.scheduledEvents.find((candidate) => candidate.name === retractableTopicTitle);
+  assert.ok(schedule, 'the stored event should have a scheduled event before it is ignored');
+  return { event, sourceUrl, postId: post.id, scheduleId: schedule.id };
+}
+
+test('an ignored topic retracts its stored Discord post and scheduled event', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id), 'one ignored cycle must leave the event intact');
+    assert.equal(discord.deletedMessages.length + discord.deletedScheduledEvents.length, 0);
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(created.event.id) as { count: number }).count, 0);
+    assert.ok(discord.deletedMessages.some(({ channelId, messageId }) => channelId === 'events' && messageId === created.postId));
+    assert.ok(discord.deletedScheduledEvents.some(({ guildId, eventId }) => guildId === 'guild' && eventId === created.scheduleId));
+    assert.equal(discord.messages.some((message) => message.id === created.postId), false);
+    assert.equal(discord.scheduledEvents.some((event) => event.id === created.scheduleId), false);
+    assert.ok(discord.logs.includes(
+      `Event zurückgezogen: „${retractableTopicTitle}“ (<${created.sourceUrl}>) — Der Beitrag bewirbt Artikel aus dem Online Store.`,
+    ));
+  } finally {
+    db.close();
+  }
+});
+
+test('forum retraction deletes the stored thread and reminder thread channels', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+    setGuildDiscordIds(db, 'guild', created.event.eventKey, {
+      messageId: 'forum-thread',
+      messageChannelId: 'events',
+      reminderThreadId: 'reminder-thread',
+      continuationMessageIds: ['continuation-1'],
+    });
+    discord.forumChannelIds.add('events');
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+
+    assert.ok(discord.deletedThreads.includes('forum-thread'));
+    assert.ok(discord.deletedThreads.includes('reminder-thread'));
+    assert.equal(discord.deletedMessages.some(({ messageId }) => messageId === 'continuation-1'), false);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(created.event.id) as { count: number }).count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('text card retraction deletes a message-based reminder thread before its starter message', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    setGuildDiscordIds(db, 'guild', created.event.eventKey, { reminderThreadId: created.postId });
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+
+    assert.ok(discord.deletedThreads.includes(created.postId));
+    assert.ok(discord.deletedMessages.some(({ channelId, messageId }) => channelId === 'events' && messageId === created.postId));
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(created.event.id) as { count: number }).count, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('a failed retraction stays hidden and retries after its topic leaves the list', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    const editsBefore = discord.editedMessageIds.length;
+    discord.failDeleteMessageOnce = true;
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+    assert.equal((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt, null);
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+    const pending = db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null } | undefined;
+    assert.ok(pending?.retractedAt, 'the intent should be stored before Discord cleanup');
+    assert.equal(getAllEvents(db).some((event) => event.id === created.event.id), false);
+    assert.equal(discord.messages.some((message) => message.id === created.postId), true);
+    assert.equal(discord.editedMessageIds.slice(editsBefore).includes(created.postId), false);
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: false, includeUnrelatedTopic: true }) });
+
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(created.event.id) as { count: number }).count, 0);
+    assert.ok(discord.deletedMessages.filter(({ messageId }) => messageId === created.postId).length >= 2);
+    assert.equal(discord.messages.some((message) => message.id === created.postId), false);
+    assert.equal(discord.editedMessageIds.slice(editsBefore).includes(created.postId), false);
+    assert.equal(discord.scheduledEvents.some((event) => event.id === created.scheduleId), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('an ignored source with another source keeps its event and logs one warning', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    attachSource(db, {
+      eventId: created.event.id,
+      url: 'https://de.finalfantasyxiv.com/lodestone/special/other-source/',
+      kind: 'special',
+      firstSeenAt: NOW.toISOString(),
+    });
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true }) });
+
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+    assert.equal((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt, null);
+    assert.equal(discord.deletedMessages.length + discord.deletedThreads.length + discord.deletedScheduledEvents.length, 0);
+    assert.equal(discord.logs.filter((message) => message.includes(
+      `Quelle ignoriert, Event bleibt: „${retractableTopicTitle}“ (<${created.sourceUrl}>) — Der Beitrag bewirbt Artikel aus dem Online Store.`,
+    )).length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('detail and list failures, and a blind cycle, leave an existing event untouched', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true, detailStatus: 503 }) });
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+
+    const listFailure: FetchText = async (url, options) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === '/lodestone/topics/' && !parsed.searchParams.has('page')) {
+        return { status: 503, body: '', finalUrl: url };
+      }
+      return retractableTopicFetcher({ ignored: true })(url, options);
+    };
+    await runCycle({ ...cycleOptions(db, discord), fetchText: listFailure });
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    const health = new SourceHealthMonitor(db);
+    health.recordCycleHealth([0], true, NOW);
+    const blindLists = controlledFetcher({
+      topicList: topicListHtml([]),
+      maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored-maintenance' }]),
+      feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    });
+    await runCycle({ ...cycleOptions(db, discord, health), fetchText: blindLists });
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+    assert.equal(discord.deletedMessages.length + discord.deletedScheduledEvents.length, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('an ignored topic and a valid topic with the same key in one cycle keep the event', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true, includeValidSameKey: true }) });
+
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+    assert.equal(getEventSources(db, created.event.id).length, 2);
+    assert.equal((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt, null);
+    assert.equal(discord.deletedMessages.length + discord.deletedScheduledEvents.length, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('a banner-only seasonal event is not retracted when its special page has no period', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const eventKey = 'seasonal-special:/lodestone/special/friend_recruit/';
+    const eventId = createEvent(db, { eventKey, eventType: 'seasonal-special', title: 'Freunde werben Freunde' });
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/special/friend_recruit/';
+    attachSource(db, { eventId, url: sourceUrl, kind: 'banner', firstSeenAt: NOW.toISOString() });
+    markSeen(db, sourceUrl, 'ignored', NOW.toISOString());
+    setGuildDiscordIds(db, 'guild', eventKey, { messageId: 'banner-post', messageChannelId: 'events' });
+    discord.messages.push({ id: 'banner-post', channelId: 'events', authorIsBot: true, pinned: false, content: '', embeds: [] });
+
+    const fetchText = controlledFetcher({
+      topicList: topicListHtml([{ title: 'Die Fall Guys-Kollaboration kehrt am 7. Oktober zurück!', url: '/lodestone/topics/detail/67df2c10d0b7467e5a006dbadd025c629dbfe8bc' }], ['/lodestone/special/friend_recruit/']),
+      maintenanceList: maintenanceListHtml([{ tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored-maintenance' }]),
+      feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    });
+    await runCycle({ ...cycleOptions(db, discord), fetchText });
+
+    assert.ok(getAllEvents(db).some((event) => event.id === eventId));
+    assert.equal((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(eventId) as { retractedAt: string | null }).retractedAt, null);
+    assert.equal(discord.deletedMessages.some(({ messageId }) => messageId === 'banner-post'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('a valid source restores a retracting event and recreates deleted Discord objects', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    applyField(db, created.event.id, 'start', { status: 'ok', value: '2026-10-16T11:00:00.000Z' }, created.sourceUrl, '2030-01-01T00:00:00.000Z');
+    applyField(db, created.event.id, 'end', { status: 'ok', value: '2026-10-20T12:00:00.000Z' }, created.sourceUrl, '2030-01-01T00:00:00.000Z');
+    markEventRetracting(db, created.event.id, 'Der Beitrag bewirbt Artikel aus dem Online Store.', NOW.toISOString());
+    discord.messages.splice(discord.messages.findIndex((message) => message.id === created.postId), 1);
+    discord.scheduledEvents.splice(discord.scheduledEvents.findIndex((event) => event.id === created.scheduleId), 1);
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: false }) });
+
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+    assert.equal((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt, null);
+    assert.ok(discord.messages.some((message) => message.embeds.some((embed) => embed.title === retractableTopicTitle)));
+    assert.ok(discord.scheduledEvents.some((event) => event.name === retractableTopicTitle));
+  } finally {
+    db.close();
+  }
+});
+
+test('cleanup cancellation logs when a valid source arrives while the guild lock is held', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    markEventRetracting(db, created.event.id, 'Der Beitrag bewirbt Artikel aus dem Online Store.', NOW.toISOString());
+    let restoredSource = false;
+    discord.isForumChannel = async () => {
+      if (!restoredSource) {
+        restoredSource = true;
+        attachSource(db, {
+          eventId: created.event.id,
+          url: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/valid-again',
+          kind: 'topic',
+          firstSeenAt: NOW.toISOString(),
+        });
+      }
+      return false;
+    };
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: true, includeUnrelatedTopic: true }) });
+
+    const warning = `Quelle ignoriert, Event bleibt: „${retractableTopicTitle}“ (<${created.sourceUrl}>) — Der Beitrag bewirbt Artikel aus dem Online Store.`;
+    assert.equal(discord.logs.filter((message) => message === warning).length, 1);
+    assert.equal(discord.deletedMessages.length + discord.deletedScheduledEvents.length, 0);
+    assert.ok(getAllEvents(db).some((event) => event.id === created.event.id));
+    assert.equal((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt, null);
+  } finally {
+    db.close();
+  }
+});
+
+test('a queued forum sync skips keepalive and post creation after retraction is marked', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumGuardDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, new FakeDiscordPort());
+    discord.forumChannelIds.add('events');
+    discord.forumPost = {
+      id: 'forum-thread', parentChannelId: 'events', starterMessageId: 'starter-forum',
+      name: retractableTopicTitle, archived: true, appliedTags: [],
+      starterMessage: {
+        id: 'starter-forum', channelId: 'forum-thread', authorIsBot: true, pinned: false,
+        content: '', embeds: [{ title: retractableTopicTitle, url: eventSourceLink(created.event.eventKey, [created.sourceUrl]) }],
+      },
+      autoArchiveDuration: 4_320, locked: false, pinned: false,
+    };
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lock = withGuildDiscordLock('guild', async () => gate);
+    const queuedSync = syncForumEvent({
+      event: created.event,
+      sourceUrls: [created.sourceUrl],
+      guildId: 'guild',
+      channelId: 'events',
+      discord,
+      store: db,
+      now: NOW,
+    });
+    markEventRetracting(db, created.event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+    release();
+    await Promise.all([lock, queuedSync]);
+
+    assert.equal(discord.forumKeepaliveCount, 0);
+    assert.equal(discord.forumUnarchiveCount, 0);
+    assert.equal(discord.forumPostCreateCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('an orphaned event post is recovered and deleted before cleanup completes', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    db.prepare('UPDATE guild_event_objects SET message_id = NULL WHERE guild_id = ? AND event_key = ?')
+      .run('guild', created.event.eventKey);
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    markEventRetracting(db, created.event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+
+    await deleteGuildEventObjects({ event: created.event, guildId: 'guild', discord, store: db });
+
+    assert.ok(discord.deletedMessages.some(({ messageId }) => messageId === created.postId));
+    assert.equal(discord.messages.some((message) => message.id === created.postId), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('orphan recovery errors keep a retracting event row for retry', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    db.prepare('UPDATE guild_event_objects SET message_id = NULL WHERE guild_id = ? AND event_key = ?')
+      .run('guild', created.event.eventKey);
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    markEventRetracting(db, created.event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+    discord.failHistoryOnce = true;
+
+    await runCycle({ ...cycleOptions(db, discord), fetchText: retractableTopicFetcher({ ignored: false, includeUnrelatedTopic: true }) });
+
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(created.event.id) as { count: number }).count, 1);
+    assert.ok((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt);
+  } finally {
+    db.close();
+  }
+});
+
+test('scheduled event recovery does not depend on the forum post attempt timestamp', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    db.prepare(`UPDATE guild_event_objects SET scheduled_event_id = NULL, first_post_attempt_at = NULL
+      WHERE guild_id = ? AND event_key = ?`).run('guild', created.event.eventKey);
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    markEventRetracting(db, created.event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+
+    await deleteGuildEventObjects({ event: created.event, guildId: 'guild', discord, store: db });
+
+    assert.ok(discord.deletedScheduledEvents.some(({ guildId, eventId }) => guildId === 'guild' && eventId === created.scheduleId));
+    assert.equal(discord.scheduledEvents.some((event) => event.id === created.scheduleId), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('missing parent channel and guild count as successful orphan recovery', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    db.prepare(`UPDATE guild_event_objects SET message_id = NULL, scheduled_event_id = NULL
+      WHERE guild_id = ? AND event_key = ?`).run('guild', created.event.eventKey);
+    discord.isForumChannel = async () => { throw Object.assign(new Error('Unknown Channel'), { code: 10_003 }); };
+    discord.listScheduledEvents = async () => { throw Object.assign(new Error('Unknown Guild'), { code: 10_004 }); };
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    markEventRetracting(db, created.event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+
+    const cleaned = await deleteGuildEventObjects({ event: created.event, guildId: 'guild', discord, store: db });
+
+    assert.equal(cleaned, true);
+  } finally {
+    db.close();
+  }
+});
+
+test('a reminder thread with no stored ID is recovered before its starter message is deleted', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    const order: string[] = [];
+    let failRecovery = true;
+    discord.fetchThread = async (channelId, threadId, starterMessageId) => {
+      assert.equal(channelId, 'events');
+      assert.equal(threadId, null);
+      assert.equal(starterMessageId, created.postId);
+      if (failRecovery) throw new Error('simulated reminder thread recovery failure');
+      return { id: 'recovered-reminder-thread', parentChannelId: channelId, starterMessageId: created.postId, name: 'Erinnerungen', archived: false };
+    };
+    const deleteThread = discord.deleteDiscordThread.bind(discord);
+    discord.deleteDiscordThread = async (threadId) => { order.push(`thread:${threadId}`); await deleteThread(threadId); };
+    const deleteMessage = discord.deleteMessage.bind(discord);
+    discord.deleteMessage = async (channelId, messageId) => { order.push(`message:${messageId}`); await deleteMessage(channelId, messageId); };
+    setGuildDiscordIds(db, 'guild', created.event.eventKey, { reminderThreadId: null });
+    markSeen(db, created.sourceUrl, 'ignored', NOW.toISOString());
+    markEventRetracting(db, created.event.id, 'Quelle wird ignoriert.', NOW.toISOString());
+
+    await assert.rejects(deleteGuildEventObjects({ event: created.event, guildId: 'guild', discord, store: db }));
+    assert.equal(discord.messages.some((message) => message.id === created.postId), true);
+    failRecovery = false;
+    await deleteGuildEventObjects({ event: created.event, guildId: 'guild', discord, store: db });
+
+    assert.ok(discord.deletedThreads.includes('recovered-reminder-thread'));
+    assert.ok(order.indexOf('thread:recovered-reminder-thread') < order.indexOf(`message:${created.postId}`));
+  } finally {
+    db.close();
+  }
+});
+
+test('a stale forum sync snapshot skips writes after its event row is deleted', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumGuardDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, new FakeDiscordPort());
+    discord.forumChannelIds.add('events');
+    deleteEvent(db, created.event.id);
+
+    await syncForumEvent({
+      event: created.event,
+      sourceUrls: [created.sourceUrl],
+      guildId: 'guild',
+      channelId: 'events',
+      discord,
+      store: db,
+      now: NOW,
+    });
+
+    assert.equal(discord.forumPostCreateCount, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('404 and Discord unknown-resource errors count as successful retraction deletes', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const eventKey = 'generic:gone';
+    const eventId = createEvent(db, { eventKey, eventType: 'topic-generic', title: 'Gelöschte Meldung' });
+    upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+    attachSource(db, { eventId, url: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/gone', kind: 'topic' });
+    setGuildDiscordIds(db, 'guild', eventKey, {
+      messageId: 'post-gone', messageChannelId: 'events', reminderThreadId: 'thread-gone',
+      continuationMessageIds: ['continuation-gone'], scheduledEventId: 'schedule-gone',
+    });
+    discord.deleteThreadErrors.push(Object.assign(new Error('Unknown Channel'), { code: 10_003 }));
+    discord.deleteMessageErrors.push(Object.assign(new Error('Unknown Message'), { code: 10_008 }));
+    discord.deleteMessageErrors.push(Object.assign(new Error('Not Found'), { status: 404 }));
+    discord.deleteScheduledErrors.push(Object.assign(new Error('Unknown Guild Scheduled Event'), { code: 10_070 }));
+    const event = getAllEvents(db)[0]!;
+    markSeen(db, 'https://de.finalfantasyxiv.com/lodestone/topics/detail/gone', 'ignored', NOW.toISOString());
+    markEventRetracting(db, eventId, 'Quelle wird ignoriert.', NOW.toISOString());
+
+    await deleteGuildEventObjects({ event, guildId: 'guild', discord, store: db });
+
+    assert.equal(discord.deletedThreads.includes('thread-gone'), true);
+    assert.equal(discord.deletedMessages.filter(({ messageId }) => ['continuation-gone', 'post-gone'].includes(messageId)).length, 2);
+    assert.equal(discord.deletedScheduledEvents.length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('a failed guild cleanup keeps the event until all guilds succeed, and retries after the source leaves the list', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    const created = await createRetractableTopicEvent(db, discord);
+    upsertGuildSetup(db, { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b' });
+    setGuildDiscordIds(db, 'guild-b', created.event.eventKey, { messageId: 'post-b', messageChannelId: 'events-b', scheduledEventId: 'schedule-b' });
+    discord.messages.push({ id: 'post-b', channelId: 'events-b', authorIsBot: true, pinned: false, content: '', embeds: [] });
+    discord.deleteMessageErrors.push(Object.assign(new Error('simulated Discord 503'), { status: 503 }));
+    const guilds = [
+      { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs', firstRun: false },
+      { guildId: 'guild-b', eventChannelId: 'events-b', logChannelId: 'logs-b', firstRun: false },
+    ];
+    const options = { ...cycleOptions(db, discord), guilds };
+
+    await runCycle({ ...options, fetchText: retractableTopicFetcher({ ignored: true }) });
+    await runCycle({ ...options, fetchText: retractableTopicFetcher({ ignored: true }) });
+    assert.ok((db.prepare('SELECT retracted_at AS retractedAt FROM events WHERE id = ?').get(created.event.id) as { retractedAt: string | null }).retractedAt);
+    assert.ok(discord.logChannels.some(({ channelId, content }) => channelId === 'logs'
+      && content.includes('Der Discord-Abgleich für das zurückgezogene Event')));
+    assert.equal(discord.logChannels.filter(({ content }) => content.includes('zurückgezogene Event')).length, 1);
+
+    discord.deleteMessageErrors.push(Object.assign(new Error('Not Found'), { status: 404 }));
+    await runCycle({ ...options, fetchText: retractableTopicFetcher({ ignored: false, includeUnrelatedTopic: true }) });
+
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(created.event.id) as { count: number }).count, 0);
+  } finally {
+    db.close();
+  }
+});
 
 test('FFXV period from the topic supplies the seasonal event when its special page has no period', async () => {
   const topicUrl = '/lodestone/topics/detail/0f1a2726a316f0bce54721fa018a68802564efaa';

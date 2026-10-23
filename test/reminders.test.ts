@@ -3,10 +3,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createEvent, getAllEvents, getGuildEventObject, openDb, setGuildDiscordIds, upsertGuildSetup } from '../src/store.ts';
+import { createEvent, getAllEvents, getGuildEventObject, markEventRetracting, openDb, setGuildDiscordIds, upsertGuildSetup } from '../src/store.ts';
 import { createChar, getReminderRecipients, listChars, recordUserGuild, setCharRemind, setItemDone } from '../src/web/data.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { collectRecentBotMessages } from '../src/discord-history.ts';
+import { withGuildDiscordLock } from '../src/guild-lock.ts';
 import type { DiscordEmbed, DiscordMessagePayload, DiscordMessageSnapshot, DiscordPort, ScheduledEventPayload, ScheduledEventSnapshot } from '../src/types.ts';
 
 class ReminderDiscord implements DiscordPort {
@@ -156,6 +157,30 @@ test('due reminders batch only opted-in users with open items and persist slots 
   } finally {
     db.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a queued reminder skips an event marked retracting before its guild lock opens', async () => {
+  const db = openDb(':memory:');
+  const { eventId } = setup(db);
+  const discord = new ReminderDiscord();
+  const now = new Date('2026-10-17T12:31:00.000Z');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const lock = withGuildDiscordLock('guild-1', async () => gate);
+  const queuedReminder = syncEventReminders({
+    guildId: 'guild-1', channelId: 'events', events: getAllEvents(db), store: db, discord, now,
+  });
+  markEventRetracting(db, eventId, 'Quelle wird ignoriert.', now.toISOString());
+  release();
+  try {
+    await Promise.all([lock, queuedReminder]);
+
+    assert.equal(discord.threadCreateCount, 0);
+    assert.equal(discord.threadSent.length, 0);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM reminder_deliveries').get() as { count: number }).count, 0);
+  } finally {
+    db.close();
   }
 });
 

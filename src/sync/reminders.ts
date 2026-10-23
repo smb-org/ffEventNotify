@@ -7,6 +7,7 @@ import {
   getGuildEventObject,
   markReminderDeliveriesAttempted,
   markReminderDeliveriesSent,
+  isEventRetracting,
   setGuildDiscordIds,
   type ReminderDeliveryKey,
   type Store,
@@ -79,13 +80,16 @@ async function ensureReminderThread(
   store: Store,
   discord: DiscordPort,
 ): Promise<string | undefined> {
+  if (isEventRetracting(store, event.id)) return undefined;
   const card = getGuildEventObject(store, guildId, event.eventKey);
   if (!card?.messageId || card.messageChannelId !== channelId) return undefined;
   if (discord.fetchForumPost) {
     const post = await discord.fetchForumPost(channelId, card.messageId);
     if (!post || !post.starterMessage.authorIsBot ||
       !post.starterMessage.embeds.some((embed) => embed.url && hasEventMarkerUrl(embed.url, event.eventKey))) return undefined;
-    if (discord.keepForumPostActive) await discord.keepForumPostActive(post.id, REMINDER_THREAD_AUTO_ARCHIVE_DURATION);
+    if (discord.keepForumPostActive && !isEventRetracting(store, event.id)) {
+      await discord.keepForumPostActive(post.id, REMINDER_THREAD_AUTO_ARCHIVE_DURATION);
+    }
     return post.id;
   }
   let thread = await discord.fetchThread(channelId, card.reminderThreadId, card.messageId);
@@ -93,6 +97,7 @@ async function ensureReminderThread(
     thread = await discord.fetchThread(channelId, null, card.messageId);
   }
   if (!thread) {
+    if (isEventRetracting(store, event.id)) return undefined;
     thread = await discord.startThreadOnMessage(
       channelId,
       card.messageId,
@@ -170,6 +175,7 @@ async function syncEventRemindersUnlocked({
   const nowMs = now.getTime();
   if (!Number.isFinite(nowMs)) return;
   for (const event of events) {
+    if (isEventRetracting(store, event.id)) continue;
     if (event.endStatus !== 'ok' || !event.endUtc || event.rewardsStatus !== 'ok' || event.rewards.length === 0) continue;
     const endMs = Date.parse(event.endUtc);
     if (!Number.isFinite(endMs) || endMs <= nowMs) continue;
@@ -228,6 +234,7 @@ async function syncEventRemindersUnlocked({
       }
 
       for (const message of splitReminderMessages(prefix, remainingRecipients)) {
+        if (isEventRetracting(store, event.id)) break;
         const marker = batchMarker(guildId, event.eventKey, leadHours, message.userIds);
         const content = message.content.replace(REMINDER_MARKER_PLACEHOLDER, marker);
         markReminderDeliveriesAttempted(store, delivery, message.userIds, now.toISOString());

@@ -264,8 +264,11 @@ export interface DiscordPort {
   fetchThread(channelId: string, threadId: string | null, starterMessageId: string | null): Promise<DiscordThreadSnapshot | null>;
   sendToThread(threadId: string, payload: DiscordMessagePayload): Promise<DiscordMessageSnapshot>;
   deleteThreadMessage?(threadId: string, messageId: string): Promise<void>;
+  deleteMessage?(channelId: string, messageId: string): Promise<void>;
+  deleteDiscordThread?(threadId: string): Promise<void>;
   createScheduledEvent(guildId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
   editScheduledEvent(guildId: string, eventId: string, payload: ScheduledEventPayload): Promise<ScheduledEventSnapshot>;
+  deleteScheduledEvent?(guildId: string, eventId: string): Promise<void>;
   listScheduledEvents(guildId: string): Promise<ScheduledEventSnapshot[]>;
   pinMessage(channelId: string, messageId: string): Promise<void>;
   sendLog(channelId: string, content: string): Promise<void>;

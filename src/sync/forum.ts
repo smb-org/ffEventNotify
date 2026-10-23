@@ -6,6 +6,7 @@ import {
   ensureGuildEventFirstPostAttemptAt,
   getGuild,
   getGuildEventObject,
+  isEventRetracting,
   setGuildEventLastKeepaliveAt,
   setGuildDiscordIds,
   setGuildStatusLastKeepaliveAt,
@@ -261,6 +262,7 @@ interface KeepForumPostVisibleOptions {
   discord: DiscordPort;
   store: Store;
   now: Date;
+  eventId?: number;
 }
 
 async function logForumUnarchiveFailure(
@@ -283,10 +285,13 @@ async function logForumUnarchiveFailure(
 
 async function keepForumPostVisible(options: KeepForumPostVisibleOptions): Promise<boolean> {
   const { post, discord, now, saveLastKeepaliveAt } = options;
+  const eventIsActive = () => options.eventId === undefined || !isEventRetracting(options.store, options.eventId);
+  if (!eventIsActive()) return false;
   let lastKeepaliveAt = options.lastKeepaliveAt;
   if (post.archived) {
     try {
       if (!discord.setForumPostArchived) throw new Error('Dieser Discord-Adapter kann Forum-Posts nicht entarchivieren.');
+      if (!eventIsActive()) return false;
       await discord.setForumPostArchived(post.id, false);
       logAction(options.guildId, 'postUnarchived', `Beitrag „${options.title}“ entarchiviert`);
       lastKeepaliveAt = now.toISOString();
@@ -303,12 +308,17 @@ async function keepForumPostVisible(options: KeepForumPostVisibleOptions): Promi
   if (keepaliveIsDue) {
     try {
       if (discord.refreshForumPostKeepAlive) {
+        if (!eventIsActive()) return false;
         await discord.refreshForumPostKeepAlive(post.id, FORUM_AUTO_ARCHIVE_DURATION);
       } else if (discord.setForumPostAutoArchiveDuration) {
+        if (!eventIsActive()) return false;
         await discord.setForumPostAutoArchiveDuration(post.id, 4_320);
+        if (!eventIsActive()) return false;
         await discord.setForumPostAutoArchiveDuration(post.id, FORUM_AUTO_ARCHIVE_DURATION);
       } else if (discord.keepForumPostActive) {
+        if (!eventIsActive()) return false;
         await discord.keepForumPostActive(post.id, 4_320);
+        if (!eventIsActive()) return false;
         await discord.keepForumPostActive(post.id, FORUM_AUTO_ARCHIVE_DURATION);
       } else {
         throw new Error('Dieser Discord-Adapter kann Forum-Posts nicht aktualisieren.');
@@ -322,8 +332,10 @@ async function keepForumPostVisible(options: KeepForumPostVisibleOptions): Promi
 
   if (post.autoArchiveDuration !== FORUM_AUTO_ARCHIVE_DURATION) {
     if (discord.setForumPostAutoArchiveDuration) {
+      if (!eventIsActive()) return false;
       await discord.setForumPostAutoArchiveDuration(post.id, FORUM_AUTO_ARCHIVE_DURATION);
     } else if (discord.keepForumPostActive) {
+      if (!eventIsActive()) return false;
       await discord.keepForumPostActive(post.id, FORUM_AUTO_ARCHIVE_DURATION);
     }
     saveLastKeepaliveAt(now.toISOString());
@@ -331,7 +343,7 @@ async function keepForumPostVisible(options: KeepForumPostVisibleOptions): Promi
   return true;
 }
 
-async function findForumPost(
+export async function findForumPost(
   channelId: string,
   event: StoreEvent,
   objectThreadId: string | null,
@@ -417,6 +429,7 @@ async function applyContinuationPlan(
   editThread: ForumThreadEdit,
 ): Promise<void> {
   for (const action of plan.actions) {
+    if (isEventRetracting(store, event.id)) return;
     if (action.kind === 'edit') {
       await editThread(() => discord.editMessage(threadId, action.messageId, action.payload));
     } else {
@@ -425,6 +438,7 @@ async function applyContinuationPlan(
     }
   }
   for (const messageId of plan.deletes) {
+    if (isEventRetracting(store, event.id)) return;
     await discord.deleteThreadMessage!(threadId, messageId);
   }
   const nextIds = plan.nextIds.map((id) => {
@@ -446,6 +460,7 @@ export interface SyncForumEventOptions {
 }
 
 async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event, sourceUrls, discord, store, now = new Date() }: SyncForumEventOptions): Promise<string> {
+  if (isEventRetracting(store, event.id)) return getGuildEventObject(store, guildId, event.eventKey)?.messageId ?? '';
   if (!discord.createForumPost || !discord.editForumStarter || !discord.fetchForumTags) {
     throw new Error('Forum-Synchronisierung wird von diesem Discord-Adapter nicht unterstützt.');
   }
@@ -466,6 +481,7 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
   if (!post) {
     const firstPostAttemptAt = ensureGuildEventFirstPostAttemptAt(store, guildId, event.eventKey, now.toISOString());
     if (!firstPostAttemptAt) throw new Error('Der erste Forum-Post-Versuch konnte nicht gespeichert werden.');
+    if (isEventRetracting(store, event.id)) return '';
     post = await discord.createForumPost(channelId, eventTitle(event), payload, appliedTags, FORUM_AUTO_ARCHIVE_DURATION);
     createdPost = true;
     if (eventObject?.messageId) logAction(guildId, 'postRecreated', `Beitrag „${eventTitle(event)}“ neu angelegt (vorher gelöscht)`);
@@ -488,11 +504,14 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
   let unarchivedForUpdate = false;
   let retriedArchivedEdit = false;
   const editThread = async <T>(edit: () => Promise<T>): Promise<T> => {
+    if (isEventRetracting(store, event.id)) return undefined as T;
     try {
       return await edit();
     } catch (error) {
       if (discordErrorCode(error) !== 50_083 || retriedArchivedEdit || !discord.setForumPostArchived) throw error;
+      if (isEventRetracting(store, event.id)) return undefined as T;
       await discord.setForumPostArchived(post.id, false);
+      if (isEventRetracting(store, event.id)) return undefined as T;
       currentArchived = false;
       unarchivedForUpdate = true;
       retriedArchivedEdit = true;
@@ -512,13 +531,23 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
       discord,
       store,
       now,
+      eventId: event.id,
     });
     if (!visible) return post.id;
     currentArchived = false;
   }
 
   if (createdPost) {
-    await addSidebarFollowersToEventPost({ db: store, discord, guildId, threadId: post.id, event, now });
+    if (isEventRetracting(store, event.id)) return post.id;
+    await addSidebarFollowersToEventPost({
+      db: store,
+      discord,
+      guildId,
+      threadId: post.id,
+      event,
+      now,
+      shouldContinue: () => !isEventRetracting(store, event.id),
+    });
   }
 
   const nameChanged = !createdPost && post.name !== eventTitle(event) && Boolean(discord.setForumPostName);
@@ -531,6 +560,7 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
 
   if (eventStatus === 'Beendet' && post.archived && hasPostChanges) {
     if (!discord.setForumPostArchived) throw new Error('Dieser Discord-Adapter kann Forum-Posts nicht entarchivieren.');
+    if (isEventRetracting(store, event.id)) return post.id;
     await discord.setForumPostArchived(post.id, false);
     currentArchived = false;
     unarchivedForUpdate = true;
@@ -562,6 +592,7 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
 
   if (eventStatus === 'Beendet') {
     if (!currentArchived && discord.setForumPostArchived) {
+      if (isEventRetracting(store, event.id)) return post.id;
       await discord.setForumPostArchived(post.id, true);
       currentArchived = true;
       if (!unarchivedForUpdate) logAction(guildId, 'postArchived', `Beitrag „${eventTitle(event)}“ archiviert`);
@@ -576,6 +607,7 @@ export function syncForumEvent(options: SyncForumEventOptions): Promise<string> 
 
 function statusEmbed(events: readonly StoreEvent[], now: Date, guildId: string, store: Store): DiscordEmbed {
   const running = events
+    .filter((event) => !isEventRetracting(store, event.id))
     .filter((event) => event.startStatus === 'ok' && event.startUtc && (
       event.endStatus === 'ok' && event.endUtc || event.endStatus === 'unsicher' && event.endPatch
     ))
@@ -629,8 +661,11 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   if (!discord.fetchForumPost || !discord.listForumPosts || !discord.createForumPost || !discord.editForumStarter || !discord.fetchForumTags) {
     throw new Error('Forum-Status wird von diesem Discord-Adapter nicht unterstützt.');
   }
-  const current = statusEmbed(events, now, guildId, store);
-  const payload: DiscordMessagePayload = { embeds: [current], components: buildForumStatusComponents(guildId) };
+  const statusPayload = (): DiscordMessagePayload => ({
+    embeds: [statusEmbed(events, now, guildId, store)],
+    components: buildForumStatusComponents(guildId),
+  });
+  let payload = statusPayload();
   const guild = getGuild(store, guildId);
   let post = guild?.statusMessageId ? await discord.fetchForumPost(channelId, guild.statusMessageId) : null;
   if (post && !statusPostMatches(post)) post = null;
@@ -641,6 +676,7 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   }
   const statusTagId = (await discord.fetchForumTags(channelId)).find((tag) => tag.name === 'Läuft')?.id;
   if (!post) {
+    payload = statusPayload();
     post = await discord.createForumPost(channelId, 'Läuft gerade', payload, statusTagId ? [statusTagId] : [], FORUM_AUTO_ARCHIVE_DURATION);
     logAction(guildId, 'statusEdited', 'Status-Beitrag „Läuft gerade“ angelegt');
     setGuildStatusMessage(store, guildId, post.id);
@@ -666,6 +702,7 @@ async function syncForumStatusUnlocked({ guildId, channelId, logChannelId, event
   if (post.name !== 'Läuft gerade' && discord.setForumPostName) await discord.setForumPostName(post.id, 'Läuft gerade');
   if (statusTagId && !post.appliedTags.includes(statusTagId) && discord.setForumPostTags) await discord.setForumPostTags(post.id, [statusTagId]);
   if (!post.pinned && discord.pinForumPost) await discord.pinForumPost(post.id);
+  payload = statusPayload();
   if (!samePayload(post.starterMessage, payload)) {
     await discord.editForumStarter(post.id, payload);
     logAction(guildId, 'statusEdited', 'Status-Beitrag „Läuft gerade“ bearbeitet');
