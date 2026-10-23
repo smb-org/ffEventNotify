@@ -150,6 +150,15 @@ test('a shop announcement with an event keyword is ignored', async () => {
   assert.equal(result.status, 'ignored');
 });
 
+test('a community contest announcement with an event keyword is ignored', async () => {
+  const result = await classify({
+    title: 'Ankündigung des „Fan Festival im Gruppenfotomodus“ Screenshot-Gewinnspiels',
+    url: '/lodestone/topics/detail/f19dfeeb61eafd79c11fda40571bf1ed81f1fedc',
+    source: 'topic',
+  }, detailHtml('topics/f19dfeeb61eafd79c11fda40571bf1ed81f1fedc.html'));
+  assert.equal(result.status, 'ignored');
+});
+
 test('a special link without a parsed period falls through keyword classification', async () => {
   const entry = classifyFixture.topicsP1.find((item) => item.note?.includes('without period'))!;
   const result = await classify({ title: entry.title, url: entry.url, source: 'topic' }, detailHtml(entry.fixture));
