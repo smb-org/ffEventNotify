@@ -63,15 +63,19 @@ function periodTexts(html: string): string[] {
     const content = $(element).attr('content');
     if (content) texts.push(normalizedText(content));
   });
-  $('.content__span__period, .content__span, .content__section, .fgs__contents, .fgs__history, .ktg__overview__period, .news__detail__wrapper').each((_, element) => {
-    const markup = ($(element).html() ?? '').replace(/<br\s*\/?>/gi, ' ');
+  $('.content__span__period, .content__span, .content__section, .fgs__contents, .ktg__overview__period, .news__detail__wrapper').each((_, element) => {
+    const node = $(element);
+    if (node.closest('.fgs__history').length > 0) return;
+    const content = node.clone();
+    content.find('.fgs__history').remove();
+    const markup = (content.html() ?? '').replace(/<br\s*\/?>/gi, ' ');
     const text = nodeText(markup);
     if (/\bVon\b/i.test(text)) texts.push(text);
   });
 
   if (texts.length === 0) {
     const body = $('body').clone();
-    body.find('script, style, nav, header, footer, .ldst__side').remove();
+    body.find('script, style, nav, header, footer, .ldst__side, .fgs__history').remove();
     const text = nodeText(body.html() ?? '');
     if (/\bVon\b/i.test(text)) texts.push(text);
   }
