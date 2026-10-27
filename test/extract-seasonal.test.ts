@@ -105,7 +105,7 @@ test('FFXV special page groups all seven linked rewards under its visible sectio
   }
 });
 
-test('Fall Guys parses every historical period and selects the period running at NOW', async () => {
+test('Fall Guys extracts only its current period and selects it running at NOW', async () => {
   const html = fixture('./fixtures/special/fallguys.html');
   const expectedPage = expected('fallguys.json');
   const result = await extract(html);
@@ -117,6 +117,24 @@ test('Fall Guys parses every historical period and selects the period running at
   assert.deepEqual(result.period, { status: 'ok', value: expectedPage.selected });
   assert.deepEqual(result.eventState, { status: 'ok', value: 'active' });
   assert.equal(hasPeriod(html, NOW), 'yes');
+});
+
+test('Fall Guys selects the 2026 period as active during its run', async () => {
+  const html = fixture('./fixtures/special/fallguys.html');
+  const result = await extract(html, new Date('2026-10-16T12:00:00Z'));
+
+  assert.deepEqual(result.period, {
+    status: 'ok',
+    value: { startUtc: '2026-10-07T08:00:00Z', endUtc: '2026-10-27T14:59:00Z' },
+  });
+  assert.deepEqual(result.eventState, { status: 'ok', value: 'active' });
+});
+
+test('Fall Guys reports ended after the 2026 period despite its older open-ended history', async () => {
+  const html = fixture('./fixtures/special/fallguys.html');
+  const result = await extract(html, new Date('2026-10-27T15:00:00Z'));
+
+  assert.deepEqual(result.eventState, { status: 'ok', value: 'ended' });
 });
 
 test('a patch maintenance end is a selectable event period for all approved German phrasings', async () => {
@@ -159,15 +177,21 @@ test('a date with an unrelated open-end phrase stays uncertain', async () => {
   }
 });
 
-test('one bad historical timezone label keeps the 2026 Fall Guys page seasonal', async () => {
+test('Fall Guys ignores a bad timezone label in its history', async () => {
   const html = fixture('./fixtures/special/fallguys.html')
     .replace('27. November 2025 um 15:59 Uhr (MEZ)', '27. November 2025 um 15:59 Uhr (MESZ)');
   const result = await extract(html);
 
-  assert.ok(result.period.status === 'unsicher' || (
-    result.period.status === 'ok' && result.period.value.startUtc === '2026-10-07T08:00:00Z'
-  ));
-  assert.ok(hasPeriod(html, NOW) === 'yes' || hasPeriod(html, NOW) === 'unsicher');
+  assert.deepEqual(result.periods, {
+    status: 'ok',
+    value: [{ startUtc: '2026-10-07T08:00:00Z', endUtc: '2026-10-27T14:59:00Z' }],
+  });
+  assert.deepEqual(result.period, {
+    status: 'ok',
+    value: { startUtc: '2026-10-07T08:00:00Z', endUtc: '2026-10-27T14:59:00Z' },
+  });
+  assert.deepEqual(result.eventState, { status: 'ok', value: 'active' });
+  assert.equal(hasPeriod(html, NOW), 'yes');
 });
 
 test('a running period wins over an earlier-listed future period', async () => {
