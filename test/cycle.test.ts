@@ -421,7 +421,7 @@ function controlledFetcher(options: {
 }
 
 const retractableTopicPath = '/lodestone/topics/detail/retractable-shop';
-const retractableTopicTitle = 'Fan Festival: Ankündigung zum Ingame-Event';
+const retractableTopicTitle = 'Patch 7.9: Fan Festival-Ankündigung zum Ingame-Event';
 
 function retractableTopicFetcher(options: { ignored: boolean; includeUnrelatedTopic?: boolean; includeValidSameKey?: boolean; detailStatus?: number }): FetchText {
   const entries = options.includeUnrelatedTopic
@@ -1363,7 +1363,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Mog Mog-Kollektion/);
     assert.deepEqual(discord.logs, [
       'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404. (<https://de.finalfantasyxiv.com/lodestone/special/fallguys/>)',
-      'Erststart: 8 erfasst, 3 gepostet, 14 unklassifiziert, 37 ignoriert',
+      'Erststart: 7 erfasst, 3 gepostet, 14 unklassifiziert, 38 ignoriert',
     ]);
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 3);
 
@@ -1919,7 +1919,7 @@ test('a first-run topic detail failure persists its URL and suppression after it
   const dbPath = join(directory, 'events.sqlite');
   let db = openDb(dbPath);
   const discord = new FakeDiscordPort();
-  const targetUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/02288c94ccfb267ca6df2a31770cd164a4ceb2ce';
+  const targetUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/16cbda3335ab7041f856e437a56a00e4136c9ec5';
   const base = fixtureFetcher();
   let unavailable = true;
   let omitFromList = false;
@@ -1928,7 +1928,7 @@ test('a first-run topic detail failure persists its URL and suppression after it
     if (parsed.pathname === '/lodestone/topics/' && parsed.searchParams.get('page') === null && omitFromList) {
       const response = await base(url, options);
       const $ = load(response.body);
-      $('a[href="/lodestone/topics/detail/02288c94ccfb267ca6df2a31770cd164a4ceb2ce"]').closest('li.news__list--topics').remove();
+      $('a[href="/lodestone/topics/detail/16cbda3335ab7041f856e437a56a00e4136c9ec5"]').closest('li.news__list--topics').remove();
       return { ...response, body: $.html() };
     }
     if (parsed.pathname === new URL(targetUrl).pathname && unavailable) return { status: 503, body: '', finalUrl: url };
