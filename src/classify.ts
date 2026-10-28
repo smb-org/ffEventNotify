@@ -17,7 +17,6 @@ export interface ClassificationOptions {
 
 const keywords = [
   'Brief des Produzenten LIVE',
-  'Fan Festival',
   'Patch',
   'Kampagne',
   'Kollaboration',
@@ -111,6 +110,11 @@ export async function classifyEntry(
       return { status: 'ignored', reason: 'Der Beitrag bewirbt Artikel aus dem Online Store.' };
     }
     return { status: 'classified', eventType: 'topic-generic' };
+  }
+
+  if (entry.source === 'topic' && entry.title.includes('Fan Festival')) {
+    // Fan Festival announcements cover a real-world convention, not an in-game event.
+    return { status: 'ignored', reason: 'Der Beitrag betrifft das Fan Festival, kein Ingame-Event.' };
   }
 
   return { status: 'unclassified', reason: `Keine Klassifikationsregel passt auf „${entry.title}“.` };

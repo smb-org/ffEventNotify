@@ -150,6 +150,18 @@ test('a shop announcement with an event keyword is ignored', async () => {
   assert.equal(result.status, 'ignored');
 });
 
+test('a Fan Festival announcement without another event keyword is ignored', async () => {
+  const result = await classify({
+    title: 'Das Fan Festival 2026 in Tokyo beginnt am 31. Oktober! Lasst euch die Livestreams nicht entgehen!',
+    url: '/lodestone/topics/detail/ce2b34c5d8b5660a93b07e555e775df5ac9628ce',
+    source: 'topic',
+  });
+  assert.deepEqual(result, {
+    status: 'ignored',
+    reason: 'Der Beitrag betrifft das Fan Festival, kein Ingame-Event.',
+  });
+});
+
 test('a community contest announcement with an event keyword is ignored', async () => {
   const result = await classify({
     title: 'Ankündigung des „Fan Festival im Gruppenfotomodus“ Screenshot-Gewinnspiels',
