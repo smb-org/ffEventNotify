@@ -162,6 +162,63 @@ test('a Fan Festival announcement without another event keyword is ignored', asy
   });
 });
 
+test('Twitch campaign announcements without an in-game period are ignored', async () => {
+  const result = await classifyEntry({
+    title: 'Runde 3 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals!',
+    url: '/lodestone/topics/detail/twitch-campaign',
+    source: 'topic',
+  }, undefined, { hasPeriod: () => 'no' });
+  assert.deepEqual(result, {
+    status: 'ignored',
+    reason: 'Der Beitrag betrifft eine Kampagne ohne Ingame-Zeitraum.',
+  });
+});
+
+test('merchandise collaboration announcements without an in-game period are ignored', async () => {
+  const result = await classifyEntry({
+    title: 'Ankündigung neuer Outdoor-Artikel in Kollaboration mit LOGOS!',
+    url: '/lodestone/topics/detail/logos-collaboration',
+    source: 'topic',
+  }, undefined, { hasPeriod: () => 'no' });
+  assert.deepEqual(result, {
+    status: 'ignored',
+    reason: 'Der Beitrag betrifft eine Kollaboration ohne Ingame-Zeitraum.',
+  });
+});
+
+test('patch special page announcements are ignored', async (t) => {
+  for (const title of [
+    'Die Sonderseite zu Patch 7.5 „Trail to the Heavens“ wurde aktualisiert!',
+    'Sonderseite zu Patch 7.4 „Into the Mist“ veröffentlicht!',
+  ]) {
+    await t.test(title, async () => {
+      const result = await classifyEntry({
+        title,
+        url: '/lodestone/topics/detail/patch-special-announcement',
+        source: 'topic',
+      }, undefined, { hasPeriod: () => 'no' });
+      assert.deepEqual(result, { status: 'ignored', reason: 'Der Beitrag kündigt nur eine Patch-Sonderseite an.' });
+    });
+  }
+});
+
+test('other patch announcements remain topic-generic', async (t) => {
+  for (const title of [
+    'Veröffentlichung der Details zu Patch 7.57!',
+    'Vorab-Details zu Patch 7.5',
+    'Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56!',
+  ]) {
+    await t.test(title, async () => {
+      const result = await classifyEntry({
+        title,
+        url: '/lodestone/topics/detail/patch-details',
+        source: 'topic',
+      }, undefined, { hasPeriod: () => 'no' });
+      assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
+    });
+  }
+});
+
 test('a community contest announcement with an event keyword is ignored', async () => {
   const result = await classify({
     title: 'Ankündigung des „Fan Festival im Gruppenfotomodus“ Screenshot-Gewinnspiels',
@@ -180,7 +237,7 @@ test('a special link without a parsed period falls through keyword classificatio
   });
 });
 
-test('each classification keyword has fixture-backed exact-case behavior', async (t) => {
+test('fixture-backed title evidence has the expected exact-case classification', async (t) => {
   for (const item of classifyFixture.keywordEvidence) {
     await t.test(`${item.keyword}: ${item.title}`, async () => {
       if (item.url !== undefined) {

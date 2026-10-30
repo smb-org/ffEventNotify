@@ -217,10 +217,10 @@
     {"keyword":"Brief des Produzenten LIVE","title":"Der Brief des Produzenten LIVE Teil 91 erscheint am Freitag, den 13. März!","expected":"topic-generic"},
     {"keyword":"Fan Festival","title":"Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo","url":"/lodestone/topics/detail/02288c94ccfb267ca6df2a31770cd164a4ceb2ce","expected":"ignore","fixture":"lists/topics-p1.html"},
     {"keyword":"Patch","title":"Veröffentlichung der Details zu Patch 7.57!","expected":"topic-generic"},
-    {"keyword":"Kampagne","title":"Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne","url":"/lodestone/topics/detail/6fc8fd8a97febb08e7c4b8a1c358a7e799d16c74","expected":"topic-generic","fixture":"lists/topics-p3.html"},
-    {"keyword":"Kampagne","title":"Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals!","url":"/lodestone/topics/detail/75f40673168878baa5c1a7da299c68432deaa65b","expected":"topic-generic","fixture":"lists/topics-p3.html"},
+    {"keyword":"Kampagne","title":"Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne","url":"/lodestone/topics/detail/6fc8fd8a97febb08e7c4b8a1c358a7e799d16c74","expected":"ignore","fixture":"lists/topics-p3.html"},
+    {"keyword":"Kampagne","title":"Runde 2 der Twitch-Kampagnen mit Zuschauer-Belohnungen zur Feier unserer Fan Festivals!","url":"/lodestone/topics/detail/75f40673168878baa5c1a7da299c68432deaa65b","expected":"ignore","fixture":"lists/topics-p3.html"},
     {"keyword":"Kampagne","title":"Ankündigung der instax™-Fotokampagne auf X","url":"/lodestone/topics/detail/989bd2cb4d5ec404139a2406990aeb017594facf","expected":"unclassified","fixture":"topics/989bd2cb4d5ec404139a2406990aeb017594facf.html"},
-    {"keyword":"Kollaboration","title":"Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!","expected":"topic-generic"},
+    {"keyword":"Kollaboration","title":"Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!","expected":"ignore"},
     {"keyword":"Mogry-Schatzkammer","title":"Mogry-Schatzkammer","expected":"unclassified","note":"No topic fixture contains this phrase; the live collection is discovered from the banner rail."}
   ],
   "maintenanceP1": [

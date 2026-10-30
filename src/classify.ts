@@ -18,9 +18,13 @@ export interface ClassificationOptions {
 const keywords = [
   'Brief des Produzenten LIVE',
   'Patch',
-  'Kampagne',
-  'Kollaboration',
 ];
+
+const topicExclusions = [
+  ['Kampagne', 'Der Beitrag betrifft eine Kampagne ohne Ingame-Zeitraum.'],
+  ['Kollaboration', 'Der Beitrag betrifft eine Kollaboration ohne Ingame-Zeitraum.'],
+  ['Fan Festival', 'Der Beitrag betrifft das Fan Festival, kein Ingame-Event.'],
+] as const;
 
 const maintenanceNames = new Set([
   'Aether', 'Crystal', 'Chaos', 'Light', 'Shadow', 'Riverside', 'Materia',
@@ -100,6 +104,10 @@ export async function classifyEntry(
   }
 
   if (entry.source === 'topic' && keywords.some((keyword) => entry.title.includes(keyword))) {
+    // Patch special-page announcements are not event announcements.
+    if (/^(?:Die )?Sonderseite zu Patch\b/.test(entry.title)) {
+      return { status: 'ignored', reason: 'Der Beitrag kündigt nur eine Patch-Sonderseite an.' };
+    }
     // Community contest announcements reuse event keywords ("Fan Festival") but are no in-game events.
     if (/gewinnspiel|wettbewerb/i.test(entry.title)) {
       return { status: 'ignored', reason: 'Der Beitrag kündigt ein Community-Gewinnspiel an.' };
@@ -112,9 +120,9 @@ export async function classifyEntry(
     return { status: 'classified', eventType: 'topic-generic' };
   }
 
-  if (entry.source === 'topic' && entry.title.includes('Fan Festival')) {
-    // Fan Festival announcements cover a real-world convention, not an in-game event.
-    return { status: 'ignored', reason: 'Der Beitrag betrifft das Fan Festival, kein Ingame-Event.' };
+  if (entry.source === 'topic') {
+    const exclusion = topicExclusions.find(([term]) => entry.title.includes(term));
+    if (exclusion !== undefined) return { status: 'ignored', reason: exclusion[1] };
   }
 
   return { status: 'unclassified', reason: `Keine Klassifikationsregel passt auf „${entry.title}“.` };
