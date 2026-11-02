@@ -70,6 +70,8 @@ test('creates the storage tables and enforces one event per source URL', () => {
       'warnings_sent',
       'web_chars',
       'web_checklist',
+      'web_skipped',
+      'web_skipped_all',
       'web_user_guilds',
       'web_users',
     ]);

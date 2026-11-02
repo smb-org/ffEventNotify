@@ -100,9 +100,15 @@ tbody th.item { position: sticky; left: 0; z-index: 2; text-align: left; font-we
 tbody tr:not(.sec) { height: 48px; }
 .ico { flex: none; width: 32px; height: 32px; border-radius: 4px; background: var(--surface-2); }
 .iname { min-width: 0; display: grid; font-size: .85rem; line-height: 1.2; }
+.itemcell .iname { flex: 1; }
 .iname a { color: var(--ink); text-decoration-color: var(--line); overflow-wrap: anywhere; }
 .iname a:hover { color: var(--accent); }
 .cost { color: var(--muted); font-size: .72rem; }
+.skip-all { flex: none; width: 1.75rem; height: 28px; min-height: 28px; padding: 0; color: var(--muted); font-size: .8rem; line-height: 1; }
+.skip-all[aria-pressed=true] { background: var(--surface); border-color: var(--muted); color: var(--ink); }
+tr.skip-row { opacity: .7; filter: grayscale(1); }
+tr.skip-row .item { background: var(--surface-2); }
+tr.skip-row .iname a { text-decoration: line-through; }
 tr.sec th { background: var(--surface-2); color: var(--accent); font-family: var(--serif); font-size: .85rem; text-align: left; padding: 4px 10px; }
 tr.sec th span { position: sticky; left: 10px; display: inline-block; }
 .cn { display: block; font-weight: 600; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -111,13 +117,18 @@ tr.sec th span { position: sticky; left: 10px; display: inline-block; }
 .rem { display: inline-flex; gap: 3px; align-items: center; font-size: .7rem; color: var(--muted); cursor: pointer; }
 .rem input { margin: 0; accent-color: var(--accent); }
 td { text-align: center; }
-.cell { width: 44px; height: 44px; padding: 0; border: 0; background: none; border-radius: 8px; display: inline-grid; place-items: center; }
+.cell { width: 44px; height: 44px; padding: 0; border: 0; background: none; border-radius: 8px; display: inline-grid; place-items: center; -webkit-touch-callout: none; user-select: none; }
 .cell svg { width: 28px; height: 28px; }
 .ring { fill: none; stroke: var(--muted); stroke-width: 2; }
 .tick { fill: none; stroke: transparent; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.slash { fill: none; stroke: transparent; stroke-width: 2.2; stroke-linecap: round; }
 .cell:hover .ring { stroke: var(--accent); }
 .cell[aria-pressed=true] .ring { fill: var(--ok); stroke: var(--ok); }
 .cell[aria-pressed=true] .tick { stroke: #fff; }
+.cell[data-skip=true] { opacity: .48; }
+.cell[data-skip=true] .ring { stroke: var(--muted); }
+.cell[data-skip=true] .slash { stroke: var(--muted); }
+.cell:disabled { opacity: .35; }
 .cell[aria-busy=true] { opacity: .6; }
 
 /* toast: fixed, never in the flow */

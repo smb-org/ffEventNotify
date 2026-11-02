@@ -88,6 +88,8 @@ export interface PageInput {
   events: readonly StoreEvent[];
   chars: readonly WebChar[];
   done: ReadonlySet<string>;
+  skipped: ReadonlySet<string>;
+  skippedAll: ReadonlySet<string>;
   /** Selected event (32-char hash) from /e/<hash>; unknown values fall back to the first tab. */
   focusHash?: string | undefined;
   /** True for /archiv. */
@@ -95,23 +97,33 @@ export interface PageInput {
   now: Date;
 }
 
-const MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="ring" cx="12" cy="12" r="9.5"/><path class="tick" d="M7 12.6l3.3 3.3L17 9"/></svg>';
+const MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="ring" cx="12" cy="12" r="9.5"/><path class="tick" d="M7 12.6l3.3 3.3L17 9"/><path class="slash" d="M5 19L19 5"/></svg>';
 
 function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'closed' | 'open'): string {
   const nowMs = input.now.getTime();
   const hash = eventHash(event.eventKey);
   const seen = new Set<string>();
   const rewards = event.rewards.filter((reward) => !seen.has(reward.itemId) && seen.add(reward.itemId));
-  const total = rewards.length;
-  const progress = (char: WebChar) => rewards.filter((reward) => input.done.has(`${char.id}|${event.eventKey}|${reward.itemId}`)).length;
+  const progress = (char: WebChar) => {
+    const relevant = rewards.filter((reward) => !input.skippedAll.has(`${event.eventKey}|${reward.itemId}`)
+      && !input.skipped.has(`${char.id}|${event.eventKey}|${reward.itemId}`));
+    return {
+      done: relevant.filter((reward) => input.done.has(`${char.id}|${event.eventKey}|${reward.itemId}`)).length,
+      total: relevant.length,
+    };
+  };
+  const globalSkipped = (itemId: string) => input.skippedAll.has(`${event.eventKey}|${itemId}`);
   const banner = event.imageUrl && isAllowedSpecialImageUrl(event.imageUrl)
     ? `<img class="banner" src="${esc(event.imageUrl)}" alt="" width="96" height="54" loading="lazy" referrerpolicy="no-referrer">`
     : '<span class="banner"></span>';
   const columns = input.chars.length + 1;
-  const head = input.chars.map((char) => `<th class="char" scope="col" data-char="${char.id}">
+  const head = input.chars.map((char) => {
+    const counts = progress(char);
+    return `<th class="char" scope="col" data-char="${char.id}">
       <span class="cn" title="${esc(char.name)}">${esc(char.name)}</span>
-      <span class="prog" data-total="${total}"><b>${progress(char)}</b>/${total}</span>
-      <label class="rem"><input type="checkbox" data-remind="${char.id}"${char.remind ? ' checked' : ''}><span>erinnern</span></label></th>`).join('');
+      <span class="prog" data-total="${counts.total}"><b>${counts.done}</b>/${counts.total}</span>
+      <label class="rem"><input type="checkbox" data-remind="${char.id}"${char.remind ? ' checked' : ''}><span>erinnern</span></label></th>`;
+  }).join('');
 
   const rows: string[] = [];
   let section: string | undefined;
@@ -126,10 +138,16 @@ function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'clos
       : '<span class="ico"></span>';
     const cost = reward.cost ? `<span class="cost">${esc(reward.cost)}</span>` : '';
     const cells = input.chars.map((char) => {
-      const on = input.done.has(`${char.id}|${event.eventKey}|${reward.itemId}`);
-      return `<td><button type="button" class="cell" aria-pressed="${on}" data-char="${char.id}" data-item="${esc(reward.itemId)}" aria-label="${esc(reward.name)} – ${esc(char.name)}">${MARK}</button></td>`;
+      const key = `${char.id}|${event.eventKey}|${reward.itemId}`;
+      const on = input.done.has(key);
+      const skipped = input.skipped.has(key);
+      const label = `${reward.name} – ${char.name}`;
+      return `<td><button type="button" class="cell" aria-pressed="${on}"${skipped ? ' data-skip="true"' : ''}${globalSkipped(reward.itemId) ? ' disabled' : ''} data-char="${char.id}" data-item="${esc(reward.itemId)}" data-label="${esc(label)}" title="Klick: gesammelt · Rechtsklick/lang drücken: nicht relevant · Shift+Enter/Leertaste: nicht relevant" aria-label="${esc(label)}${skipped ? ' – nicht relevant' : ''}">${MARK}</button></td>`;
     }).join('');
-    rows.push(`<tr><th class="item" scope="row"><div class="itemcell">${icon}<span class="iname"><a href="${ITEM_DB}${encodeURIComponent(reward.itemId)}/" target="_blank" rel="noopener noreferrer">${esc(reward.name)}</a>${cost}</span></div></th>${cells}</tr>`);
+    const allSkipped = input.chars.length > 0 && input.chars.every((char) => input.skipped.has(`${char.id}|${event.eventKey}|${reward.itemId}`));
+    const isGlobalSkipped = globalSkipped(reward.itemId);
+    const rowSkipped = isGlobalSkipped || allSkipped;
+    rows.push(`<tr class="${rowSkipped ? 'skip-row' : ''}" data-global-skip="${isGlobalSkipped}"><th class="item" scope="row"><div class="itemcell">${icon}<span class="iname"><a href="${ITEM_DB}${encodeURIComponent(reward.itemId)}/" target="_blank" rel="noopener noreferrer">${esc(reward.name)}</a>${cost}</span><button type="button" class="skip-all" data-item="${esc(reward.itemId)}" aria-label="${esc(reward.name)} für alle Chars nicht relevant" aria-pressed="${isGlobalSkipped}" title="Für alle Chars nicht relevant">⊘</button></div></th>${cells}</tr>`);
   }
   const empty = input.chars.length === 0 ? '<p class="hint">Lege unten deinen ersten Char an, dann kannst du hier Belohnungen abhaken.</p>' : '';
   const title = esc(event.titleStatus === 'ok' ? event.title : 'FFXIV-Event');
@@ -170,7 +188,9 @@ function openCount(input: PageInput, event: StoreEvent): number | undefined {
   const reminding = input.chars.filter((char) => char.remind);
   if (reminding.length === 0) return undefined;
   const ids = [...new Set(event.rewards.map((reward) => reward.itemId))];
-  return reminding.reduce((sum, char) => sum + ids.filter((id) => !input.done.has(`${char.id}|${event.eventKey}|${id}`)).length, 0);
+  return reminding.reduce((sum, char) => sum + ids.filter((id) => !input.skippedAll.has(`${event.eventKey}|${id}`)
+    && !input.skipped.has(`${char.id}|${event.eventKey}|${id}`)
+    && !input.done.has(`${char.id}|${event.eventKey}|${id}`)).length, 0);
 }
 
 function charManager(chars: readonly WebChar[]): string {

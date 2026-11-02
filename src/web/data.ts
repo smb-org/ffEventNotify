@@ -124,11 +124,52 @@ export function setItemDone(
   if (typeof input.done !== 'boolean') throw new WebInputError('Ungültige Eingabe.');
   const found = requireChar(db, userId, input.charId);
   if (input.done) {
-    db.prepare(`INSERT INTO web_checklist (char_id, event_key, item_id, done_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(char_id, event_key, item_id) DO NOTHING`).run(found.id, input.eventKey, input.itemId, now.toISOString());
+    runTransaction(db, () => {
+      db.prepare(`INSERT INTO web_checklist (char_id, event_key, item_id, done_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(char_id, event_key, item_id) DO NOTHING`).run(found.id, input.eventKey, input.itemId, now.toISOString());
+      db.prepare('DELETE FROM web_skipped WHERE char_id = ? AND event_key = ? AND item_id = ?')
+        .run(found.id, input.eventKey, input.itemId);
+    });
   } else {
     db.prepare('DELETE FROM web_checklist WHERE char_id = ? AND event_key = ? AND item_id = ?')
       .run(found.id, input.eventKey, input.itemId);
+  }
+}
+
+export function setItemSkipped(
+  db: Store,
+  userId: string,
+  input: { charId: unknown; eventKey: string; itemId: string; skip: unknown },
+  now = new Date(),
+): void {
+  if (typeof input.skip !== 'boolean') throw new WebInputError('Ungültige Eingabe.');
+  const found = requireChar(db, userId, input.charId);
+  if (input.skip) {
+    runTransaction(db, () => {
+      db.prepare('DELETE FROM web_checklist WHERE char_id = ? AND event_key = ? AND item_id = ?')
+        .run(found.id, input.eventKey, input.itemId);
+      db.prepare(`INSERT INTO web_skipped (char_id, event_key, item_id, skipped_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(char_id, event_key, item_id) DO NOTHING`).run(found.id, input.eventKey, input.itemId, now.toISOString());
+    });
+  } else {
+    db.prepare('DELETE FROM web_skipped WHERE char_id = ? AND event_key = ? AND item_id = ?')
+      .run(found.id, input.eventKey, input.itemId);
+  }
+}
+
+export function setItemSkippedAll(
+  db: Store,
+  userId: string,
+  input: { eventKey: string; itemId: string; skip: unknown },
+  now = new Date(),
+): void {
+  if (typeof input.skip !== 'boolean') throw new WebInputError('Ungültige Eingabe.');
+  if (input.skip) {
+    db.prepare(`INSERT INTO web_skipped_all (user_id, event_key, item_id, skipped_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, event_key, item_id) DO NOTHING`).run(userId, input.eventKey, input.itemId, now.toISOString());
+  } else {
+    db.prepare('DELETE FROM web_skipped_all WHERE user_id = ? AND event_key = ? AND item_id = ?')
+      .run(userId, input.eventKey, input.itemId);
   }
 }
 
@@ -137,6 +178,20 @@ export function getDoneKeys(db: Store, userId: string): Set<string> {
   const rows = db.prepare(`SELECT c.char_id AS charId, c.event_key AS eventKey, c.item_id AS itemId
     FROM web_checklist c JOIN web_chars w ON w.id = c.char_id WHERE w.user_id = ?`).all(userId) as Array<{ charId: number; eventKey: string; itemId: string }>;
   return new Set(rows.map((row) => `${row.charId}|${row.eventKey}|${row.itemId}`));
+}
+
+/** Per-character skipped keys `charId|eventKey|itemId` for all of a user's characters. */
+export function getSkippedKeys(db: Store, userId: string): Set<string> {
+  const rows = db.prepare(`SELECT c.char_id AS charId, c.event_key AS eventKey, c.item_id AS itemId
+    FROM web_skipped c JOIN web_chars w ON w.id = c.char_id WHERE w.user_id = ?`).all(userId) as Array<{ charId: number; eventKey: string; itemId: string }>;
+  return new Set(rows.map((row) => `${row.charId}|${row.eventKey}|${row.itemId}`));
+}
+
+/** Global skipped keys `eventKey|itemId` for one user. */
+export function getSkippedAllKeys(db: Store, userId: string): Set<string> {
+  const rows = db.prepare('SELECT event_key AS eventKey, item_id AS itemId FROM web_skipped_all WHERE user_id = ?')
+    .all(userId) as Array<{ eventKey: string; itemId: string }>;
+  return new Set(rows.map((row) => `${row.eventKey}|${row.itemId}`));
 }
 
 export interface ReminderChar { name: string; open: number }
@@ -150,10 +205,23 @@ export function getReminderRecipients(db: Store, guildId: string, event: Pick<St
     FROM web_user_guilds g JOIN web_chars w ON w.user_id = g.user_id
     WHERE g.guild_id = ? AND w.remind = 1 ORDER BY w.user_id, w.sort_order, w.id`).all(guildId) as Array<{ userId: string; charId: number; name: string }>;
   const doneStatement = db.prepare('SELECT item_id AS itemId FROM web_checklist WHERE char_id = ? AND event_key = ?');
+  const skippedStatement = db.prepare('SELECT item_id AS itemId FROM web_skipped WHERE char_id = ? AND event_key = ?');
+  const skippedAllStatement = db.prepare('SELECT item_id AS itemId FROM web_skipped_all WHERE user_id = ? AND event_key = ?');
+  const globalSkippedByUser = new Map<string, Set<string>>();
   const recipients = new Map<string, ReminderChar[]>();
   for (const row of rows) {
-    const done = (doneStatement.all(row.charId, event.eventKey) as Array<{ itemId: string }>).filter(({ itemId }) => itemIds.has(itemId)).length;
-    const open = itemIds.size - done;
+    let globalSkipped = globalSkippedByUser.get(row.userId);
+    if (!globalSkipped) {
+      globalSkipped = new Set((skippedAllStatement.all(row.userId, event.eventKey) as Array<{ itemId: string }>)
+        .filter(({ itemId }) => itemIds.has(itemId)).map(({ itemId }) => itemId));
+      globalSkippedByUser.set(row.userId, globalSkipped);
+    }
+    const charSkipped = new Set((skippedStatement.all(row.charId, event.eventKey) as Array<{ itemId: string }>)
+      .filter(({ itemId }) => itemIds.has(itemId)).map(({ itemId }) => itemId));
+    const relevant = [...itemIds].filter((itemId) => !globalSkipped.has(itemId) && !charSkipped.has(itemId));
+    const done = new Set((doneStatement.all(row.charId, event.eventKey) as Array<{ itemId: string }>)
+      .filter(({ itemId }) => relevant.includes(itemId)).map(({ itemId }) => itemId));
+    const open = relevant.length - done.size;
     if (open <= 0) continue;
     recipients.set(row.userId, [...(recipients.get(row.userId) ?? []), { name: row.name, open }]);
   }
