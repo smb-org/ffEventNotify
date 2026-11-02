@@ -5,7 +5,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { getAllEvents, type Store } from '../store.ts';
 import { log } from '../log.ts';
 import {
-  WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, listChars, renameChar, reorderChars, setCharRemind, setItemDone,
+  WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, getSkippedAllKeys, getSkippedKeys, listChars, renameChar,
+  reorderChars, setCharRemind, setItemDone, setItemSkipped, setItemSkippedAll,
 } from './data.ts';
 import { eventHash, hasChecklist, renderNotFound, renderPage } from './render.ts';
 import { TOKEN_PATTERN, type TokenCodec } from './token.ts';
@@ -123,6 +124,20 @@ export function createWebServer(options: WebServerOptions): Server {
         setItemDone(store, userId, { charId: body.charId, eventKey: event.eventKey, itemId: reward.itemId, done: body.done }, now());
         break;
       }
+      case 'skip': {
+        const event = resolveEvent(body.eventKey);
+        const reward = event?.rewards.find((entry) => entry.itemId === body.itemId);
+        if (!event || !reward) throw new WebInputError('Belohnung nicht gefunden.', 404);
+        setItemSkipped(store, userId, { charId: body.charId, eventKey: event.eventKey, itemId: reward.itemId, skip: body.skip }, now());
+        break;
+      }
+      case 'skip-all': {
+        const event = resolveEvent(body.eventKey);
+        const reward = event?.rewards.find((entry) => entry.itemId === body.itemId);
+        if (!event || !reward) throw new WebInputError('Belohnung nicht gefunden.', 404);
+        setItemSkippedAll(store, userId, { eventKey: event.eventKey, itemId: reward.itemId, skip: body.skip }, now());
+        break;
+      }
       case 'chars': createChar(store, userId, body.name); break;
       case 'chars/rename': renameChar(store, userId, body.charId, body.name); break;
       case 'chars/delete': deleteChar(store, userId, body.charId); break;
@@ -160,7 +175,8 @@ export function createWebServer(options: WebServerOptions): Server {
     }
     if (method !== 'GET') return send(response, 405, 'Nicht erlaubt.', 'text/plain; charset=utf-8');
     send(response, 200, renderPage({
-      store, events: getAllEvents(store), chars: listChars(store, userId), done: getDoneKeys(store, userId), focusHash, archiveTab: archiveTab !== undefined, now: now(),
+      store, events: getAllEvents(store), chars: listChars(store, userId), done: getDoneKeys(store, userId),
+      skipped: getSkippedKeys(store, userId), skippedAll: getSkippedAllKeys(store, userId), focusHash, archiveTab: archiveTab !== undefined, now: now(),
     }), 'text/html; charset=utf-8');
   }
 

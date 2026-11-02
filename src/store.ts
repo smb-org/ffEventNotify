@@ -336,13 +336,29 @@ const SCHEMA = `
     PRIMARY KEY (char_id, event_key, item_id)
   );
 
+  CREATE TABLE IF NOT EXISTS web_skipped (
+    char_id INTEGER NOT NULL REFERENCES web_chars(id) ON DELETE CASCADE,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    skipped_at TEXT NOT NULL,
+    PRIMARY KEY (char_id, event_key, item_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS web_skipped_all (
+    user_id TEXT NOT NULL,
+    event_key TEXT NOT NULL REFERENCES events(event_key) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    skipped_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, event_key, item_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_events_end_utc ON events(end_utc);
   CREATE INDEX IF NOT EXISTS idx_event_sources_event_id ON event_sources(event_id);
   CREATE INDEX IF NOT EXISTS idx_seen_entries_first_seen_at ON seen_entries(first_seen_at);
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 12;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -545,6 +561,19 @@ function migrateV10ToV11(db: Store): void {
   }
 }
 
+function migrateV11ToV12(db: Store): void {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(SCHEMA);
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (12)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 function initializeSchema(db: Store): void {
   const hadEvents = tableExists(db, 'events');
   const version = tableExists(db, 'schema_version')
@@ -557,7 +586,7 @@ function initializeSchema(db: Store): void {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     return;
   }
-  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10, migrateV10ToV11];
+  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10, migrateV10ToV11, migrateV11ToV12];
   for (const step of steps.slice(Math.max(0, version - 1))) step(db);
   db.exec(SCHEMA);
   // Added later without a version bump: the guild name for the web page's Discord links.

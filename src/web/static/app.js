@@ -54,18 +54,40 @@
   }
 
   function updateProgress(table, charId) {
-    const done = table.querySelectorAll(`.cell[data-char="${charId}"][aria-pressed="true"]`).length;
+    const cells = [...table.querySelectorAll('.cell')].filter((cell) => cell.dataset.char === String(charId));
+    const relevant = cells.filter((cell) => cell.closest('tr').dataset.globalSkip !== 'true' && cell.dataset.skip !== 'true');
+    const done = relevant.filter((cell) => cell.getAttribute('aria-pressed') === 'true').length;
     const prog = table.querySelector(`thead th[data-char="${charId}"] .prog`);
-    if (prog) prog.querySelector('b').textContent = String(done);
+    if (prog) {
+      prog.dataset.total = String(relevant.length);
+      prog.querySelector('b').textContent = String(done);
+      prog.lastChild.textContent = `/${relevant.length}`;
+    }
     updateOpen(table);
   }
 
+  function updateRowState(row) {
+    const globalSkip = row.dataset.globalSkip === 'true';
+    const cells = [...row.querySelectorAll('.cell')];
+    row.classList.toggle('skip-row', globalSkip || (cells.length > 0 && cells.every((cell) => cell.dataset.skip === 'true')));
+    for (const cell of cells) cell.disabled = globalSkip;
+  }
+
+  function setCellState(cell, done, skipped) {
+    cell.setAttribute('aria-pressed', String(done));
+    if (skipped) cell.dataset.skip = 'true';
+    else delete cell.dataset.skip;
+    cell.setAttribute('aria-label', `${cell.dataset.label}${skipped ? ' – nicht relevant' : ''}`);
+    updateRowState(cell.closest('tr'));
+    updateProgress(cell.closest('table'), cell.dataset.char);
+  }
+
   async function toggleCell(cell) {
-    if (cell.getAttribute('aria-busy') === 'true') return;
+    if (cell.getAttribute('aria-busy') === 'true' || cell.disabled) return;
     const next = cell.getAttribute('aria-pressed') !== 'true';
-    const table = cell.closest('table');
-    const set = (value) => { cell.setAttribute('aria-pressed', String(value)); updateProgress(table, cell.dataset.char); };
-    set(next);
+    const oldDone = cell.getAttribute('aria-pressed') === 'true';
+    const oldSkipped = cell.dataset.skip === 'true';
+    setCellState(cell, next, false);
     cell.setAttribute('aria-busy', 'true');
     try {
       await post('toggle', {
@@ -75,10 +97,60 @@
         done: next,
       });
     } catch (error) {
-      set(!next);
+      setCellState(cell, oldDone, oldSkipped);
       toast(error.message);
     } finally {
       cell.removeAttribute('aria-busy');
+    }
+  }
+
+  async function toggleSkipCell(cell) {
+    if (cell.getAttribute('aria-busy') === 'true' || cell.disabled) return;
+    const oldDone = cell.getAttribute('aria-pressed') === 'true';
+    const oldSkipped = cell.dataset.skip === 'true';
+    const next = !oldSkipped;
+    setCellState(cell, next ? false : oldDone, next);
+    cell.setAttribute('aria-busy', 'true');
+    try {
+      await post('skip', {
+        charId: Number(cell.dataset.char),
+        eventKey: cell.closest('.event').dataset.event,
+        itemId: cell.dataset.item,
+        skip: next,
+      });
+    } catch (error) {
+      setCellState(cell, oldDone, oldSkipped);
+      toast(error.message);
+    } finally {
+      cell.removeAttribute('aria-busy');
+    }
+  }
+
+  async function toggleSkipAll(button) {
+    if (button.getAttribute('aria-busy') === 'true') return;
+    const row = button.closest('tr');
+    const old = button.getAttribute('aria-pressed') === 'true';
+    const next = !old;
+    const table = button.closest('table');
+    const set = (value) => {
+      button.setAttribute('aria-pressed', String(value));
+      row.dataset.globalSkip = String(value);
+      updateRowState(row);
+      for (const header of table.querySelectorAll('thead th[data-char]')) updateProgress(table, header.dataset.char);
+    };
+    set(next);
+    button.setAttribute('aria-busy', 'true');
+    try {
+      await post('skip-all', {
+        eventKey: button.closest('.event').dataset.event,
+        itemId: button.dataset.item,
+        skip: next,
+      });
+    } catch (error) {
+      set(old);
+      toast(error.message);
+    } finally {
+      button.removeAttribute('aria-busy');
     }
   }
 
@@ -132,11 +204,94 @@
     action('chars', { name: event.target.elements.name.value });
   });
 
-  document.querySelector('main').addEventListener('click', (event) => {
+  const main = document.querySelector('main');
+  let activePress;
+  let suppressedCell;
+  let ignoreContextCell;
+  let suppressTimer;
+  let contextTimer;
+  const suppressCellClick = (cell) => {
+    suppressedCell = cell;
+    clearTimeout(suppressTimer);
+    suppressTimer = setTimeout(() => {
+      if (suppressedCell === cell) suppressedCell = undefined;
+    }, 800);
+  };
+
+  main.addEventListener('pointerdown', (event) => {
+    const cell = event.target.closest('.cell');
+    if (!cell || cell.disabled || event.button !== 0 || (event.pointerType !== 'touch' && event.pointerType !== 'pen')) return;
+    const press = { cell, pointerId: event.pointerId, x: event.clientX, y: event.clientY, fired: false, timer: undefined };
+    activePress = press;
+    press.timer = setTimeout(() => {
+      if (activePress !== press) return;
+      press.fired = true;
+      toggleSkipCell(cell);
+    }, 500);
+  });
+  window.addEventListener('pointermove', (event) => {
+    if (!activePress || activePress.pointerId !== event.pointerId || activePress.fired) return;
+    if (Math.hypot(event.clientX - activePress.x, event.clientY - activePress.y) <= 10) return;
+    clearTimeout(activePress.timer);
+    activePress = undefined;
+  });
+  window.addEventListener('pointerup', (event) => {
+    if (!activePress || activePress.pointerId !== event.pointerId) return;
+    const press = activePress;
+    clearTimeout(press.timer);
+    activePress = undefined;
+    if (!press.fired) return;
+    ignoreContextCell = press.cell;
+    clearTimeout(contextTimer);
+    suppressCellClick(press.cell);
+    contextTimer = setTimeout(() => { ignoreContextCell = undefined; }, 800);
+  });
+  window.addEventListener('pointercancel', (event) => {
+    if (!activePress || activePress.pointerId !== event.pointerId) return;
+    clearTimeout(activePress.timer);
+    activePress = undefined;
+  });
+  main.addEventListener('contextmenu', (event) => {
+    const cell = event.target.closest('.cell');
+    if (!cell) return;
+    event.preventDefault();
+    suppressCellClick(cell);
+    if (activePress?.cell === cell) {
+      if (activePress.fired) return;
+      clearTimeout(activePress.timer);
+      activePress.fired = true;
+      toggleSkipCell(cell);
+      return;
+    }
+    if (ignoreContextCell === cell) return;
+    toggleSkipCell(cell);
+  });
+  main.addEventListener('keydown', (event) => {
+    const cell = event.target.closest('.cell');
+    if (!cell || !event.shiftKey || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    toggleSkipCell(cell);
+  });
+  main.addEventListener('click', (event) => {
+    const clickedCell = event.target.closest('.cell');
+    if (clickedCell && suppressedCell === clickedCell) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressedCell = undefined;
+      clearTimeout(suppressTimer);
+      return;
+    }
+    if (clickedCell && event.ctrlKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const skipAll = event.target.closest('.skip-all');
+    if (skipAll) { toggleSkipAll(skipAll); return; }
     const cell = event.target.closest('.cell');
     if (cell) toggleCell(cell);
   });
-  document.querySelector('main').addEventListener('change', async (event) => {
+  main.addEventListener('change', async (event) => {
     const box = event.target.closest('input[data-remind]');
     if (!box) return;
     const id = box.dataset.remind;

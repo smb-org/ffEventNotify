@@ -4,10 +4,11 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { applyField, cacheItem, createEvent, getAllEvents, markEventRetracting, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
+import { applyField, cacheItem, createEvent, deleteEvent, getAllEvents, markEventRetracting, openDb, setGuildDiscordIds, upsertGuildSetup, type Store } from '../src/store.ts';
 import {
   MAX_CHARS, WebInputError, createChar, deleteChar, findUserByToken, getDoneKeys, getOrCreateToken, getReminderRecipients,
-  listChars, recordUserGuild, renameChar, reorderChars, rotateToken, setCharRemind, setItemDone,
+  getSkippedAllKeys, getSkippedKeys, listChars, recordUserGuild, renameChar, reorderChars, rotateToken, setCharRemind,
+  setItemDone, setItemSkipped, setItemSkippedAll,
 } from '../src/web/data.ts';
 import { eventHash, renderPage } from '../src/web/render.ts';
 import { createWebServer } from '../src/web/server.ts';
@@ -109,8 +110,92 @@ test('toggling persists per character and dies with the character', () => {
     assert.throws(() => setItemDone(db, 'user-1', { charId: mira.id, eventKey, itemId: 'a-1', done: 'ja' }), WebInputError);
     setItemDone(db, 'user-1', { charId: mira.id, eventKey, itemId: 'a-1', done: false });
     assert.equal(getDoneKeys(db, 'user-1').size, 1);
+    setItemSkipped(db, 'user-1', { charId: kael.id, eventKey, itemId: 'a-3', skip: true });
+    assert.equal(getSkippedKeys(db, 'user-1').size, 1);
     deleteChar(db, 'user-1', kael.id);
     assert.equal(getDoneKeys(db, 'user-1').size, 0);
+    assert.equal(getSkippedKeys(db, 'user-1').size, 0, 'character deletion cascades its skip rows');
+  } finally {
+    db.close();
+  }
+});
+
+test('skipping and collecting are mutually exclusive per character', () => {
+  const db = fresh();
+  try {
+    const { eventKey } = seedEvent(db, 'skip', 'Event skip', '2026-10-20T14:59:00.000Z');
+    const mira = createChar(db, 'user-1', 'Mira');
+    const key = `${mira.id}|${eventKey}|skip-1`;
+
+    setItemSkipped(db, 'user-1', { charId: mira.id, eventKey, itemId: 'skip-1', skip: true }, NOW);
+    assert.deepEqual([...getSkippedKeys(db, 'user-1')], [key]);
+    setItemDone(db, 'user-1', { charId: mira.id, eventKey, itemId: 'skip-1', done: true }, NOW);
+    assert.equal(getSkippedKeys(db, 'user-1').size, 0, 'collecting clears the skip marker');
+    assert.deepEqual([...getDoneKeys(db, 'user-1')], [key]);
+
+    setItemSkipped(db, 'user-1', { charId: mira.id, eventKey, itemId: 'skip-1', skip: true }, NOW);
+    assert.equal(getDoneKeys(db, 'user-1').size, 0, 'skipping clears the done marker');
+    setItemSkipped(db, 'user-1', { charId: mira.id, eventKey, itemId: 'skip-1', skip: false });
+    assert.equal(getSkippedKeys(db, 'user-1').size, 0);
+    assert.throws(() => setItemSkipped(db, 'user-1', { charId: mira.id, eventKey, itemId: 'skip-1', skip: 'ja' }), WebInputError);
+    assert.throws(() => setItemSkipped(db, 'user-2', { charId: mira.id, eventKey, itemId: 'skip-1', skip: true }), /nicht gefunden/);
+  } finally {
+    db.close();
+  }
+});
+
+test('global skips affect relevant progress and apply to characters created later', () => {
+  const db = fresh();
+  try {
+    const { eventKey } = seedEvent(db, 'global-skip', 'Event global skip', '2026-10-20T14:59:00.000Z');
+    const mira = createChar(db, 'user-1', 'Mira');
+    setItemDone(db, 'user-1', { charId: mira.id, eventKey, itemId: 'global-skip-2', done: true }, NOW);
+    setItemSkippedAll(db, 'user-1', { eventKey, itemId: 'global-skip-1', skip: true }, NOW);
+    assert.deepEqual([...getSkippedAllKeys(db, 'user-1')], [`${eventKey}|global-skip-1`]);
+
+    const kael = createChar(db, 'user-1', 'Kael');
+    const html = renderPage({
+      store: db, events: getAllEvents(db), chars: listChars(db, 'user-1'), done: getDoneKeys(db, 'user-1'),
+      skipped: getSkippedKeys(db, 'user-1'), skippedAll: getSkippedAllKeys(db, 'user-1'), now: NOW,
+    });
+    assert.match(html, /<span class="prog" data-total="2"><b>1<\/b>\/2<\/span>/, 'Mira progress excludes the globally skipped reward');
+    assert.match(html, /<span class="tab-open" data-open>1 offen<\/span>/, 'the open count excludes the globally skipped reward');
+    assert.match(html, new RegExp(`data-char="${kael.id}"[^>]*>[\\s\\S]*?<span class="prog" data-total="2"><b>0<\\/b>\\/2<\\/span>`), 'a later char sees the global skip');
+    assert.match(html, /<tr class="skip-row" data-global-skip="true"><th class="item"/);
+    assert.match(html, /class="skip-all" data-item="global-skip-1" aria-label="Belohnung 1 für alle Chars nicht relevant" aria-pressed="true"/);
+    assert.equal(getDoneKeys(db, 'user-1').size, 1, 'a global skip leaves existing done state untouched');
+
+    setItemSkipped(db, 'user-1', { charId: mira.id, eventKey, itemId: 'global-skip-3', skip: true }, NOW);
+    setItemSkipped(db, 'user-1', { charId: kael.id, eventKey, itemId: 'global-skip-3', skip: true }, NOW);
+    const allSkippedHtml = renderPage({
+      store: db, events: getAllEvents(db), chars: listChars(db, 'user-1'), done: getDoneKeys(db, 'user-1'),
+      skipped: getSkippedKeys(db, 'user-1'), skippedAll: getSkippedAllKeys(db, 'user-1'), now: NOW,
+    });
+    assert.match(allSkippedHtml, /data-skip="true"/);
+    assert.match(allSkippedHtml, /<tr class="skip-row" data-global-skip="false"><th class="item"/);
+    assert.match(allSkippedHtml, /aria-label="Belohnung 3 – Mira – nicht relevant"/);
+    assert.match(allSkippedHtml, /title="Klick: gesammelt · Rechtsklick\/lang drücken: nicht relevant · Shift\+Enter\/Leertaste: nicht relevant"/);
+
+    setItemSkippedAll(db, 'user-1', { eventKey, itemId: 'global-skip-1', skip: false });
+    assert.equal(getSkippedAllKeys(db, 'user-1').size, 0, 'turning global skip off removes only its own marker');
+    assert.equal(getSkippedKeys(db, 'user-1').size, 2, 'character skip state remains');
+  } finally {
+    db.close();
+  }
+});
+
+test('event deletion cascades both kinds of skip state', () => {
+  const db = fresh();
+  try {
+    const { eventKey } = seedEvent(db, 'skip-cleanup', 'Cleanup event', '2026-10-20T14:59:00.000Z');
+    const mira = createChar(db, 'user-1', 'Mira');
+    setItemSkipped(db, 'user-1', { charId: mira.id, eventKey, itemId: 'skip-cleanup-1', skip: true });
+    setItemSkippedAll(db, 'user-1', { eventKey, itemId: 'skip-cleanup-2', skip: true });
+    const eventId = (db.prepare('SELECT id FROM events WHERE event_key = ?').get(eventKey) as { id: number }).id;
+
+    assert.equal(deleteEvent(db, eventId), true);
+    assert.equal(getSkippedKeys(db, 'user-1').size, 0);
+    assert.equal(getSkippedAllKeys(db, 'user-1').size, 0);
   } finally {
     db.close();
   }
@@ -134,7 +219,7 @@ test('migration turns old per-guild checklist rows into a Hauptchar', () => {
     db.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 11);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 12);
     const one = listChars(db, 'user-1');
     assert.deepEqual(one.map(({ name, remind }) => [name, remind]), [['Hauptchar', true]]);
     assert.deepEqual([...getDoneKeys(db, 'user-1')].sort(), [`${one[0]!.id}|${eventKey}|m-1`, `${one[0]!.id}|${eventKey}|m-2`]);
@@ -243,7 +328,7 @@ test('the web checklist excludes events marked retracting', () => {
     const event = getAllEvents(db).find((candidate) => candidate.eventKey === eventKey)!;
     markEventRetracting(db, event.id, 'Quelle wird ignoriert.', NOW.toISOString());
 
-    const html = renderPage({ store: db, events: getAllEvents(db), chars: [], done: new Set(), now: NOW });
+    const html = renderPage({ store: db, events: getAllEvents(db), chars: [], done: new Set(), skipped: new Set(), skippedAll: new Set(), now: NOW });
     assert.doesNotMatch(html, /Zurückgezogenes Event/);
   } finally {
     db.close();
@@ -257,7 +342,7 @@ test('a patch-bound event stays in the current checklist with its German open-en
     const { eventKey } = seedEvent(db, 'keybound', 'Tastenschläger', '2026-11-20T14:59:00.000Z', 3, '2026-10-28T08:00:00.000Z');
     db.prepare("UPDATE events SET end_utc = NULL, end_status = 'unsicher', end_reason = ?, end_patch = '8.0' WHERE event_key = ?")
       .run('Wird mit der Wartung zu Patch 8.0 festgelegt.', eventKey);
-    const html = renderPage({ store: db, events: getAllEvents(db), chars: [], done: new Set(), now: NOW });
+    const html = renderPage({ store: db, events: getAllEvents(db), chars: [], done: new Set(), skipped: new Set(), skippedAll: new Set(), now: NOW });
     assert.ok(html.includes('ab 28.10.2026 09:00 bis Patch 8.0'));
     assert.ok(html.indexOf('Bekanntes Ende') < html.indexOf('Tastenschläger'));
     assert.ok(html.includes('angekündigt'));
@@ -346,6 +431,22 @@ test('the API toggles, manages chars and rejects missing header or foreign origi
 
     assert.equal((await post(`/c/${token}/api/toggle`, toggle, { 'X-FFE': '1', Origin: BASE, 'Sec-Fetch-Site': 'same-origin' })).status, 200);
     assert.equal(getDoneKeys(db, 'user-1').size, 1);
+    const skip = { charId, eventKey: hash, itemId: 'api-1', skip: true };
+    assert.equal((await post(`/c/${token}/api/skip`, skip)).status, 200);
+    assert.equal(getDoneKeys(db, 'user-1').size, 0, 'skip clears the done row');
+    assert.equal(getSkippedKeys(db, 'user-1').size, 1);
+    assert.equal((await post(`/c/${token}/api/skip`, { ...skip, skip: false })).status, 200);
+    assert.equal(getSkippedKeys(db, 'user-1').size, 0);
+    assert.equal((await post(`/c/${token}/api/skip`, { ...skip, skip: 'ja' })).status, 400);
+    assert.equal((await post(`/c/${token}/api/skip`, { ...skip, itemId: 'nope' })).status, 404);
+    assert.equal((await post(`/c/${token}/api/skip`, { ...skip, charId: 99999 })).status, 404);
+    const skipAll = { eventKey: hash, itemId: 'api-1', skip: true };
+    assert.equal((await post(`/c/${token}/api/skip-all`, skipAll)).status, 200);
+    assert.equal(getSkippedAllKeys(db, 'user-1').size, 1);
+    assert.equal((await post(`/c/${token}/api/skip-all`, { ...skipAll, skip: 'ja' })).status, 400);
+    assert.equal((await post(`/c/${token}/api/skip-all`, { ...skipAll, itemId: 'nope' })).status, 404);
+    assert.equal((await post(`/c/${token}/api/skip-all`, { ...skipAll, skip: false })).status, 200);
+    assert.equal(getSkippedAllKeys(db, 'user-1').size, 0);
     assert.equal((await post(`/c/${token}/api/toggle`, { ...toggle, itemId: 'nope' })).status, 404);
     assert.equal((await post(`/c/${token}/api/toggle`, { ...toggle, charId: 99999 })).status, 404);
     assert.equal((await post(`/c/${token}/api/toggle`, { ...toggle, done: 'x' })).status, 400);

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createEvent, getAllEvents, getGuildEventObject, markEventRetracting, openDb, setGuildDiscordIds, upsertGuildSetup } from '../src/store.ts';
-import { createChar, getReminderRecipients, listChars, recordUserGuild, setCharRemind, setItemDone } from '../src/web/data.ts';
+import {
+  createChar, getReminderRecipients, listChars, recordUserGuild, setCharRemind, setItemDone, setItemSkipped, setItemSkippedAll,
+} from '../src/web/data.ts';
 import { syncEventReminders } from '../src/sync/reminders.ts';
 import { collectRecentBotMessages } from '../src/discord-history.ts';
 import { withGuildDiscordLock } from '../src/guild-lock.ts';
@@ -324,6 +326,26 @@ test('current rewards without checklist rows count as unfinished for existing su
     assert.deepEqual(getReminderRecipients(db, 'guild-1', updated), [
       { userId: 'user-01', chars: [{ name: 'Mira', open: 5 }] },
     ]);
+  } finally {
+    db.close();
+  }
+});
+
+test('reminder open counts exclude per-character and global skips', () => {
+  const db = openDb(':memory:');
+  const { eventId, eventKey } = setup(db);
+  try {
+    const event = getAllEvents(db).find((candidate) => candidate.id === eventId)!;
+    const mira = listChars(db, 'user-01')[0]!;
+    setItemSkipped(db, 'user-01', { charId: mira.id, eventKey, itemId: 'item-a', skip: true });
+    setItemSkippedAll(db, 'user-01', { eventKey, itemId: 'item-b', skip: true });
+    setItemDone(db, 'user-01', { charId: mira.id, eventKey, itemId: 'item-c', done: true });
+    assert.deepEqual(getReminderRecipients(db, 'guild-1', event), [
+      { userId: 'user-01', chars: [{ name: 'Mira', open: 1 }] },
+    ]);
+
+    setItemSkippedAll(db, 'user-01', { eventKey, itemId: 'item-d', skip: true });
+    assert.deepEqual(getReminderRecipients(db, 'guild-1', event), [], 'a char with all relevant rewards collected or skipped has no reminder');
   } finally {
     db.close();
   }
