@@ -72,10 +72,12 @@ function parseSeasonalPage(html: string, now: Date): WikiParseResult | undefined
   const unparsed: WikiEvent[] = [];
   content.find('h2, h3').each((_, element) => {
     const heading = $(element).text().replace(/\s+/g, ' ').trim();
-    const match = heading.match(new RegExp(`^${month}\\s*:\\s*(.+)$`, 'i'));
+    const match = heading.match(new RegExp(`^((?:${monthNamePattern})(?:\\s*\\/\\s*(?:${monthNamePattern}))*)\\s*(?::\\s*(.*))?$`, 'i'));
     if (match === null) return;
+    const headingMonths = match[1]!.split('/').map((name) => name.trim());
+    if (!headingMonths.some((name) => name.toLowerCase() === month.toLowerCase())) return;
     foundMonth = true;
-    const name = match[1]!.trim();
+    const name = match[2]?.trim() ?? '';
     if (!name || /^no regularly scheduled special events\.?$/i.test(name)) return;
     unparsed.push({ name, unparsedReason: 'Auf der Saison-Event-Seite steht kein verlässlicher Zeitraum.' });
   });

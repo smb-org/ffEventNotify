@@ -33,6 +33,44 @@ test('wiki parsers extract the running Moogle event and mark date-free seasonal 
   });
 });
 
+test('seasonal fixture headings are recognized for every month', () => {
+  const expectedNames = [
+    ['Heavensturn'],
+    ["Valentione's Day"],
+    ["Little Ladies' Day"],
+    ['Hatching-tide'],
+    ['The Make It Rain Campaign'],
+    [],
+    [],
+    ['Moonfire Faire', 'The Rising'],
+    ['The Rising'],
+    ["All Saints' Wake"],
+    [],
+    ['Starlight Celebration'],
+  ];
+
+  expectedNames.forEach((names, month) => {
+    const result = parseWikiEvents(fixture('wiki/seasonal-events.html'), new Date(Date.UTC(2026, month, 16, 12)));
+    assert.deepEqual(result, {
+      ok: true,
+      events: [],
+      unparsed: names.map((name) => ({
+        name,
+        unparsedReason: 'Auf der Saison-Event-Seite steht kein verlässlicher Zeitraum.',
+      })),
+    }, `month ${month + 1}`);
+  });
+});
+
+test('seasonal parser does not treat text containing November as its month heading', () => {
+  for (const heading of ['Novemberfest', 'Notes: November']) {
+    assert.deepEqual(parseWikiEvents(`<div id="mw-content-text"><h2>${heading}</h2></div>`, new Date('2026-11-16T12:00:00Z')), {
+      ok: false,
+      reason: 'Auf der Wiki-Seite wurde keine unterstützte Ereignisstruktur gefunden.',
+    });
+  }
+});
+
 test('wiki parser reports an unexpected page structure without throwing', () => {
   assert.deepEqual(parseWikiEvents('<html><body>changed</body></html>', now), {
     ok: false,
