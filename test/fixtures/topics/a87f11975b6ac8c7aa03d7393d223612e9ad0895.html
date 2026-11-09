@@ -1,0 +1,1581 @@
+<!DOCTYPE html>
+<html lang="de" class="de" xmlns:og="http://ogp.me/ns#" xmlns:fb="http://www.facebook.com/2008/fbml">
+<head><meta charset="utf-8">
+
+<script>
+	window.dataLayer = window.dataLayer || [];
+	function gtag(){dataLayer.push(arguments);}
+	(function() {
+		var cookie_suffix = '';
+		var get_cookie = function(name) {
+			var cookies = document.cookie ? document.cookie.split('; ') : [];
+			for ( var i = 0; i < cookies.length; i++ ) {
+				var cookie = cookies[i].split('=');
+				if ( cookie.shift() === name ) {
+					return decodeURIComponent(cookie.join('='));
+				}
+			}
+			return null;
+		};
+		var theme = get_cookie('ldst_theme' + cookie_suffix) || 'white';
+		if ( theme !== 'black' ) {
+			theme = 'white';
+		}
+		window.ldst_theme = theme;
+		window.ldst_apply_theme_switcher = function(root) {
+			if ( !root ) {
+				return;
+			}
+			var nodes = root.querySelectorAll('.sys_theme');
+			var active_theme = window.ldst_theme || 'white';
+			var has_active_theme = false;
+			for ( var i = 0; i < nodes.length; i++ ) {
+				if ( nodes[i].getAttribute('data-theme') === active_theme ) {
+					has_active_theme = true;
+					break;
+				}
+			}
+			if ( !has_active_theme ) {
+				active_theme = 'white';
+			}
+			for ( var i = 0; i < nodes.length; i++ ) {
+				nodes[i].classList.toggle('active', nodes[i].getAttribute('data-theme') === active_theme);
+			}
+		};
+		window.ldst_write_theme_link = function(options) {
+			var links = options.links || {};
+			var active_theme = window.ldst_theme || 'white';
+			if ( !links[active_theme] ) {
+				active_theme = 'white';
+			}
+			var html = '<link href="' + links[active_theme] + '" rel="stylesheet" class="sys_theme_css"';
+			if ( options.media ) {
+				html += ' media="' + options.media + '"';
+			}
+			for ( var key in links ) {
+				if ( Object.prototype.hasOwnProperty.call(links, key) ) {
+					html += ' data-theme_' + key + '="' + links[key] + '"';
+				}
+			}
+			html += '>';
+			document.write(html);
+		};
+		window.ldst_gtm_variable = {
+			'login': 'notloginuser',
+			'theme':  theme
+		};
+		
+		
+	})();
+</script>
+
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','digitalData','GTM-P37XSWJ');</script>
+<!-- End Google Tag Manager -->
+
+
+
+<title>Veröffentlichung der Details zu Patch 7.58! | FINAL FANTASY XIV - Der Lodestone</title>
+<meta name="description" content="Veröffentlichung der Details zu Patch 7.58!">
+
+<meta name="keywords" content="FF14,FFXIV,Final Fantasy XIV,Final Fantasy 14,Lodestone,Spieler,Seiten,Community,Player,A Realm Reborn,Heavensward,Stormblood,Shadowbringers,Endwalker,Dawntrail">
+
+<meta name="author" content="SQUARE ENIX Ltd.">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="format-detection" content="telephone=no">
+
+<link rel="alternate" type="application/atom+xml" href="/lodestone/news/news.xml" title="Neuigkeiten | FINAL FANTASY XIV - Der Lodestone">
+<link rel="alternate" type="application/atom+xml" href="/lodestone/news/topics.xml" title="Artikel | FINAL FANTASY XIV - Der Lodestone">
+
+<link rel="shortcut icon" type="image/vnd.microsoft.icon" href="https://lds-img.finalfantasyxiv.com/pc/global/images/favicon.ico?1792043712">
+<link rel="apple-touch-icon-precomposed" href="https://lds-img.finalfantasyxiv.com/h/0/U2uGfVX4GdZgU1jASO0m9h_xLg.png">
+<meta name="msapplication-TileImage" content="https://lds-img.finalfantasyxiv.com/h/0/U2uGfVX4GdZgU1jASO0m9h_xLg.png">
+
+<meta name="msapplication-TileColor" content="#000000">
+<link rel="alternate" hreflang="en-gb" href="https://eu.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">
+<link rel="alternate" hreflang="en-us" href="https://na.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">
+<link rel="alternate" hreflang="fr" href="https://fr.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">
+<link rel="alternate" hreflang="ja" href="https://jp.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">
+
+
+
+
+<link rel="amphtml" href="/lodestone/amp/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">
+
+
+<!--[if lt IE 9]>
+	<script src="https://lds-img.finalfantasyxiv.com/h/I/SMlNRnAvuilc1lYKBpzKWpmADs.js"></script>
+
+<![endif]-->
+<!-- ** CSS ** -->
+
+<link href="https://lds-img.finalfantasyxiv.com/h/M/gnHIH2j_-_0VBfgUjGhRVd9Jzg.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/q/JBwrsXAApGdTnITZ66OtFX75to.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/b/WXbHgaAp7JzOhVFP91E3giX79s.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/j/JgAulXN0McN_xRNcKLLbnNh4fs.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/o/knBdqVmVK_tDDdOo21wZe0hdw8.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/g/_FT5sBjTZcBxViNIEXYN03sthA.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/w/3KI7E02bylUIk1dGwOPFfJ2vOQ.css" rel="stylesheet">
+<link href="https://lds-img.finalfantasyxiv.com/h/W/6HwIxzuTy2X5uTf7zVXU40VS1c.css" rel="stylesheet">
+
+<link href="https://lds-img.finalfantasyxiv.com/h/h/QgQikFet-NquVs6tJ91-T7JcUo.css" rel="stylesheet">
+	
+	<script>
+		window.ldst_write_theme_link({
+			links: {
+			
+				'white': 'https://lds\u002dimg.finalfantasyxiv.com/h/w/\u002dm4wRVIxU3C0AXl82\u002d5gsaNQb4.css',
+			
+				'black': 'https://lds\u002dimg.finalfantasyxiv.com/h/p/vUhe5KXqjyh\u002d9cucxyapYMxW4U.css'
+			
+			}
+		});
+	</script>
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- ogp -->
+<meta property="fb:app_id" content="">
+<meta property="og:type" content="website">
+<meta property="og:description" content="Veröffentlichung der Details zu Patch 7.58!">
+<meta property="og:title" content="Veröffentlichung der Details zu Patch 7.58! | FINAL FANTASY XIV - Der Lodestone">
+<meta property="og:url" content="https://de.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">
+<meta property="og:site_name" content="FINAL FANTASY XIV - Der Lodestone">
+<meta property="og:locale" content="de_DE">
+
+	<meta property="og:image" content="https://img.finalfantasyxiv.com/t/a87f11975b6ac8c7aa03d7393d223612e9ad0895.jpg?1794219335">
+
+
+
+	<meta property="fb:pages" content="116214575870">
+
+
+<meta name="twitter:card" content="summary_large_image">
+
+	<meta name="twitter:site" content="@ff_xiv_de">
+
+
+
+
+<script>
+	var base_domain = 'finalfantasyxiv.com';
+	var ldst_subdomain = 'de';
+	var ldst_subdomain_suffix = '';
+	var strftime_fmt = {
+		'dateHHMM_now': 'Heute %H:%M',
+		'dateYMDHMS': '%d.%m.%Y, %H.%M.%S',
+		'dateYMDHM': '%d.%m.%Y, %H:%M',
+		'dateYMDHM_jp': '%Y/%m/%d %H:%M',
+		'dateHM': '%H:%M',
+		'dateYMDH': '%d.%m.%Y, %H',
+		'dateYMD': '%d.%m.%Y',
+		'dateEternal': '%d.%m.%Y',
+		'dateYMDW': '%d.%m.%Y (%a)',
+		'dateHM': '%H:%M',
+		'week.0': 'So',
+		'week.1': 'Mo',
+		'week.2': 'Di',
+		'week.3': 'Mi',
+		'week.4': 'Do',
+		'week.5': 'Fr',
+		'week.6': 'Sa',
+		'ampm.0': 'a.m.',
+		'ampm.1': 'p.m.'
+	};
+	var base_uri   = '/lodestone/';
+	var api_uri    = '/lodestone/api/';
+	var static_uri = 'https://lds\u002dimg.finalfantasyxiv.com/';
+	var subdomain  = 'de';
+	var csrf_token = '8bd87b44a948a9c59d9ee0abea2a54d80a26d30c';
+	var cis_origin = 'https://secure.square\u002denix.com';
+	var ldst_max_image_size = 31457280;
+	var eorzeadb = {
+		cdn_prefix: 'https://lds\u002dimg.finalfantasyxiv.com/',
+		version: '1791873949',
+		version_js_uri:  'https://lds-img.finalfantasyxiv.com/pc/global/js/eorzeadb/version.js',
+		dynamic_tooltip: false
+	};
+	var cookie_suffix = '';
+	var ldst_is_loggedin = false;
+	var show_achievement = false;
+</script>
+<script src="https://lds-img.finalfantasyxiv.com/h/A/PknAmzDJUZCNhTGtSGGMIGi5k4.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/A/ak0dIM6d4V4mN-y_odkmGzm4fY.js"></script>
+
+
+
+
+	
+
+
+</head>
+<body id="news" class=" lang_de">
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-P37XSWJ"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+
+
+
+
+<div class="brand"><div class="brand__section">
+	<div class="brand__logo">
+		<a href="
+				https://square-enix-games.com/de_DE
+			" target="_blank"><img src="https://lds-img.finalfantasyxiv.com/h/a/1LbK-2Cqoku3zorQFR0VQ6jP0Y.png" width="130" height="14" alt="SQUARE ENIX">
+		</a>
+	</div>
+
+	
+		<div class="brand__search">
+			<form action="/lodestone/community/search/" class="brand__search__form">
+				<div class="brand__search__focus_bg"></div>
+				<div class="brand__search__base_bg"></div>
+				<input type="text" id="txt_search" class="brand__search--text" name="q" placeholder="Stichwort">
+				<input type="submit" id="bt_search" class="brand__search--btn" value="">
+			</form>
+		</div>
+	
+
+	
+		<div class="brand__theme sys_theme_switcher">
+			<a href="javascript:void(0);"><i class="brand__theme--white sys_theme js__tooltip" data-tooltip="Design (schwarz)" data-theme="white"></i></a>
+			<a href="javascript:void(0);"><i class="brand__theme--black sys_theme js__tooltip" data-tooltip="Design (weiß)" data-theme="black"></i></a>
+		</div>
+		<script>
+			(function() {
+				if ( window.ldst_apply_theme_switcher ) {
+					window.ldst_apply_theme_switcher(document.currentScript.previousElementSibling);
+				}
+			})();
+		</script>
+	
+
+	<div class="brand__lang dropdown_trigger_box">
+		<a href="javascript:void(0);" class="brand__lang__btn dropdown_trigger">Deutsch</a>
+		<ul class="brand__lang__select dropdown">
+		
+			<li><a href="https://de.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">Deutsch</a></li>
+		
+			<li><a href="https://eu.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">English (UK)</a></li>
+		
+			<li><a href="https://na.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">English (US)</a></li>
+		
+			<li><a href="https://fr.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">Français</a></li>
+		
+			<li><a href="https://jp.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895">日本語</a></li>
+		
+		</ul>
+	</div>
+
+
+	
+		<div class="l__cross_menu de">
+			<a href="javascript:void(null)" class="ffxiv_pr_cross_menu_button_de"></a>
+			<script>
+				var ffxiv_pr_cross_menu = {
+					uri_js: '/cross_menu/uri.js'
+				};
+			</script>
+			<script src="https://lds-img.finalfantasyxiv.com/promo/pc/global/menu/loader.js"></script>
+		</div>
+	
+</div></div>
+
+
+	
+		
+<header class="l__header">
+	<div class="l__header__inner l__header__bg_image" style="background-image: url(https://lds-img.finalfantasyxiv.com/banner/1566/headerImage_7_5_de.jpg);">
+		<a href="/lodestone/" class="l__header__link_top"></a>
+
+		
+		<a href="/lodestone/topics/detail/44f19ca47eac7b6517ef2fc98cd1da2169da58e1/?utm_source=lodestone&amp;utm_medium=pc_header&amp;utm_campaign=de_7_5patch" class="l__header__link_management"></a>
+
+		<div class="l__header__login clearfix"><a href="/lodestone/account/login/" class="l__header__login__btn">
+			<img src="https://lds-img.finalfantasyxiv.com/h/z/6PLTZ82M99GJ7tKOee1RSwvNrQ.png" width="40" height="40" alt="" class="l__header__login__chara_silhouette">
+			<div class="l__header__login__txt">
+				<p>Check deine Charakterdetails</p>
+				<div>Einloggen</div>
+			</div>
+		</a></div>
+
+	</div>
+</header>
+
+	
+
+	
+		
+
+
+
+	
+
+<div class="global-nav">
+	<nav class="main-nav de">
+		<ul class="main-nav__area main-nav__area__news clearfix ">
+			<li class="main-nav__news main-nav__item">
+				<a href="/lodestone/news/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_main-menu', 'de_news-top');"><span>Neuigkeiten</span></a>
+				<nav class="sub-nav">
+					<div class="sub-nav__area ">
+
+						
+						<div class="sub-nav__list sub-nav__news">
+							<div class="sub-nav__list__inner">
+								<ul class="sub-nav__news__icon">
+									<li>
+										<a href="/lodestone/news/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_top');"><div>
+											<img src="https://lds-img.finalfantasyxiv.com/h/4/B79dZSWmMmTL1owGkr14l4mlcQ.png" width="32" height="32" alt="Neuigkeiten">
+											Neuigkeiten
+										</div></a>
+									</li>
+									<li>
+										<a href="/lodestone/topics/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_topics');"><div>
+											<img src="https://lds-img.finalfantasyxiv.com/h/5/67ZyAIzQUaYoWBmyvFwNvGmCnQ.png" width="32" height="32" alt="Artikel">
+											Artikel
+										</div></a>
+									</li>
+									<li>
+										<a href="/lodestone/news/category/1" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_notices');"><div>
+											<img src="https://lds-img.finalfantasyxiv.com/h/-/Y5JdwnEWYfyO7OlH27eKIm91Ok.png" width="32" height="32" alt="Hinweise">
+											Hinweise
+										</div></a>
+									</li>
+									<li>
+										<a href="/lodestone/news/category/2" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_maintenance');"><div>
+											<img src="https://lds-img.finalfantasyxiv.com/h/s/-JfULvMAf26L7AaU1OGaGYwanI.png" width="32" height="32" alt="Wartung">
+											Wartung
+										</div></a>
+									</li>
+									<li>
+										<a href="/lodestone/news/category/3" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_updates');"><div>
+											<img src="https://lds-img.finalfantasyxiv.com/h/p/HPudyOQcwdv97RBwj3FQC552ps.png" width="32" height="32" alt="Updates">
+											Updates
+										</div></a>
+									</li>
+									<li>
+										<a href="/lodestone/news/category/4" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_Status');"><div>
+											<img src="https://lds-img.finalfantasyxiv.com/h/S/-IC2xIQhTl2ymYW7deE1fOII04.png" width="32" height="32" alt="Status">
+											Status
+										</div></a>
+									</li>
+								</ul>
+								<ul class="sub-nav__news__text">
+									<li><a href="/lodestone/special/patchnote_log/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_patch-notes_special-sites');"><div>
+										Patch-Details & Sonderseiten
+										<span class="update">
+											Aktualisiert am <span id="datetime-79e4f008339">-</span><script>document.getElementById('datetime-79e4f008339').innerHTML = ldst_strftime(1791878400, 'YMD');</script>
+										</span>
+									</div></a></li>
+									<li><a href="/lodestone/special/update_log/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_lodestone-update-notes');"><div>
+										<span class="sub_text">Offizielle Community-Seite</span>
+										Lodestone-Update-Log
+										<span class="update">
+											Aktualisiert am <span id="datetime-a71a9aba164">-</span><script>document.getElementById('datetime-a71a9aba164').innerHTML = ldst_strftime(1791878400, 'YMD');</script>
+										</span>
+									</div></a></li>
+									<li><a href="/lodestone/worldstatus/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_news_server-status');"><div>
+										Status der Welten
+									</div></a></li>
+								</ul>
+							</div>
+						</div>
+
+
+					</div>
+				</nav>
+
+			</li>
+			<li class="main-nav__promotion main-nav__item">
+				<a href="/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_main-menu', 'de_begin-ff14-top');"><span>Abenteuer beginnen</span></a>
+				<nav class="sub-nav ">
+					<div class="sub-nav__area ">
+
+						
+						<div class="sub-nav__list sub-nav__promotion">
+							<div class="sub-nav__list__inner">
+								<div class="sub-nav__promotion__inner">
+									<div class="sub-nav__promotion__link">
+										<div class="sub-nav__promotion__top">
+											<a href="/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_begin-ff14_pr');"><img src="https://lds-img.finalfantasyxiv.com/h/J/oc6AIjDG_V3pe0uQ2TO_SgLZJI.jpg" width="632" height="140" alt="FINAL FANTASY XIV: A Realm Reborn"></a>
+										</div>
+										<ul class="sub-nav__promotion__page">
+											<li><a href="/benchmark/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_begin-ff14_benchmark');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/x/yLkmDjeDW9cU_l1mWtbQUnVIhs.png" width="64" height="40" alt="Benchmark">
+												<span>Benchmark</span>
+											</a></li>
+											<li><a href="
+												
+													http://freetrial.finalfantasyxiv.com/
+												" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_begin-ff14_freetrial');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/c/tWvZpXDc_g6yQd5YKK2k5jhuns.png" width="64" height="40" alt="Kostenloses Probespiel">
+												<span>Kostenloses Probespiel</span>
+											</a></li>
+											<li><a href="/product/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_begin-ff14_product');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/m/NCNLGrn3U9M85ky-NscraujvN8.png" width="64" height="40" alt="Produkt">
+												<span>Produkt</span>
+											</a></li>
+											<li><a href="/winning/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_begin-ff14_awards');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/j/udWU20sWmhYoEsQ_FtrAzVwJ3Q.png" width="64" height="40" alt="Auszeichnungen/Nominierungen">
+												<span>Auszeichnungen/Nominierungen</span>
+											</a></li>
+										</ul>
+									</div>
+									<div class="sub-nav__promotion__patch_site">
+										<a href="/dawntrail/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_begin-ff14_latest-expansion');"><span>
+											<img src="https://lds-img.finalfantasyxiv.com/h/H/40Hg4dml4wfTAWb4S52rHkj7bE.png" width="296" height="232" alt="Zur offiziellen Dawntrail-Seite">
+										</span></a>
+									</div>
+								</div>
+							</div>
+						</div>
+
+					</div>
+				</nav>
+			</li>
+			<li class="main-nav__playguide main-nav__item">
+				<a href="/lodestone/playguide/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_main-menu', 'de_playguide-top');"><span>Spielinfos</span></a>
+				<nav class="sub-nav ">
+					<div class="sub-nav__area ">
+
+						
+						<div class="sub-nav__list sub-nav__playguide">
+							<div class="sub-nav__list__inner">
+								<ul class="sub-nav__playguide__list">
+									<li><a href="/lodestone/playguide/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_playguide_playguide-top');">
+										<img src="https://lds-img.finalfantasyxiv.com/h/P/Lfl3LVb9KMPa5Ye8yxftZkelbc.png" width="40" height="40" alt="Spielinfos<br />Home">
+										<span>Spielinfos<br />Home</span>
+									</a></li>
+									<li><a href="/lodestone/playguide/#game_playguide" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_playguide_game-playguide');">
+										<img src="https://lds-img.finalfantasyxiv.com/h/q/qy4dUGMNkjoyVqPweYMIpOApik.png" width="40" height="40" alt="Spielanleitung<br />Leitfaden für Anfänger">
+										<span>Spielanleitung<br />Leitfaden für Anfänger</span>
+										<span class="update">
+											Aktualisiert am <span id="datetime-a227031d0c1">-</span><script>document.getElementById('datetime-a227031d0c1').innerHTML = ldst_strftime(1791878400, 'YMD');</script>
+										</span>
+									</a></li>
+									<li><a href="/lodestone/playguide/db/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_playguide_databese');">
+										<img src="https://lds-img.finalfantasyxiv.com/h/N/OYPWhQVCkovUbVcMMck0O4HABU.png" width="40" height="40" alt="Eorzea-Datenbank">
+										<span>Eorzea-Datenbank</span>
+										<span class="update">
+											Aktualisiert am <span id="datetime-0052ee6586e">-</span><script>document.getElementById('datetime-0052ee6586e').innerHTML = ldst_strftime(1788854400, 'YMD');</script>
+										</span>
+									</a></li>
+									<li><a href="/lodestone/playguide/#content_guide" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_playguide_contents-guide');">
+										<img src="https://lds-img.finalfantasyxiv.com/h/W/wlHP1NMpdQHcPKUG-swlv71fhE.png" width="40" height="40" alt="Spielinhalte">
+										<span>Spielinhalte</span>
+										<span class="update">
+											Aktualisiert am <span id="datetime-633306a4aa1">-</span><script>document.getElementById('datetime-633306a4aa1').innerHTML = ldst_strftime(1788854400, 'YMD');</script>
+										</span>
+									</a></li>
+									<li><a href="/lodestone/playguide/#side_storyes" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_playguide_side-story');">
+										<img src="https://lds-img.finalfantasyxiv.com/h/Z/1QWgBsVU7ZboWyMZlRjCQcDRJg.png" width="40" height="40" alt="Spielwelt und<br />Geschichten">
+										<span>Spielwelt und<br />Geschichten</span>
+										<span class="update">
+											Aktualisiert am <span id="datetime-5831bd4d6e4">-</span><script>document.getElementById('datetime-5831bd4d6e4').innerHTML = ldst_strftime(1789718400, 'YMD');</script>
+										</span>
+									</a></li>
+									<li><a href="/lodestone/playguide/#option_service" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_playguide_option-service');">
+										<img src="https://lds-img.finalfantasyxiv.com/h/K/4fXwcEoJzDEmFRt-tD7PeeKvjE.png" width="40" height="40" alt="Optionale Dienste">
+										<span>Optionale Dienste</span>
+									</a></li>
+								</ul>
+							</div>
+						</div>
+
+					</div>
+				</nav>
+
+			</li>
+			<li class="main-nav__community main-nav__item">
+				<a href="/lodestone/community/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_main-menu', 'de_community-top');"><span>Community</span></a>
+				<nav class="sub-nav">
+					<div class="sub-nav__area">
+
+						
+						<div class="sub-nav__list sub-nav__community">
+							<div class="sub-nav__list__inner sub-nav__community__flex">
+								<div class="sub-nav__community__link">
+									<div class="sub-nav__community__top">
+										<div class="sub-nav__community__top__wrapper">
+											<h2 class="sub-nav__community__title"><img src="https://lds-img.finalfantasyxiv.com/h/q/GiEpnP3oCXluFjrlPlM-mgIbS8.png" width="16" height="16" alt="Community">Community</h2>
+											<ul class="sub-nav__community__list">
+												<li><a href="/lodestone/community/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_community-top');">
+													<img src="https://lds-img.finalfantasyxiv.com/h/i/Sa5YF2-VFf4IJ1cjjFAbPf4GWg.png" width="40" height="40" alt="Community-Pinnwand">
+													<span>Community-Pinnwand</span>
+												</a></li>
+												<li><a href="/lodestone/blog/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_blog');">
+													<img src="https://lds-img.finalfantasyxiv.com/h/h/6gPbLbzUQ_omC_mdXFUA3zPy7I.png" width="40" height="40" alt="Blogs">
+													<span>Blogs</span>
+												</a></li>
+											</ul>
+										</div>
+										<div class="sub-nav__community__top__wrapper">
+											<h2 class="sub-nav__community__title"><img src="https://lds-img.finalfantasyxiv.com/h/d/in_Sbc6SzxLU--Npa7URI-_kdg.png" width="16" height="16" alt="Suche">Suche</h2>
+											<ul class="sub-nav__community__list">
+												<li><a href="/lodestone/community_finder/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_community-finder');">
+													<img src="https://lds-img.finalfantasyxiv.com/h/V/kHxwEjpY-Fme83ta8VIfi1kyLU.png" width="40" height="40" alt="Community-Suche">
+													<span>Community-Suche</span>
+												</a></li>
+												<li><a href="/lodestone/event/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_event-party');">
+													<img src="https://lds-img.finalfantasyxiv.com/h/0/k5jD6-BJZHwKA2CtbNcDYZR6oY.png" width="40" height="40" alt="Ereignisse & Gruppensuche">
+													<span>Ereignisse & Gruppensuche</span>
+												</a></li>
+											</ul>
+										</div>
+									</div>
+									<div class="sub-nav__community__search">
+										<h2 class="sub-nav__community__title"><img src="https://lds-img.finalfantasyxiv.com/h/X/uQVT3DEl1xlFWHu3UZU4-RBtVk.png" width="16" height="16" alt="Suche">Suche</h2>
+										<ul class="sub-nav__community__list sub-nav__community__search__list">
+											<li><a href="/lodestone/character/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_chara-search');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/5/YcEF3K-5SgqU0BxZtT0D1Zsa2A.png" width="40" height="40" alt="Suche unter Charakteren">
+												<span>Suche unter Charakteren</span>
+											</a></li>
+											<li><a href="/lodestone/linkshell/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_ls-search');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/b/SPCgcBAk4HvMngGzk6H4MfSINg.png" width="40" height="40" alt="Kontaktkreis-Suche">
+												<span>Kontaktkreis-<br />Suche</span>
+											</a></li>
+											<li><a href="/lodestone/crossworld_linkshell/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_cwls-search');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/L/NUGcPcy-C8jvx6oKgEXgwJ1ePE.png" width="40" height="40" alt="Welten-Kontaktkreis<br />Suche">
+												<span>Welten-Kontaktkreis<br />Suche</span>
+											</a></li>
+											<li><a href="/lodestone/freecompany/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_fc-search');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/q/GJ-lsgAtsCCDwCm9te3a5sCjpU.png" width="40" height="40" alt="Suche in Freier Gesellschaft">
+												<span>Suche in Freier Gesellschaft</span>
+											</a></li>
+											<li><a href="/lodestone/pvpteam/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_pvp-team-search');">
+												<img src="https://lds-img.finalfantasyxiv.com/h/K/vZf_pjL1HRJCDF9mxKFKb8iISc.png" width="40" height="40" alt="PvP-Team suchen">
+												<span>PvP-Team suchen</span>
+											</a></li>
+										</ul>
+									</div>
+								</div>
+								<div class="sub-nav__community__side">
+									<div class="sub-nav__community__forum">
+										<ul class="sub-nav__community__forum__list">
+											<li><a href="https://forum.square-enix.com/ffxiv/forum.php" target="_blank" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_forum');">
+												<div class="forum">
+													<i><img src="https://lds-img.finalfantasyxiv.com/h/r/maZ-sHaqn4PMFANUlbH4GzztFM.png" width="40" height="40" alt="Forum">
+													</i><span>Forum</span>
+												</div>
+											</a></li>
+											<li><a href="https://forum.square-enix.com/ffxiv/search.php?do=getdaily_ll&contenttype=vBForum_Post" target="_blank" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_forum-new-posts');">
+												<div>
+													<i><img src="https://lds-img.finalfantasyxiv.com/h/p/hIKumMfCocoSfxWeUUUIL78Jhg.png" width="16" height="16" alt="">
+													</i><span>Neue Einträge</span>
+												</div>
+											</a></li>
+											<li><a href="
+													
+														https://forum.square-enix.com/ffxiv/search.php?do=process&search_type=1&contenttypeid=1&devtrack=1&starteronly=0&showposts=1&childforums=1&forumchoice[]=730
+													" target="_blank" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_forum-dev-tracker');">
+												<div>
+													<i><img src="https://lds-img.finalfantasyxiv.com/h/p/hIKumMfCocoSfxWeUUUIL78Jhg.png" width="16" height="16" alt="">
+													</i><span>Dev-Tracker</span>
+												</div>
+											</a></li>
+										</ul>
+									</div>
+									<ul class="sub-nav__community__fankit">
+										<li><a href="/lodestone/special/fankit/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_community_fankit');">
+											<div>
+												<span>Fan-Kit</span>
+												<span class="update">
+													Aktualisiert am <span id="datetime-805f6630613">-</span><script>document.getElementById('datetime-805f6630613').innerHTML = ldst_strftime(1777363200, 'YMD');</script>
+												</span>
+											</div>
+										</a></li>
+									</ul>
+								</div>
+							</div>
+						</div>
+
+					</div>
+				</nav>
+
+			</li>
+			<li class="main-nav__ranking main-nav__item">
+				<a href="/lodestone/ranking/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_main-menu', 'de_ranking-top');"><span>Ranglisten</span></a>
+					<nav class="sub-nav ">
+						<div class="sub-nav__area ">
+
+							
+							<div class="sub-nav__list sub-nav__ranking">
+								<div class="sub-nav__list__inner">
+									<ul class="sub-nav__ranking__list">
+										<li><a href="/lodestone/ranking/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_ranking-top');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/E/NtymEFiUJfAh25ffTrADsVFkLQ.png" width="40" height="40" alt="Ranglisten">
+											<span>Ranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/crystallineconflict/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_feast');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/K/vZf_pjL1HRJCDF9mxKFKb8iISc.png" width="40" height="40" alt="„Crystalline Conflict“-Ranglisten">
+											<span>„Crystalline Conflict“-Ranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/frontline/weekly/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_frontline');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/K/vZf_pjL1HRJCDF9mxKFKb8iISc.png" width="40" height="40" alt="Front-Ranglisten">
+											<span>Front-Ranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/gc/weekly/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_gc');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/o/uRmujlTx4X_5c6wETNxssK1d_4.png" width="40" height="40" alt="Rang der Staatlichen Gesellschaft">
+											<span>Rang der Staatlichen Gesellschaft</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/fc/weekly/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_fc');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/q/GJ-lsgAtsCCDwCm9te3a5sCjpU.png" width="40" height="40" alt="Rang der Freien Gesellschaft">
+											<span>Rang der Freien Gesellschaft</span>
+										</a></li>
+									</ul>
+									<ul class="sub-nav__ranking__list">
+										<li><a href="/lodestone/ranking/crucible/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_crucible');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/Z/3XIBWcUZ8qh46PnX58UerELjpg.png" width="40" height="40" alt="Brettranglisten">
+											<span>Brettranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/deepdungeon4/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_deepdungeon4');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/_/qP22LgUoAFKDTRayb_TEYu6d7g.png" width="40" height="40" alt="Pilgers Pfad-Ranglisten">
+											<span>Pilgers Pfad-Ranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/deepdungeon3/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_deepdungeon3');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/_/qP22LgUoAFKDTRayb_TEYu6d7g.png" width="40" height="40" alt="Eureka Orthos-Ranglisten">
+											<span>Eureka Orthos-Ranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/deepdungeon2/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_deepdungeon2');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/_/qP22LgUoAFKDTRayb_TEYu6d7g.png" width="40" height="40" alt="Himmelssäule-Ranglisten">
+											<span>Himmelssäule-Ranglisten</span>
+										</a></li>
+										<li><a href="/lodestone/ranking/deepdungeon/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_ranking_deepdungeon');">
+											<img src="https://lds-img.finalfantasyxiv.com/h/p/op9iPrlMmYgTK3Q6NQKifyQOGA.png" width="40" height="40" alt="Palast der Toten-Ranglisten">
+											<span>Palast der Toten-Ranglisten</span>
+										</a></li>
+									</ul>
+								</div>
+							</div>
+
+						</div>
+					</nav>
+
+			</li>
+			<li class="main-nav__help main-nav__item">
+				<a href="/lodestone/help/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_main-menu', 'de_help-support-top');"><span>Hilfe</span></a>
+				<nav class="sub-nav ">
+					<div class="sub-nav__area ">
+
+						
+						<div class="sub-nav__list sub-nav__help">
+							<div class="sub-nav__list__inner">
+								<ul class="sub-nav__help__list">
+									<li><a href="/lodestone/help/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_help-support-top');">
+										<span>Hilfe</span>
+									</a></li>
+									<li><a href="/lodestone/help/about_the_lodestone/" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_about-lodestone');">
+										<span>Über diese Seite</span>
+									</a></li>
+									<li><a href="
+										
+											https://support.eu.square-enix.com/faq.php?id=5385&la=4
+										" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_faq');">
+										<span>Häufige Fragen</span>
+									</a></li>
+									<li><a href="
+										
+											https://eu.square-enix.com/de/seaccount/
+										" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_sqex-account');">
+										<span>Square Enix-Konten</span>
+									</a></li>
+								</ul>
+								<ul class="sub-nav__help__other">
+									<li><a href="
+										
+											https://support.eu.square-enix.com/rule.php?id=5385&la=4
+										" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_rule-policies');">
+										<div>
+											<i><img src="https://lds-img.finalfantasyxiv.com/h/p/hIKumMfCocoSfxWeUUUIL78Jhg.png" width="16" height="16" alt="">
+											</i><span>Regeln & Leitlinien</span>
+										</div>
+									</a></li>
+									<li><a href="
+										
+											https://support.eu.square-enix.com/main.php?id=5385&la=4
+										" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_customer-service');">
+										<div>
+											<i><img src="https://lds-img.finalfantasyxiv.com/h/p/hIKumMfCocoSfxWeUUUIL78Jhg.png" width="16" height="16" alt="">
+											</i><span>Kontakt</span>
+										</div>
+									</a></li>
+									<li><a href="https://secure.square-enix.com/account/app/svc/mogstation/" target="_blank" onClick="ldst_ga('send', 'event', 'lodestone_lo', 'pc_sub-menu', 'de_help-support_mogstation');">
+										<div>
+											<i class="ic_mogst"><img src="https://lds-img.finalfantasyxiv.com/h/S/6IKp0hN6xQqTYPgnPIsd2fjzSI.png" width="32" height="32" alt="">
+											</i><span>Mogry-Station</span>
+										</div>
+									</a></li>
+								</ul>
+							</div>
+						</div>
+
+					</div>
+				</nav>
+
+			</li>
+		</ul>
+	</nav>
+</div>
+
+	
+
+
+<div class="ldst__bg">
+	
+		<div id="breadcrumb">
+			<ul itemscope itemscope itemtype="https://schema.org/BreadcrumbList" class="clearfix">
+				<li class="breadcrumb__home" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+					<a href="/lodestone/" itemprop="item"><span itemprop="name">HOME</span></a>
+					<meta itemprop="position" content="1" />
+				</li>
+				
+				
+					
+					
+					
+						<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+							<a href="/lodestone/news/" itemprop="item" class="breadcrumb__link"><span itemprop="name">Neuigkeiten</span></a>
+							<meta itemprop="position" content="2" />
+						</li>
+					
+				
+					
+					
+					
+						<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+							<a href="/lodestone/topics/" itemprop="item" class="breadcrumb__link"><span itemprop="name">Artikel</span></a>
+							<meta itemprop="position" content="3" />
+						</li>
+					
+				
+					
+					
+					
+						<li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+							<span itemprop="name">Veröffentlichung der Details zu Patch 7.58!</span>
+							<meta itemprop="position" content="4" />
+						</li>
+					
+				
+			</ul>
+		</div>
+	
+
+	<h1 class="heading__title">Artikel</h1>
+
+	
+
+	<div class="ldst__contents clearfix">
+	
+		<div class="ldst__main">
+
+
+
+
+
+<article class="news__detail">
+	<header class="news__header">
+		<time class="news__ic--topics"><span id="datetime-dd7420b1826">-</span><script>document.getElementById('datetime-dd7420b1826').innerHTML = ldst_strftime(1794220200, 'YMDHM');</script></time>
+		<h1>Veröffentlichung der Details zu Patch 7.58!</h1>
+	</header>
+
+	<div class="news__detail__wrapper"><img src="https://img.finalfantasyxiv.com/t/a87f11975b6ac8c7aa03d7393d223612e9ad0895.jpg?1794219335" class="mdl-img__visual"><p class="mdl-text__sm-m16">Mit Patch 7.58 wird das Matching innerhalb derselben Region auf den Datenzentren in Nordamerika und Europa implementiert. Außerdem gibt es weitere Anpassungen am Spielinhalt „Brett der Bestie“ und die Kraft des Transzendierens wird in den Raid-Inhalten „Arkadion - Superschwergewicht (episch)“ verstärkt.</p>
+<h1 class="mdl-title__patch">FINAL FANTASY XIV Patch 7.58</h1>
+					<ul class="mdl-nav js--mdl-nav">
+
+	<li><a href="#random-b454d9e1083cb3787124c4508c3277e0b9759ce8">Spielbare Inhalte</a>
+		<ul class="mdl-nav">
+			
+				<li><a href="#random-e8624988421155517525c0482f151a8fc917e3bc">Unterkünfte</a></li>
+			
+		</ul>
+	</li>
+
+	<li><a href="#random-eff17f121f82df76e736aaadb65cb22be591a204">Kampfsystem</a>
+		<ul class="mdl-nav">
+			
+				<li><a href="#random-b0237d186841590f7622a6237c8e8a1bfd22fc61">Crystalline Conflict</a></li>
+			
+		</ul>
+	</li>
+
+	<li><a href="#random-b5442fd8d34e8b9bb992e40a234e617cd66c873b">System</a>
+		<ul class="mdl-nav">
+			
+		</ul>
+	</li>
+
+	<li><a href="#random-74508f54a5320689639fa86a362e7c0f0e5f8d67">Behobene Probleme</a>
+		<ul class="mdl-nav">
+			
+		</ul>
+	</li>
+
+</ul>
+<div class="mdl-nav__floating">
+	<div class="mdl-nav__floating__icon"></div>
+	<div class="mdl-nav__floating__list">
+		<ul class="mdl-nav">
+			
+				<li><a href="#random-b454d9e1083cb3787124c4508c3277e0b9759ce8">Spielbare Inhalte</a>
+					<ul class="mdl-nav">
+						
+							<li><a href="#random-e8624988421155517525c0482f151a8fc917e3bc">Unterkünfte</a></li>
+						
+					</ul>
+				</li>
+			
+				<li><a href="#random-eff17f121f82df76e736aaadb65cb22be591a204">Kampfsystem</a>
+					<ul class="mdl-nav">
+						
+							<li><a href="#random-b0237d186841590f7622a6237c8e8a1bfd22fc61">Crystalline Conflict</a></li>
+						
+					</ul>
+				</li>
+			
+				<li><a href="#random-b5442fd8d34e8b9bb992e40a234e617cd66c873b">System</a>
+					<ul class="mdl-nav">
+						
+					</ul>
+				</li>
+			
+				<li><a href="#random-74508f54a5320689639fa86a362e7c0f0e5f8d67">Behobene Probleme</a>
+					<ul class="mdl-nav">
+						
+					</ul>
+				</li>
+			
+		</ul>
+	</div>
+</div>
+<h3 class="mdl-title__radius">Erforderliche Lizenzen</h3>
+<p class="mdl-text__xs mdl-text__sm-m16">Patch 7.58 enthält Inhalte, für die die Erweiterung „FINAL FANTASY XIV: Dawntrail“ sowie die entsprechende Lizenz notwendig sind. Welche Inhalte dies betrifft, wird im Folgenden ausführlich dargestellt.</p>
+<dl class="mdl-patch">
+<dt class="mdl-patch--line"><img src="https://img.finalfantasyxiv.com/lds/h/8/vNEWMNCsOTu709b_kR7LodvPu8.png" name="2.x" width="40" height="23" alt=""></dt>
+<dd class="mdl-patch--line">Falls eine Lizenz für „FINAL FANTASY XIV: A Realm Reborn“ vorliegt, sind fortan auch die Inhalte von „FINAL FANTASY XIV: Heavensward“, „FINAL FANTASY XIV: Stormblood“ und „FINAL FANTASY XIV: Shadowbringers“ zugänglich.</dd>
+<dt class="mdl-patch--line"><img src="https://img.finalfantasyxiv.com/lds/h/8/BZ0cgwm4TRlfTZ69XSmFIwYfmA.png" name="6.x" width="40" height="23" alt=""></dt>
+<dd class="mdl-patch--line">Es wird eine Lizenz für „FINAL FANTASY XIV: Endwalker“ benötigt.</dd>
+<dt class="mdl-patch--line"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></dt>
+<dd class="mdl-patch--line">Es wird eine Lizenz für „FINAL FANTASY XIV: Dawntrail“ benötigt.</dd>
+<dt>
+<img src="https://img.finalfantasyxiv.com/lds/h/8/vNEWMNCsOTu709b_kR7LodvPu8.png" name="2.x" width="40" height="23" alt=""><img src="https://img.finalfantasyxiv.com/lds/h/8/BZ0cgwm4TRlfTZ69XSmFIwYfmA.png" name="6.x" width="40" height="23" alt=""><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt="">
+</dt>
+<dd>Um alle Inhalte spielen zu können, werden alle oben genannten Lizenzen benötigt.</dd>
+</dl>
+<h3 class="mdl-title__ancher mdl-title__image mdl-space--lg" id="random-b454d9e1083cb3787124c4508c3277e0b9759ce8">
+<img src="https://img.finalfantasyxiv.com/lds/h/B/008Me6NiValtUap2EbW9-B4_vc.png"><span class="hide">Spielbare Inhalte</span>
+</h3>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Befreundete NPCs, die Abenteurern im NPC-Koop-Modus „Seite an Seite“ in die Dungeons folgen, erhalten mehr Routine.</h3>
+<h4 class="mdl-title__heading--sm mdl-color__green">Betroffene Inhalte</h4>
+<ul class="mdl-list__cat-12  mdl-space--48">
+<li>Ihuykatumu</li>
+<li>Worqor Zormor</li>
+<li>Himmelstiefer Cenote</li>
+<li>Der Außenposten</li>
+<li>Origenik</li>
+</ul>
+<div class="mdl-title__category" id="random-e8624988421155517525c0482f151a8fc917e3bc"><h2>Unterkünfte</h2></div>
+<div class="mdl-patch__heading"><img src="https://img.finalfantasyxiv.com/lds/h/8/vNEWMNCsOTu709b_kR7LodvPu8.png" name="2.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Folgende Anpassungen wurden an den Unterkünften von Freien Gesellschaften vorgenommen:</h3>
+<dl class="mdl-menu mdl-space--48">
+<dt>Es ist nun möglich, das eigene Zimmer von überall aus zu räumen, solange man sich auf der Stammwelt befindet.</dt>
+<dd>Dies funktioniert, indem man unter dem Hauptmenüpunkt „Unterkünfte“ → „Einstellungen einer Unterkunft ändern“ das entsprechende Zimmer aufruft und „Zimmer räumen“ auswählt.</dd>
+<dt>Das eigene Zimmer kann auch aufgegeben werden, wenn darin Mobiliar platziert oder gelagert wurde.</dt>
+<dd>Dieses kann innerhalb von 35 Tagen bei dem Unterkunftsbeamten zurückerhalten werden.</dd>
+</dl>
+<h3 class="mdl-title__ancher mdl-title__image mdl-space--lg" id="random-eff17f121f82df76e736aaadb65cb22be591a204">
+<img src="https://img.finalfantasyxiv.com/lds/h/K/s21Zx6-H41QiwHaIaibez5ADrM.png"><span class="hide">Kampfsystem</span>
+</h3>
+<a name="beastmaster" class="topics__anchor"></a><div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Am Kampfinhalt „Brett der Bestie“ wurden folgende Änderungen vorgenommen:</h3>
+<dl class="mdl-menu">
+<dt>Wenn die „Empfohlene Formation“ verwendet wird, bleiben die der Formation bereits zugeteilten Bestien erhalten.</dt>
+<dd>Bislang wurden bei der Verwendung der Formationsempfehlung auch Bestien ausgetauscht, welche man zuvor selbst der Bestienformation hinzugefügt hat. Wenn künftig also bereits zwei Bestien für eine Partie ausgewählt wurden, werden durch die empfohlene Formation nur die übrigen acht Bestien hinzugefügt, ohne die bereits ausgewählten Bestien auszutauschen.</dd>
+<dt>In der Bestienformation wird von nun an sowohl der tatsächliche als auch der angepasste Bestienrang der einzelnen Bestien angezeigt.</dt>
+<div class="mdl-img__normal-m16"><img src="https://img.finalfantasyxiv.com/t/a87f11975b6ac8c7aa03d7393d223612e9ad0895_0.png?1794219335" class="mdl-img__radius"></div>
+<dt>Wenn im Bestienbuch oder in der Bestienformation nach Bestienrang sortiert wird, folgt diese fortan auf Basis des tatsächlichen Bestienrangs.</dt>
+<dt>Wenn ein Bändigerutensil im Kommandomenü abgelegt wird, wird die genaue Gegenstandsbeschreibung angezeigt, indem man mit dem Mauszeiger über den Gegenstand fährt.</dt>
+<dt>Bei der Nutzung der Controller-Steuerung kann der Cursor über ein vorhandenes Bändigerutensil bewegt und zwischen den Optionen „Benutzen“ und „Wegwerfen“ ausgewählt werden.</dt>
+<dt>Beim Verlassen des Bretts der Bestie werden die Kampfhörner, welche vor der Partie eingestellt wurden, wiederhergestellt.</dt>
+</dl>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">„Gok Tajaal - Enuo“ wurde von der Raid-Suche in die Inhaltssuche verlegt.</h3>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Die Fundrate für Flügel des Nihilismus in „Gok Tajaal - Enuo“ wurde erhöht.</h3>
+<p class="mdl-text__sm-m16">Die folgenden Gegenstände können bei Uah'shepya in Lösung Neun (X:8.7 Y:13.5) eingetauscht werden:</p>
+<div class="mdl-table-m16"><table class="mdl-table__layout"><tbody>
+<tr>
+<th width="49.5%">Dafür erhältlicher Gegenstand</th>
+<th width="1%" class="mdl-table__layout--spacer"></th>
+<th width="49.5%">Tauschgegenstand</th>
+</tr>
+<tr>
+<td class="mdl-layout__left">Flügel des Nihilismus</td>
+<td> </td>
+<td class="mdl-layout__left">Enuo-Totem x99</td>
+</tr>
+</tbody></table></div>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Die Kraft des Transzendierens im Spielinhalt „Arkadion - Superschwergewicht (episch)“ wurde verstärkt.</h3>
+<p class="mdl-text__sm-m16">Wenn die Kraft aktiv ist, werden bei Betreten des Inhalts die maximalen LP, der ausgeteilte Schaden und die Wirkung eigener Heilmagie um 17 % erhöht.<br><span class="mdl-color__notes">※ Es gibt keine stufenweise Erhöhung bei Neustarts.<br>※ Da der Zeitraum zwischen der Veröffentlichung von Patch 7.4 und dem Beginn des Raid-Inhalts „Arkadion - Superschwergewicht (episch)“ länger war, als es bislang bei epischen Raids der Fall war, wurde die Schwierigkeit unter Berücksichtigung der Ausrüstung der Spieler zum Zeitpunkt der Veröffentlichung angepasst. Aus diesem Grund wurde der Statuseffekt Kraft des Transzendierens entsprechend erhöht.</span></p>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Das Wochenlimit für die nach Abschluss des „Arkadion - Superschwergewicht R4“ erhältliche „Holo-Klinge des Superschwergewichts“ wurde aufgehoben.</h3>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Das Wochenlimit für Gaukler-Totems in „Tanzender Wahn (fatal)“ wurde aufgehoben.</h3>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Für den Allianz-Raid „Windurst: Die dritte Etappe“ wurden folgende Änderungen vorgenommen:</h3>
+<dl class="mdl-menu">
+<dt>Das Wochenlimit für alle aus Schatztruhen erbeuteten Gegenstände wurde aufgehoben.</dt>
+<dt>Das Wochenlimit für Ranperre-Münzen und inaktive berstende Polykristalle wurde aufgehoben.</dt>
+</dl>
+<div class="mdl-patch__heading"><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Blitzimprägnierte Lösung, welche benötigt wird, um durch Tausch gegen Allagische Steine der Mnemonik erhaltene Waffen auf Gegenstandsstufe 790 zu bringen, ist nun bei folgendem Händler erhältlich:</h3>
+<h4 class="mdl-title__heading--sm mdl-color__green">Händler und für den Tausch benötigte Gegenstände</h4>
+<div class="mdl-table-m16"><table class="mdl-table__layout"><tbody>
+<tr>
+<th width="49.5%">Händler</th>
+<th width="1%" class="mdl-table__layout--spacer"></th>
+<th width="49.5%">Tauschgegenstand</th>
+</tr>
+<tr>
+<td class="mdl-layout__left">Uah'shepya in Lösung Neun (X:8.7 Y:13.5)</td>
+<td> </td>
+<td class="mdl-layout__left">・Ordelle-Münze<br>・Montiont-Münze<br>・Ranperre-Münze</td>
+</tr>
+</tbody></table></div>
+<h4 class="mdl-title__heading--sm mdl-color__green">Ablauf der Gegenstandsverstärkung:</h4>
+<ul class="mdl-list__basic mdl-space--xs mdl-space--48">
+<li class="mdl-space--xs">1. Überprüft bei Theone in Lösung Neun (X:8.5 Y:13.6) zuerst die Ausrüstungsgegenstände, die gegen Allagische Steine der Mnemonik eingetauscht werden, sowie deren zur Verstärkung notwendigen Materialien.</li>
+<li class="mdl-space--xs">2. Besorgt die benötigten Materialien beim entsprechenden Händler.</li>
+<li>3. Überreicht Theone die gewünschten Ausrüstungsgegenstände gemeinsam mit den notwendigen Verstärkungsmaterialien.</li>
+</ul>
+<div class="mdl-title__category" id="random-b0237d186841590f7622a6237c8e8a1bfd22fc61"><h2>Crystalline Conflict</h2></div>
+<div class="mdl-patch__heading"><img src="https://img.finalfantasyxiv.com/lds/h/8/vNEWMNCsOTu709b_kR7LodvPu8.png" name="2.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Die 21. Saison wurde beendet und die 22. Saison eröffnet.</h3>
+<p class="mdl-text__sm-m16 mdl-space--48">Spieler der Datenzentren Japan, Nordamerika und Europa, welche unter den ersten 300 Plätzen sind, sowie Spieler des Datenzentrums Ozeanien, welche unter den ersten 100 Plätzen sind, erhalten nach Ende der Saison Mogry-Post mit ihrer Belohnung.<br><br>Außerdem können Spieler mit einer Wertung von Bronze oder höher ihre Kampfklassen-Belohnung beim Versorgungsoffizier des Mahlstroms am Wolfshöhlen-Pier (X:4.9 Y:5.7) abholen.<br><br>Weitere Informationen rund um die Belohnungen bekommt ihr <a href="https://sqex.to/whIeX" target="_blank">hier</a>.<br><span class="mdl-color__notes">※ Kampfklassen-Belohnungen für die 21. Saison können bis zum Ende der 22. Saison erhalten werden.</span><br><br>Die Kampfklasse für Saison 22 liegt fünf Ränge unter der von Saison 21. Die Siegessterne werden auf 1 zurückgesetzt. Spieler, welche die 21. Saison mit Omega oder Ultima abgeschlossen haben, beginnen die 22. Saison auf Kristall und mit 100 Kristallpunkten.<br><span class="mdl-color__notes">※ Wurde die vorherige Saison ohne Kampfklasse oder mit Bronze Rang 3 und 0 Siegessternen beendet, so bleiben der Rang und die Anzahl an Siegessternen zum Start der nächsten Saison unverändert.</span><br><br>Die Einführung des Matchings innerhalb derselben Region ermöglicht es zudem, von jeder Welt aus an Ranglisten-Kämpfen teilzunehmen, solange diese sich im selben physischen Datenzentrum (Japan, Nordamerika, Europa oder Ozeanien) befindet.</p>
+<h3 class="mdl-title__ancher mdl-title__image mdl-space--lg" id="random-b5442fd8d34e8b9bb992e40a234e617cd66c873b">
+<img src="https://img.finalfantasyxiv.com/lds/h/M/jbKfsST_zxfBTU9FZzme5iwhF0.png"><span class="hide">System</span>
+</h3>
+<div class="mdl-patch__heading"><img src="https://img.finalfantasyxiv.com/lds/h/8/vNEWMNCsOTu709b_kR7LodvPu8.png" name="2.x" width="40" height="23" alt=""></div>
+<h3 class="mdl-title__heading--lg">Das Matching innerhalb derselben Region wurde auch auf den Datenzentren in Nordamerika und Europa implementiert.</h3>
+<p class="mdl-text__sm-m16">Mit dieser Änderung wird die bisher auf logische Datenzentren beschränkte Spieler- und Gruppensuche auf das physische Datenzentrum ausgeweitet.<br><br>Dadurch können fortan Gruppen mit Spielern aus allen Welten innerhalb desselben physischen Datenzentrums gebildet werden.<br><br>Zusätzliche Informationen zu den Auswirkungen des Matchings innerhalb derselben Region findet ihr <a href="https://sqex.to/7T8Jj" target="_blank">hier</a>.</p>
+<div class="mdl-patch__heading">
+<img src="https://img.finalfantasyxiv.com/lds/h/8/vNEWMNCsOTu709b_kR7LodvPu8.png" name="2.x" width="40" height="23" alt=""><img src="https://lds-img.finalfantasyxiv.com/h/j/lLyx2UZU_8Es7j3Y29vnbrr3ZM.png" name="7.x" width="40" height="23" alt="">
+</div>
+<h3 class="mdl-title__heading--lg mdl-space--48">Die Aufteilung in Instanzen für Tiefer Wald, Ewiges Erbe, Trugstadt und Schwebende Insel wurde aufgehoben.</h3>
+<h3 class="mdl-title__ancher mdl-title__image mdl-space--lg" id="random-74508f54a5320689639fa86a362e7c0f0e5f8d67">
+<img src="https://img.finalfantasyxiv.com/lds/h/F/YqHXT-5DHv5fhUSAywo_653JYE.png"><span class="hide">Behobene Probleme</span>
+</h3>
+<ul class="mdl-list__basic mdl-space--md">
+<li class="mdl-space--xs">Folgende Probleme wurden behoben.</li>
+<ul class="mdl-list__cat-12 mdl-text__indent mdl-space--xs">
+<li>Die im Mogpendium angegebenen Fristen für wöchentliche Inhalte und den wöchentlichen Minimog der „Mog Mog-Kollektion Astronomische Abenteuer - Teil 1“ wichen von den eigentlichen Fristen ab.<br><span class="mdl-color__notes">※ Falls diese Inhalte in der 6. Woche nicht abgeschlossen und die betreffenden Inhalte bereits freigeschaltet worden sind, dann werden die betreffenden Inhalte als abgeschlossen behandelt und die Belohnung kann erhalten werden.<br><br>Dazu muss zunächst der reisende Mogry an einem der unten angeführten Orte aufgesucht werden. Anschließend kann die Belohnung im Mogpendium entgegengenommen werden.<br>Limsa Lominsa: Untere Decks (X:9.4 Y:11.6)<br>Neu-Gridania (X:12.4 Y:12.1)<br>Ul'dah: Nald-Kreuzgang (X:9.6 Y:9.1)<br><br>Falls die entsprechenden Inhalte noch nicht freigeschaltet wurden, kann die Belohnung auch nach Freischaltung bei dem reisenden Mogry abgeholt werden.<br><br>Wir entschuldigen uns vielmals für die Unannehmlichkeiten und bedanken uns für euer Verständnis.<br>※ Die Belohnungen können bis zu dem Beginn der Wartungsarbeiten von Patch 8.0 abgeholt werden.</span>
+</li>
+<li>Im Inhalt „Brett der Bestie“ kam es bei Bestien mit Stufenanpassung zu einer fehlerhaften Sortierreihenfolge, wenn nach „Bestienrang“ sortiert wurde.</li>
+<li>Im Inhalt „Brett der Bestie“ kam es bei der Nutzung der Controller-Steuerung unter bestimmten Umständen zu einer inkorrekten Ausgangsposition des Cursors, wenn sich das Fenster für Beute öffnete und man diese entgegennahm.</li>
+<li>Im Inhalt „Brett der Bestie“ führte der Gegner „Sirenen-Ebenbild“ auch während der Ausführung des Angriffs „Wirre Melodie“ noch weiter Auto-Attacken aus.</li>
+<li>Im Inhalt „Brett der Bestie“ konnte der Gegner „Sanduhr des Todes“, welcher von dem Gegner „Königs-Ahriman-Ebenbild“ durch die Fähigkeit „Todesroulette“ herbeigerufen wird, bei der Steuerung mit der Maus nur schwer durch Klicken anvisiert werden.</li>
+<li>Im Inhalt „Tastenschläger“ wurden Spieler trotz aktiver Eingabe unter Umständen fälschlicherweise als inaktiv gewertet, wodurch sich der Inhalt für diese beendete.</li>
+<li>Im Inhalt „Tastenschläger“ kam es unter Umständen dazu, dass nach einer Verbindungsunterbrechung Wörter nicht angezeigt wurden und bei erneutem Betreten einige Wörter nicht mehr aktualisiert wurden.</li>
+<li>Wenn man im Status-Layout die Einstellung „Ein Element“ auswählte und den Inhalt „Tastenschläger“ betrat, kam es nach dem Beenden des Inhalts dazu, dass Statuseffekte an einer inkorrekten Position angezeigt wurden.</li>
+<li>Die folgenden Ausrüstungsgegenstände konnten fälschlicherweise nicht im Kostbarkeitenkabinett gelagert werden:<br>Halone-Ohrring / Grizzlybär-Kopf / Grizzlybär-Anzug</li>
+<li>Bei Zufallsinhalten wechselte die Anzeige für den Rollenbonus zu schnell.</li>
+<li>Wenn Inhalte über „Zufallsinhalt: Mentor“ gesucht wurden, kam es unter Umständen dazu, dass keine Inhalte gefunden wurden.</li>
+</ul>
+</ul>
+<p class="mdl-text__sm-m16">Verschiedene weitere Fehler wurden behoben.</p>
+	</div>
+
+	<div class="news__detail__social">
+		
+<ul class="social__btn"><li><a href="http://www.facebook.com/share.php?u=https://de.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895" target="_blank"><i class="xiv-lds xiv-lds-facebook js__tooltip" data-tooltip="Jetzt teilen"></i></a></li><li><a href="https://x.com/intent/tweet?url=https://de.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895&text=Ver%C3%B6ffentlichung%20der%20Details%20zu%20Patch%207.58%21%20%7C%20FINAL%20FANTASY%20XIV%20-%20Der%20Lodestone" target="_blank"><i class="xiv-lds xiv-lds-x js__tooltip" data-tooltip="Posten"></i></a></li><li><a href="https://bsky.app/intent/compose?text=Ver%C3%B6ffentlichung%20der%20Details%20zu%20Patch%207.58%21%20%7C%20FINAL%20FANTASY%20XIV%20-%20Der%20Lodestone%20https://de.finalfantasyxiv.com/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895" target="_blank"><i class="xiv-lds xiv-lds-bluesky js__tooltip" data-tooltip="Posten"></i></a></li></ul>
+
+	</div>
+
+	<div class="news__footer">
+
+		<ul class="news__nav">
+			<li class="news__nav__prev"><a href="/lodestone/topics/detail/321fe81b53e4bc533a286c6018432b1c0d0220cb">Voriger Artikel</a></li>
+
+			<li class="btn__nav__center"><a href="/lodestone/topics/">Übersicht</a></li>
+
+			
+		</ul>
+	</div>
+</article>
+
+		</div>
+
+		<div class="ldst__side">
+			
+				
+	
+		
+			<ul class="l__rside__bnr clearfix">
+	<li>
+		<a href="https://secure.square-enix.com/account/app/svc/mogstation/?utm_source=lodestone&utm_medium=pc_banner&utm_campaign=de_mogstation" target="_blank" class="l__rside__bnr--mog_station">
+			<img src="https://lds-img.finalfantasyxiv.com/h/q/1utD8ubllu0aqg3GWQ9zs6kz_0.png" width="150" height="48" alt="Mogry-Station">
+		</a>
+	</li>
+	<li>
+		<a href="https://store.finalfantasyxiv.com/ffxivstore/" target="_blank" class="l__rside__bnr--store">
+			<img src="https://lds-img.finalfantasyxiv.com/h/c/WT9jpRaUeWfj_sHl9O2DibFQFw.png" width="150" height="48" alt="">
+		</a>
+	</li>
+	<li>
+		<a href="https://forum.square-enix.com/ffxiv/forum.php?utm_source=lodestone&utm_medium=pc_banner&utm_campaign=de_forum" target="_blank" class="l__rside__bnr--forums">
+			<img src="https://lds-img.finalfantasyxiv.com/h/2/M4JhFAsJa4fehvAd_nDCE0enig.png" width="150" height="48" alt="Forum">
+		</a>
+	</li>
+	<li>
+		<a href="/pr/blog/?utm_source=lodestone&utm_medium=pc_banner&utm_campaign=de_officalblog" target="_blank" class="l__rside__bnr--blog">
+			<img src="https://lds-img.finalfantasyxiv.com/h/f/6VpEnpT6Cl8CJEFuuOdeSTiWMU.png" width="150" height="48" alt="Offizielles Blog">
+		</a>
+	</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+		
+	
+		
+			
+
+
+
+		
+	
+		
+			<div class="mb10"><a href="/lodestone/special/keybound_brawler/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_keybound"><img src="https://lds-img.finalfantasyxiv.com/banner/1608/LDS_KTG.jpg"></a></div>
+		
+	
+		
+			<div class="mb10"><a href="/evercold/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_evercold"><img src="https://lds-img.finalfantasyxiv.com/banner/1575/evercold_de.jpg"></a></div>
+		
+	
+		
+			<div class="mb10"><a href="/crafting_gathering_guide/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_cgguide"><img src="https://lds-img.finalfantasyxiv.com/banner/1131/CGguide_v60_de.jpg"></a></div>
+		
+	
+		
+			<div class="mb10"><a href="/jobguide/battle/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_jobguide"><img src="https://lds-img.finalfantasyxiv.com/banner/1091/jobguide_v70_de.jpg"></a></div>
+		
+	
+		
+			<div class="mb10"><a href="/uiguide/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_uiguide"><img src="https://lds-img.finalfantasyxiv.com/banner/673/uiguide_de.jpg"></a></div>
+		
+	
+		
+			<div class="conducting_area">
+	
+		<img src="https://lds-img.finalfantasyxiv.com/h/T/UzTP8sFzvnaGOiIqs1jJLT0dKk.png" width="300" height="240" alt="">
+	
+	<div class="inr">
+		<a href="
+				http://freetrial.finalfantasyxiv.com/" class="bt_conducting">
+			<img src="https://lds-img.finalfantasyxiv.com/h/5/YXRtvVasJM2vA9DiuKpoDbZMWQ.png" width="284" height="80" alt="Kostenlos spielen">
+		</a>
+		<a href="/product/?utm_source=lodestone&utm_medium=pc_buyarea&utm_campaign=de_buynow" class="bt_conducting" target="_blank">
+				<img src="https://lds-img.finalfantasyxiv.com/h/l/qxYwKTURboclBlDaxwJSJfK7mo.png" width="284" height="80" alt="Jetzt kaufen">
+		</a>			<a href="https://support.eu.square-enix.com/faqarticle.php?id=5385&la=4&kid=78775" onmousedown="ga('send', 'event', 'lodestone_de', 'howtoupgrade_link', 'DE-lodestone-UG_20170620', true);" class="bt_ft_migration">			<img src="https://lds-img.finalfantasyxiv.com/h/R/SGuhLjvq8gcGaYWjpOuChbdQQo.png" width="260" height="80" alt="Infos zum Wechsel von der <br />Testversion zur Vollversion">
+		</a>
+	</div>
+</div>
+
+
+
+
+
+
+		
+	
+		
+			<div class="mb10"><a href="https://starter-guide.finalfantasyxiv.com/de/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_starter-guide" target="_blank"><img src="https://lds-img.finalfantasyxiv.com/banner/1177/FFXIV_StarterGuide_WebsitePlacement_300x120_DE.jpg"></a></div>
+		
+	
+		
+			<div class="mb10"><a href="/tales_of_adventure/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_tales_of_adventure"><img src="https://lds-img.finalfantasyxiv.com/banner/1081/LDS_Tales_of_Adventure_v70_de.jpg"></a></div>
+		
+	
+		
+			<div class="mb10"><a href="/lodestone/special/friend_recruit/?utm_source=lodestone&amp;utm_medium=pc_banner&amp;utm_campaign=de_friendrecruit"><img src="https://lds-img.finalfantasyxiv.com/banner/205/RFC_de.jpg"></a></div>
+		
+	
+		
+			
+	
+		
+<div class="ldst__side__box">
+
+
+
+<div class="heading--side">
+	<h3>Community-Pinnwand</h3>
+	<a href="/lodestone/community/" class="heading--side__icon icon-list__side js__tooltip" data-tooltip="Mehr"></a>
+</div>
+<div class="heading__icon parts__space--reset js__toggle_wrapper">
+	<h4>Neueste Aktivitäten</h4>
+	<i class="icon-btn__filter js__toggle_trigger js__tooltip" data-tooltip="Filtern"></i>
+	<div class="parts__switch parts__switch--filter js__toggle_item">
+		<p class="parts__text">
+			Die Anzahl der anzuzeigenden Einträge kann verringert werden.<br>
+			<span class="parts__text__notes">
+				※ Aktivitäten, die Ranglisten betreffen, werden auf allen Welten geteilt.<br>
+				※ Aktivitäten zur Grüdung von PvP-Teams können nicht nach Sprache gefiltert werden.<br>
+				※ Aktivitäten deiner Freien Gesellschaft können nicht nach Sprache gefiltert werden.
+			</span>
+		</p>
+		
+			
+<div class="form__horizontal js__communitywall_filter">
+	<input type="hidden" name="order" value=""><h5 class="heading--side--lead">Nach Art des Eintrags sortiert</h5><ul class="form__row parts__spce--8"><li><input type="checkbox" name="community_type" value="blog" class="form__checkbox" id="community_type01"><label class="form__checkbox__label" for="community_type01">Blogs</label></li><li><input type="checkbox" name="community_type" value="event" class="form__checkbox" id="community_type02"><label class="form__checkbox__label" for="community_type02">Ereignisse & Gruppensuche</label></li><li><input type="checkbox" name="community_type" value="fc" class="form__checkbox" id="community_type03"><label class="form__checkbox__label" for="community_type03">Freie Gesellschaften</label></li><li><input type="checkbox" name="community_type" value="db" class="form__checkbox" id="community_type04"><label class="form__checkbox__label" for="community_type04">Eorzea-Datenbank</label></li><li><input type="checkbox" name="community_type" value="ranking" class="form__checkbox" id="community_type05"><label class="form__checkbox__label" for="community_type05">Ranglisten</label></li><li><input type="checkbox" name="community_type" value="pvpteam" class="form__checkbox" id="community_type06"><label class="form__checkbox__label" for="community_type06">PvP-Team</label></li><li><input type="checkbox" name="community_type" value="community_finder" class="form__checkbox" id="community_type07"><label class="form__checkbox__label" for="community_type07">Community-Suche</label></li></ul><h5 class="heading--side--lead">Datenzentrum / Stammwelt</h5><div class="select-pulldown"><label class="control-label" for="world"></label><select name="community_worldname" class="select-pulldown__open"><option value="">Alle auswählen</option><optgroup label="Datenzentrum"><option value="_dc_Chaos">Chaos</option><option value="_dc_Light">Light</option><option value="_dc_Materia">Materia</option><option value="_dc_Aether">Aether</option><option value="_dc_Crystal">Crystal</option><option value="_dc_Dynamis">Dynamis</option><option value="_dc_Primal">Primal</option><option value="_dc_Elemental">Elemental</option><option value="_dc_Gaia">Gaia</option><option value="_dc_Mana">Mana</option><option value="_dc_Meteor">Meteor</option></optgroup><optgroup label="Stammwelt"><option value="Adamantoise">Adamantoise</option><option value="Aegis">Aegis</option><option value="Alexander">Alexander</option><option value="Alpha">Alpha</option><option value="Anima">Anima</option><option value="Asura">Asura</option><option value="Atomos">Atomos</option><option value="Bahamut">Bahamut</option><option value="Balmung">Balmung</option><option value="Behemoth">Behemoth</option><option value="Belias">Belias</option><option value="Bismarck">Bismarck</option><option value="Brynhildr">Brynhildr</option><option value="Cactuar">Cactuar</option><option value="Carbuncle">Carbuncle</option><option value="Cerberus">Cerberus</option><option value="Chocobo">Chocobo</option><option value="Coeurl">Coeurl</option><option value="Cuchulainn">Cuchulainn</option><option value="Diabolos">Diabolos</option><option value="Durandal">Durandal</option><option value="Excalibur">Excalibur</option><option value="Exodus">Exodus</option><option value="Faerie">Faerie</option><option value="Famfrit">Famfrit</option><option value="Fenrir">Fenrir</option><option value="Garuda">Garuda</option><option value="Gilgamesh">Gilgamesh</option><option value="Goblin">Goblin</option><option value="Golem">Golem</option><option value="Gungnir">Gungnir</option><option value="Hades">Hades</option><option value="Halicarnassus">Halicarnassus</option><option value="Hyperion">Hyperion</option><option value="Ifrit">Ifrit</option><option value="Ixion">Ixion</option><option value="Jenova">Jenova</option><option value="Kraken">Kraken</option><option value="Kujata">Kujata</option><option value="Lamia">Lamia</option><option value="Leviathan">Leviathan</option><option value="Lich">Lich</option><option value="Louisoix">Louisoix</option><option value="Maduin">Maduin</option><option value="Malboro">Malboro</option><option value="Mandragora">Mandragora</option><option value="Marilith">Marilith</option><option value="Masamune">Masamune</option><option value="Mateus">Mateus</option><option value="Midgardsormr">Midgardsormr</option><option value="Moogle">Moogle</option><option value="Odin">Odin</option><option value="Omega">Omega</option><option value="Pandaemonium">Pandaemonium</option><option value="Phantom">Phantom</option><option value="Phoenix">Phoenix</option><option value="Rafflesia">Rafflesia</option><option value="Ragnarok">Ragnarok</option><option value="Raiden">Raiden</option><option value="Ramuh">Ramuh</option><option value="Ravana">Ravana</option><option value="Ridill">Ridill</option><option value="Sagittarius">Sagittarius</option><option value="Sargatanas">Sargatanas</option><option value="Sephirot">Sephirot</option><option value="Seraph">Seraph</option><option value="Shinryu">Shinryu</option><option value="Shiva">Shiva</option><option value="Siren">Siren</option><option value="Sophia">Sophia</option><option value="Spriggan">Spriggan</option><option value="Tiamat">Tiamat</option><option value="Titan">Titan</option><option value="Tonberry">Tonberry</option><option value="Twintania">Twintania</option><option value="Typhon">Typhon</option><option value="Ultima">Ultima</option><option value="Ultros">Ultros</option><option value="Unicorn">Unicorn</option><option value="Valefor">Valefor</option><option value="Yojimbo">Yojimbo</option><option value="Zalera">Zalera</option><option value="Zeromus">Zeromus</option><option value="Zodiark">Zodiark</option><option value="Zurvan">Zurvan</option></optgroup></select></div><h5 class="heading--side--lead">Sprache</h5><div class="select-pulldown"><label class="control-label" for="lang"></label><select name="community_lang" class="select-pulldown__open"><option value="">Alle auswählen</option><option value="ja">Japanisch</option><option value="en">Englisch</option><option value="de">Deutsch</option><option value="fr">Französisch</option></select></div><h5 class="heading--side--lead">Anzahl </h5><div class="select-pulldown"><label class="control-label" for="limit"></label><select name="community_limit" class="select-pulldown__open"><option value="10">10</option><option value="20">20</option><option value="30">30</option></select></div><div class="form__submit form__submit--full"><input type="submit" value="Filtern" class="js__bt_communitywall_filter"></div>
+</div>
+
+		
+	</div>
+</div>
+
+
+<ul class="side__list__box">
+	
+
+	<div class="entry more_"><a href="/lodestone/character/19016268/blog/5743873/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-88ebd8a5b55" class="datetime_dynamic_ymdhm" data-epoch="1794221702">-</span><script>document.getElementById('datetime-88ebd8a5b55').innerHTML = ldst_strftime_dynamic_ymdhm(1794221702);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Kizuna Ohse</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Belias [Meteor]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „第427話「メンテデスカ…」“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/19016268/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/232fdef3b1daa3e17dfa02470e4aa11f_894c4bd0beab2e2beb44b74f4c4bd206fc0.jpg?1794218810" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/character/22811855/blog/5743872/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-5d8899a1748" class="datetime_dynamic_ymdhm" data-epoch="1794221646">-</span><script>document.getElementById('datetime-5d8899a1748').innerHTML = ldst_strftime_dynamic_ymdhm(1794221646);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Acid Amino</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Yojimbo [Meteor]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „二千九百七十三日目【メンテまで○○分】“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/22811855/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/64750e8bec79f1e6db8f348152f8ad1d_4a92c619bde4f34cfa77e05fef21ad85fc0.jpg?1794219825" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/community_finder/8dd2b3a5165894cf8542f590439687da92e0143a/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-8c2f751d4c4" class="datetime_dynamic_ymdhm" data-epoch="1794221477">-</span><script>document.getElementById('datetime-8c2f751d4c4').innerHTML = ldst_strftime_dynamic_ymdhm(1794221477);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Melfina Astrea</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Masamune [Mana]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__community_finder js__tooltip"data-tooltip="Community-Suche"></span></div><div class="entry__activity__txt--message"><p>Melfina Astrea (<i class="xiv-lds xiv-lds-home-world"></i>Masamune) hat eine Rekrutierung für Gründungsmitglieder eines Welten-Kontaktkreises begonnen.</p></div></div></div></a><a href="/lodestone/character/44929098/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/02b8e683b9f92bcbf0b662c011de4bc9_134930215abb8a90ec37d6cc05b05e08fc0.jpg?1794220434" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/character/52743041/blog/5743868/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-bf92554e5d0" class="datetime_dynamic_ymdhm" data-epoch="1794221390">-</span><script>document.getElementById('datetime-bf92554e5d0').innerHTML = ldst_strftime_dynamic_ymdhm(1794221390);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Prim Roses</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Valefor [Meteor]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „プリム日記#293“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/52743041/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/13d83e86fc259d956343e49835cd7ed9_485f4777c38002871591fb54f27edc65fc0.jpg?1794220344" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/character/9266790/blog/5743865/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-11a9199f76a" class="datetime_dynamic_ymdhm" data-epoch="1794221376">-</span><script>document.getElementById('datetime-11a9199f76a').innerHTML = ldst_strftime_dynamic_ymdhm(1794221376);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Wolfguy Troll</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Tiamat [Gaia]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „メンテ前滑り込み“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/9266790/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/b1ad0e092dba1362ca03fea0d14a77f7_9f10d335198e90990f3437c5733468e7fc0.jpg?1794220204" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/character/13252535/blog/5743867/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-524d125c27e" class="datetime_dynamic_ymdhm" data-epoch="1794221178">-</span><script>document.getElementById('datetime-524d125c27e').innerHTML = ldst_strftime_dynamic_ymdhm(1794221178);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Joe Schmoe</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Hyperion [Primal]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „Joe&#39;s Weekly Weekend, 11/9 - 11/11“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/13252535/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/94ab5db48c260a0f7d4c1b637dc123bc_57ae9ee5592123dd79c8912bf768cf99fc0.jpg?1794219778" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/community_finder/4942cb2da1c570eb174ffaf770ca0fa36c3aa320/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-4c834fe23bc" class="datetime_dynamic_ymdhm" data-epoch="1794221017">-</span><script>document.getElementById('datetime-4c834fe23bc').innerHTML = ldst_strftime_dynamic_ymdhm(1794221017);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Rope Numero</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Hades [Mana]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__community_finder js__tooltip"data-tooltip="Community-Suche"></span></div><div class="entry__activity__txt--message"><p>Rope Numero (<i class="xiv-lds xiv-lds-home-world"></i>Hades) hat eine Rekrutierung für den Welten-Kontaktkreis „--Lounge-- (Elemental)“ begonnen.</p></div></div></div></a><a href="/lodestone/character/22471530/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/b4ef07a680df899485d18df0a0da212f_a4730651230dd43cb129562a30d531aefc0.jpg?1794219693" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/character/60550825/blog/5743866/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-9e5986ad69e" class="datetime_dynamic_ymdhm" data-epoch="1794220731">-</span><script>document.getElementById('datetime-9e5986ad69e').innerHTML = ldst_strftime_dynamic_ymdhm(1794220731);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Hello Moon</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Pandaemonium [Mana]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „若葉🌱、ついにレベル100になる“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/60550825/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/94fb5319e0ce98fcbddf8a4912da2743_470db1bf2e865f9130531fea40b61ee4fc0.jpg?1794220243" width="40" height="40" alt=""></div></a></div>
+
+
+	<div class="entry more_"><a href="/lodestone/character/33268942/blog/5743864/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-1e0d2ff8d25" class="datetime_dynamic_ymdhm" data-epoch="1794220472">-</span><script>document.getElementById('datetime-1e0d2ff8d25').innerHTML = ldst_strftime_dynamic_ymdhm(1794220472);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Sinobu Kamado</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Atomos [Elemental]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „出戻りの猫“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/33268942/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/9ebc1a29e637c1053d85fc86c4bfec13_cf768a751b1f5e355c2fd39a9ed91f3ffc0.jpg?1794219259" width="40" height="40" alt=""></div></a></div>
+
+
+	<div data-min_id="8755427456" class="entry more_"data-has_next=""><a href="/lodestone/character/47170919/blog/5743862/" class="entry__activity"><div class="entry__activity__box"><div class="entry__activity__box__header clearfix"><time class="entry__activity__time"><span id="datetime-ee77a03f218" class="datetime_dynamic_ymdhm" data-epoch="1794220304">-</span><script>document.getElementById('datetime-ee77a03f218').innerHTML = ldst_strftime_dynamic_ymdhm(1794220304);</script></time><div class="entry__activity__data"><p class="entry__activity__data--name">Yuuki Dotimi</p><p class="entry__activity__data--world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Ramuh [Meteor]</p></div></div><div class="entry__activity__txt"><div class="entry__activity__txt--icon"><span class="icon-activity__blog js__tooltip"data-tooltip="Mein Blog"></span></div><div class="entry__activity__txt--message"><p>Den Blogeintrag „🦌ファンフェスティバル 2026 in 東京🦌“ veröffentlicht.</p></div></div></div></a><a href="/lodestone/character/47170919/" class="entry__activity__link"><div class="entry__chara__face"><img src="https://img2.finalfantasyxiv.com/f/8af45014e694c01879d19cd4a14d4fed_410ddb5a66a2fcacf538bec5ea5d0291fc0.jpg?1794220226" width="40" height="40" alt=""></div></a></div>
+
+
+
+
+</ul>
+
+
+</div>
+
+
+
+<div class="ldst__side__box">
+
+
+
+
+<div class="heading--side">
+	<h3>Entdecken</h3>
+	<a href="/lodestone/ranking/" class="heading--side__icon icon-list__side js__tooltip" data-tooltip="Mehr"></a>
+</div>
+
+
+<h4 class="heading--side--sm">Crystalline Conflict-Ranglisten</h4>
+
+	<ul>
+					<li class="entry__ranking">
+				<a href="/lodestone/ranking/crystallineconflict/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						1
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Cliffe Zanza</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Spriggan [Chaos]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/36074329/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/d8d2fa78adb447ec4b6d5d747f5d5f84_feaf0a2e88ff164813fbc9b85876fa48fc0.jpg?1794221064" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+					<li class="entry__ranking">
+				<a href="/lodestone/ranking/crystallineconflict/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						2
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Mamiyama Kamimama</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Spriggan [Chaos]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/37371304/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/3c6fd6569d3dce40308c9a2a1f3c3bfa_feaf0a2e88ff164813fbc9b85876fa48fc0.jpg?1794219648" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+					<li class="entry__ranking">
+				<a href="/lodestone/ranking/crystallineconflict/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						3
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Scarlet Rose</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Spriggan [Chaos]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/26616217/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/96ad88f23a708e8d6e391f669986d57c_feaf0a2e88ff164813fbc9b85876fa48fc0.jpg?1794221704" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+		
+	</ul>
+
+
+
+
+<h4 class="heading--side--sm">Rang der Staatlichen Gesellschaft</h4>
+
+	<ul>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/gc/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						1
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Fransabelle Chloe</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Typhon [Elemental]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/55472143/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/cd38bf913a79bacdb4352729fefdd8d9_32d8c9c7cd5f62d62da2d31b6750a680fc0.jpg?1794221002" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/gc/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						2
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Loretta Londor</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Phoenix [Light]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/62352776/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/70e01ee1aecd8a84f6e7d6eeb5c15aff_5047bc596a4bab2dc7f7c120bb22dec5fc0.jpg?1794219809" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/gc/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						3
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Minp Cyaya</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Titan [Mana]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/27769962/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/f43bd1ab95a1f25fb51c03930ce92c8f_e2bb3f9679fec6d4836fcf8abcc3eeacfc0.jpg?1794219067" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+		
+	</ul>
+
+
+
+<h4 class="heading--side--sm">Rang der Freien Gesellschaft</h4>
+
+	<ul>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/fc/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						1
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">JellyFish</p>
+
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Anima [Mana]</p>
+					</div>
+				</a>
+				<a href="/lodestone/freecompany/9229564486342570420/" class="entry__ranking__crest">
+					
+
+		
+		<img src="https://img2.finalfantasyxiv.com/c/F00_f4d64b4d75ce7d3be3ba37e24ccc7830_00_40x40.png" width="40" height="40">
+		<img src="https://img2.finalfantasyxiv.com/c/S02_e4ecc91f18ffeea79c65a3b0a101f184_00_40x40.png" width="40" height="40">
+
+
+				</a>
+			</li>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/fc/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						2
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Fleur Chloe</p>
+
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Typhon [Elemental]</p>
+					</div>
+				</a>
+				<a href="/lodestone/freecompany/9230408911272703716/" class="entry__ranking__crest">
+					
+
+		
+		<img src="https://img2.finalfantasyxiv.com/c/F00_f4d64b4d75ce7d3be3ba37e24ccc7830_00_40x40.png" width="40" height="40">
+		<img src="https://img2.finalfantasyxiv.com/c/S00_9a8096c55d9b806ba05b5626ccfa14e8_00_40x40.png" width="40" height="40">
+
+
+				</a>
+			</li>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/fc/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						3
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">The Syndicate</p>
+
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Siren [Aether]</p>
+					</div>
+				</a>
+				<a href="/lodestone/freecompany/9231394073691073564/" class="entry__ranking__crest">
+					
+
+		
+			<img src="https://img2.finalfantasyxiv.com/c/B08_de875598ba3f5ef9fe02858d29c85455_33_40x40.png" width="40" height="40">
+		
+		<img src="https://img2.finalfantasyxiv.com/c/F1e_ed8a164ee0086dc3e36d078e76126110_00_40x40.png" width="40" height="40">
+		<img src="https://img2.finalfantasyxiv.com/c/S5c_c48179b4e96cff6ed7c51da16ca90c11_04_40x40.png" width="40" height="40">
+
+
+				</a>
+			</li>
+		
+	</ul>
+
+
+
+<h4 class="heading--side--sm">Front-Ranglisten</h4>
+
+	<ul>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/frontline/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						1
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Lewellyn Nym</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Odin [Primal]</p>
+					</div>
+				</a>
+				
+					<span class="entry__ranking__face">
+						<img src="https://lds-img.finalfantasyxiv.com/h/z/6PLTZ82M99GJ7tKOee1RSwvNrQ.png" alt="">
+					</span>
+				
+			</li>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/frontline/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						2
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Kazuma Lorinser</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Ridill [Gaia]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/35506129/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/24496ba20371e1404b926a53bbc436b4_138751880f18161a907d7cf0faa43f07fc0.jpg?1794219680" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+		
+			<li class="entry__ranking">
+				<a href="/lodestone/ranking/frontline/weekly/" class="entry__ranking__link">
+					<p class="entry__ranking__rank">
+						3
+					</p>
+					<div class="entry__ranking__data">
+						<p class="entry__name">Purple Iris</p>
+						<p class="entry__world"><i class="xiv-lds xiv-lds-home-world js__tooltip" data-tooltip="Stammwelt"></i>Midgardsormr [Aether]</p>
+					</div>
+				</a>
+				
+					<a href="/lodestone/character/33661276/" class="entry__ranking__face">
+						<img src="https://img2.finalfantasyxiv.com/f/80d5e9310a287b29dd36e68f0d69b693_5c8ecfbc673e1287a9b5e85423fe1657fc0.jpg?1794221807" width="50" height="50" alt="">
+					</a>
+				
+			</li>
+		
+	</ul>
+
+
+</div>
+
+
+	
+
+
+		
+	
+
+
+			
+		</div>
+	
+	</div>
+	
+</div>
+
+
+
+	<div id="link_spsite" class="link_sp-site"><a href="javascript:void(0)">Version für Mobilgeräte</a><br></div><footer class="l__footer l__footer__de "><div class="page-top"><span class="page-top__btn"></span></div><div class="l__footer__inner"><div class="l__footer__logo"><a href="/lodestone/"><img src="https://lds-img.finalfantasyxiv.com/h/L/9yR2E7dDBigPW9CUZbILKJfBys.png" width="320" height="32" alt=""></a></div><div class="l__footer__shop"><a href="/lodestone/playguide/#returner" class="l__footer__shop__btn">Spiel herunterladen</a></div><p class="l__footer__officiel">Offizielle Informationen</p><ul class="l__footer__sns"><li><a href="https://www.facebook.com/FinalFantasyXIV.DE" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-facebook xiv-lds-3x"></i><span>Facebook</span></a></li><li class="l__footer__sns--twitter"><a href="https://x.com/ff_xiv_de" target="_blank"><i class="xiv-lds xiv-lds-x xiv-lds-3x"></i>X</a> / <a href="https://x.com/FFXIV_NEWS_DE" target="_blank">News</a></li><li><a href="http://www.youtube.com/finalfantasyxiv" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-youtube xiv-lds-3x"></i><span>YouTube</span></a></li><li><a href="https://www.instagram.com/ffxiv/" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-instagram xiv-lds-3x"></i><span>Instagram</span></a></li><li><a href="https://www.twitch.tv/finalfantasyxiv" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-twitch xiv-lds-3x"></i><span>Twitch</span></a></li><li><a href="https://bsky.app/profile/de.finalfantasyxiv.com" target="_blank" class="l__footer__sns--link"><i class="xiv-lds xiv-lds-bluesky xiv-lds-3x"></i><span>Bluesky</span></a></li></ul><ul class="l__footer__link-list"><li class="link_license" id="link_license"><a href="/license/" target="_blank">Lizenz</a></li><li><a href="https://support.eu.square-enix.com/rule.php?id=5385&la=4" target="_blank">Regeln & Richtlinien</a></li><li><a href="https://square-enix-games.com/de_DE/documents/privacy" target="_blank">Datenschutzrichtlinie</a></li><li><a href="https://square-enix-games.com/de_DE/documents/cookies" target="_blank">Cookie-Richtlinien</a></li><li><a href="https://sqex.to/DEcancel" target="_blank">Abo jetzt kündigen</a></li></ul></div><div class="l__footer__legal-area"><div class="l__footer__legal-area__inner clearfix"><div class="l__footer__legal-area__box"><ul class="l__footer__legal-area__bnr-list"><li><img src="https://lds-img.finalfantasyxiv.com/h/_/45sv0DETIHyh_gl2FyLgD6kUJE.png" width="245" height="39" alt="PlayStation PS5 PS4"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/M/5T9l7AE_cSDlsD4EM4rjEQRgCE.png" width="227" height="39" alt="XBOX SERIES XIS"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/i/-sl3kKCt6xCALS3zfHfBvnGTjc.png" width="39" height="39" alt="Switch2"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/E/38lyWv84H59UEwldgCOGU2B9dM.png" width="33" height="39" alt="PC"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/v/hyXqlwktN4v0EssRTzkbMf_7OQ.png" width="30" height="39" alt="Mac"></li><li><img src="https://lds-img.finalfantasyxiv.com/h/U/15QxPO___EcPlhMI9ydNRRxEY8.png" width="90" height="39" alt="STEAM"></li></ul><ul class="l__footer__legal-area__bnr-list"><li><a href="http://www.usk.de/" target="_blank"><img src="https://lds-img.finalfantasyxiv.com/h/x/BaMXVLYO7w3-NS6z3098DfhS_g.png" width="50" height="50" alt="USK"></a></li></ul><p class="l__footer__legal-area__text">&copy;2026 Sony Interactive Entertainment LLC."PlayStation Family Mark", "PlayStation", "PS5 logo", "PS5", "PS4 logo" and "PS4" are registered trademarks or trademarks of Sony Interactive Entertainment Inc.<br />Microsoft, the XBOX Sphere mark, the Series X|S logo and XBOX Series X|S are trademarks of the Microsoft group of companies.<br />Nintendo Switch is a trademark of Nintendo.<br />Mac is a trademark of Apple Inc.<br />&copy;2026 Valve Corporation. Steam and the Steam logo are trademarks and/or registered trademarks of Valve Corporation in the U.S. and/or other countries.</p></div><div class="l__footer__legal-area__box"><p class="l__footer__legal-area__copyright">© SQUARE ENIX<br />Square Enix Limited, registriert in England No. 01804186 - Registrierte Niederlassung: 240 Blackfriars Road, London, SE1 8NW.<br>LOGO ILLUSTRATION:© YOSHITAKA AMANO</p></div></div></div></footer>
+
+
+
+
+<script src="https://lds-img.finalfantasyxiv.com/pc/de/js/i18n.js?c146df79ea"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/7/khZLR__lS_PBs4LZm7UeFSTr9w.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/g/uQNBgvCaabd4gw5kMpaT-psp1Q.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/b/RKD_bGx738E81TyiPQN4kGf-_Y.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/Z/wqo4GxX1wALdnxx6xOv38NxFVY.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/e/TSPHxkEhdcyaPMm0rpoBtk1dZA.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/6/z0eVVJmQzwrm9wpLxwxsLqUL4Q.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/J/_A05duMMuJo4pWbmnwSWNNuRRA.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/8/b_tPmOnEw1tyr2dp2InkGxUlMA.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/Y/6WaukM6m3WFE2JXrCEb6tsknik.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/l/dmowllk61MDsDA64pZqroR5OIw.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/b/M5IszZ2CA4ytUYpG_qCcfDx1GM.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/V/6HyqXCkjgk21c-wPWUwv57Cubk.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/-/-A1gnsYCMckjdruzZT-WfgevBg.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/S/7-Q0K-ExtOpkcmgNFSIzKfeEiM.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/m/frS9tr4pNIFJN6EqyjEYY-wtbM.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/P/ZS_64NhEW6Lhy_mjuKREowBe3Y.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/R/gvHs-ADo5VulodZlJcepFeUORI.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/u/kT-Uc5bStNbLIYU4HvTpzY-UX4.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/0/f52zA7ACWvjEMB1oWe8kfyGWH0.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/l/-_ePiHXNE_1t8LnRcmRAbhRME8.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/P/MYGDtxveSuUwuhprm8oj1Hhuq8.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/F/537IFhrnUY-z_UKOewrVygH8hQ.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/n/HMQm8_JEoqrSmuv5RmmKgTldGc.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/s/2diP0am0jh_Mi5UVpb2vlToHeU.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/b/n5r8SK_HHM15btCjkBC5WjLB9A.js"></script>
+<script src="https://lds-img.finalfantasyxiv.com/h/X/J7UcY_5xEsN6Q3Y7YuyzgUgP-U.js"></script>
+
+
+<div id="dialog_bg" style="opacity:0; visibility: hidden;"></div>
+<!-- dialog -->
+<div name="ldstDialog" class="overlay__area js__overlay" style="opacity:0; visibility: hidden; top: 0px">
+	<p class="overlay__text--icon"></p>
+
+	<div class="outbound_consent hide">
+		<input type="checkbox" name="outbound_consent" value="1" id="outbound_consent" class="form__checkbox">
+		<label for="outbound_consent" class="form__checkbox__label form__outbound">
+			Diese Nachricht in Zukunft nicht mehr anzeigen.
+		</label>
+	</div>
+
+	<!-- SIMPLE DIALOG -->
+	<a href="javascript:void(0);" class="js__dialog_btn btn__color--radius js__overlay_ok">OK</a>
+	<!-- //SIMPLE DIALOG -->
+	<!-- CONFIRM DIALOG -->
+	<ul class="js__dialog_btn overlay__btn js__overlay_btn">
+		<li><a href="javascript:void(0);" class="js__overlay_yes">Ja</a></li>
+		<li><a href="javascript:void(0);" class="js__overlay_no">Nein</a></li>
+	</ul>
+	<!-- //CONFIRM DIALOG -->
+</div>
+<!-- //dialog -->
+
+
+</body>
+</html>

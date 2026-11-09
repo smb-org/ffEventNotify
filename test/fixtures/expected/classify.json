@@ -1,15 +1,15 @@
 {
   "summary": {
     "topics-p1": {
-      "topic-generic": 2,
+      "topic-generic": 0,
       "unclassified": 14,
       "seasonal-special": 3,
-      "ignore": 1
+      "ignore": 3
     },
     "topics-p1-ifOnlyLiteralHrefs": {
-      "topic-generic": 4,
+      "topic-generic": 2,
       "unclassified": 15,
-      "ignore": 1
+      "ignore": 3
     },
     "maintenance-p1": {
       "ignore": 12,
@@ -59,8 +59,8 @@
       "fixture": "topics/16cbda3335ab7041f856e437a56a00e4136c9ec5.html",
       "bodyDirectSpecialHref": false,
       "bodySqexToResolvesToSpecial": [],
-      "expected": "topic-generic",
-      "expectedIfOnlyLiteralHrefs": "topic-generic"
+      "expected": "ignore",
+      "expectedIfOnlyLiteralHrefs": "ignore"
     },
     {
       "title": "Allerschutzheiligen beginnt am 15. Oktober!",
@@ -209,8 +209,8 @@
       "fixture": "topics/3bf4fdda3e9f46182d41ff04f2aeb5025a7c68fd.html",
       "bodyDirectSpecialHref": false,
       "bodySqexToResolvesToSpecial": [],
-      "expected": "topic-generic",
-      "expectedIfOnlyLiteralHrefs": "topic-generic"
+      "expected": "ignore",
+      "expectedIfOnlyLiteralHrefs": "ignore"
     }
   ],
   "keywordEvidence": [

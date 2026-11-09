@@ -202,7 +202,7 @@ test('patch special page announcements are ignored', async (t) => {
   }
 });
 
-test('other patch announcements remain topic-generic', async (t) => {
+test('patch topics without fetched detail remain topic-generic', async (t) => {
   for (const title of [
     'Veröffentlichung der Details zu Patch 7.57!',
     'Vorab-Details zu Patch 7.5',
@@ -217,6 +217,35 @@ test('other patch announcements remain topic-generic', async (t) => {
       assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
     });
   }
+});
+
+test('a patch announcement without a date in the article is ignored', async () => {
+  const result = await classify({
+    title: 'Veröffentlichung der Details zu Patch 7.58!',
+    url: '/lodestone/topics/detail/a87f11975b6ac8c7aa03d7393d223612e9ad0895',
+    source: 'topic',
+  }, detailHtml('topics/a87f11975b6ac8c7aa03d7393d223612e9ad0895.html'));
+  assert.deepEqual(result, { status: 'ignored', reason: 'Der Patch-Beitrag nennt keinen Termin.' });
+});
+
+test('a patch announcement with a dated article is topic-generic', async () => {
+  const html = `<article class="news__detail"><header class="news__header"><h1>Veröffentlichung der Details zu Patch 7.59!</h1></header><div class="news__detail__wrapper"><p>Datum und Uhrzeit</p><p>Mittwoch, den 11. November 2026 um 15:00 Uhr (MEZ)</p></div></article>`;
+  const result = await classifyEntry({
+    title: 'Veröffentlichung der Details zu Patch 7.59!',
+    url: '/lodestone/topics/detail/patch-759',
+    source: 'topic',
+  }, html, { hasPeriod: () => 'no' });
+  assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
+});
+
+test('a LIVE-letter title that also mentions Patch remains topic-generic without a date', async () => {
+  const html = '<article class="news__detail"><header class="news__header"><h1>Brief des Produzenten LIVE Teil 94: Details zu Patch 7.58</h1></header><div class="news__detail__wrapper"><p>Der Produzent spricht über Patch 7.58.</p></div></article>';
+  const result = await classifyEntry({
+    title: 'Brief des Produzenten LIVE Teil 94: Details zu Patch 7.58',
+    url: '/lodestone/topics/detail/live-letter-patch',
+    source: 'topic',
+  }, html, { hasPeriod: () => 'no' });
+  assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
 });
 
 test('a community contest announcement with an event keyword is ignored', async () => {

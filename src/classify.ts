@@ -1,6 +1,7 @@
 // Classifies Lodestone entries using article content and stable title rules.
 
 import type { Classification, FetchText, ListEntry, PeriodEvidence } from './types.ts';
+import { extractGeneric } from './extractors/generic.ts';
 import {
   articleBodyLinks,
   normalizeLodestoneUrl,
@@ -116,6 +117,10 @@ export async function classifyEntry(
     // Only pure shop posts link the store itself; patch notes merely mention it.
     if (detailHtml !== undefined && articleBodyLinks(detailHtml).some((link) => /sqex\.to\/ffxivstore|store\.finalfantasyxiv\.com/i.test(link))) {
       return { status: 'ignored', reason: 'Der Beitrag bewirbt Artikel aus dem Online Store.' };
+    }
+    if (entry.title.includes('Patch') && !entry.title.includes('Brief des Produzenten LIVE')
+      && detailHtml !== undefined && extractGeneric(detailHtml).date.status !== 'ok') {
+      return { status: 'ignored', reason: 'Der Patch-Beitrag nennt keinen Termin.' };
     }
     return { status: 'classified', eventType: 'topic-generic' };
   }
