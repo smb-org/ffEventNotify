@@ -424,6 +424,7 @@ const retractableTopicPath = '/lodestone/topics/detail/retractable-shop';
 const retractableTopicTitle = 'Patch 7.9: Fan Festival-Ankündigung zum Ingame-Event';
 
 function retractableTopicFetcher(options: { ignored: boolean; includeUnrelatedTopic?: boolean; includeValidSameKey?: boolean; detailStatus?: number }): FetchText {
+  const dateBlock = '<h4>Datum und Uhrzeit</h4><p>Mittwoch, den 11. November 2026 um 15:00 Uhr (MEZ)</p>';
   const entries = options.includeUnrelatedTopic
     ? [{ title: 'Eine Meldung ohne Klassifikation', url: '/lodestone/topics/detail/unrelated' }]
     : [
@@ -445,14 +446,14 @@ function retractableTopicFetcher(options: { ignored: boolean; includeUnrelatedTo
           : '';
         return {
           status: 200,
-          body: `<article class="news__detail"><header class="news__header"><h1>${retractableTopicTitle}</h1></header><div class="news__detail__wrapper"><p>Eine Ankündigung.${storeLink}</p></div></article>`,
+          body: `<article class="news__detail"><header class="news__header"><h1>${retractableTopicTitle}</h1></header><div class="news__detail__wrapper">${dateBlock}<p>Eine Ankündigung.${storeLink}</p></div></article>`,
           finalUrl: url,
         };
       }
       if (pathname === '/lodestone/topics/detail/retractable-valid') {
         return {
           status: 200,
-          body: `<article class="news__detail"><header class="news__header"><h1>${retractableTopicTitle}</h1></header><div class="news__detail__wrapper"><p>Eine Ankündigung.</p></div></article>`,
+          body: `<article class="news__detail"><header class="news__header"><h1>${retractableTopicTitle}</h1></header><div class="news__detail__wrapper">${dateBlock}<p>Eine Ankündigung.</p></div></article>`,
           finalUrl: url,
         };
       }
@@ -1363,7 +1364,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Mog Mog-Kollektion/);
     assert.deepEqual(discord.logs, [
       'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404. (<https://de.finalfantasyxiv.com/lodestone/special/fallguys/>)',
-      'Erststart: 7 erfasst, 3 gepostet, 14 unklassifiziert, 38 ignoriert',
+      'Erststart: 5 erfasst, 3 gepostet, 14 unklassifiziert, 40 ignoriert',
     ]);
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 3);
 
@@ -1931,7 +1932,14 @@ test('a first-run topic detail failure persists its URL and suppression after it
       $('a[href="/lodestone/topics/detail/16cbda3335ab7041f856e437a56a00e4136c9ec5"]').closest('li.news__list--topics').remove();
       return { ...response, body: $.html() };
     }
-    if (parsed.pathname === new URL(targetUrl).pathname && unavailable) return { status: 503, body: '', finalUrl: url };
+    if (parsed.pathname === new URL(targetUrl).pathname) {
+      if (unavailable) return { status: 503, body: '', finalUrl: url };
+      return {
+        status: 200,
+        body: '<article class="news__detail"><header class="news__header"><h1>Veröffentlichung der Details zu Patch 7.57!</h1></header><div class="news__detail__wrapper"><h4>Datum und Uhrzeit</h4><p>Mittwoch, den 11. November 2026 um 15:00 Uhr (MEZ)</p></div></article>',
+        finalUrl: url,
+      };
+    }
     return base(url, options);
   };
   try {
