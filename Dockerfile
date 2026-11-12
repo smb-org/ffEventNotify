@@ -1,5 +1,5 @@
 # Node 24 runtime image for the ffEventNotify bot.
-FROM node:24.22.1-slim
+FROM node:24.22.2-slim
 
 ARG GIT_SHA=""
 ARG BUILD_TIME=""
