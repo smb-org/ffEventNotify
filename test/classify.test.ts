@@ -124,7 +124,7 @@ test('maintenance stems pair the original and follow-up titles in the expected f
   assert.equal(expected.stemsMatch, maintenanceStem(expected.original.title) === maintenanceStem(expected.followup.title));
 });
 
-test('a LIVE-letter topic with site-wide special banners is not classified as seasonal', async () => {
+test('a LIVE-letter topic with site-wide special banners is ignored', async () => {
   const html = detailHtml('topics/ll93-topic-a.html');
   const expected = JSON.parse(readFileSync(new URL('./fixtures/expected/ll93.json', import.meta.url), 'utf8')) as Record<string, {
     topics: Array<{ title: string; url: string }>;
@@ -136,8 +136,8 @@ test('a LIVE-letter topic with site-wide special banners is not classified as se
     source: 'topic',
   }, html);
   assert.deepEqual(result, {
-    status: 'classified',
-    eventType: 'topic-generic',
+    status: 'ignored',
+    reason: 'Der Beitrag kündigt nur den Livestream „Brief des Produzenten LIVE“ an.',
   });
 });
 
@@ -238,14 +238,42 @@ test('a patch announcement with a dated article is topic-generic', async () => {
   assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
 });
 
-test('a LIVE-letter title that also mentions Patch remains topic-generic without a date', async () => {
+test('a LIVE-letter title that also mentions Patch is ignored without a date', async () => {
   const html = '<article class="news__detail"><header class="news__header"><h1>Brief des Produzenten LIVE Teil 94: Details zu Patch 7.58</h1></header><div class="news__detail__wrapper"><p>Der Produzent spricht über Patch 7.58.</p></div></article>';
   const result = await classifyEntry({
     title: 'Brief des Produzenten LIVE Teil 94: Details zu Patch 7.58',
     url: '/lodestone/topics/detail/live-letter-patch',
     source: 'topic',
   }, html, { hasPeriod: () => 'no' });
-  assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
+  assert.deepEqual(result, {
+    status: 'ignored',
+    reason: 'Der Beitrag kündigt nur den Livestream „Brief des Produzenten LIVE“ an.',
+  });
+});
+
+test('a plain LIVE-letter announcement title is ignored', async () => {
+  const result = await classifyEntry({
+    title: 'Brief des Produzenten LIVE Teil 94 erscheint am 4. Dezember!',
+    url: '/lodestone/topics/detail/live-letter-94',
+    source: 'topic',
+  }, undefined, { hasPeriod: () => 'no' });
+  assert.deepEqual(result, {
+    status: 'ignored',
+    reason: 'Der Beitrag kündigt nur den Livestream „Brief des Produzenten LIVE“ an.',
+  });
+});
+
+test('LIVE-letter title matching also ignores case variants', async () => {
+  const html = '<article class="news__detail"><div class="news__detail__wrapper"><h4>Datum und Uhrzeit</h4><p>Freitag, den 4. Dezember 2026 um 16:00 Uhr (MEZ)</p></div></article>';
+  const result = await classifyEntry({
+    title: 'Brief des Produzenten Live Teil 94: Details zu Patch 7.58',
+    url: '/lodestone/topics/detail/live-letter-94-mixed-case',
+    source: 'topic',
+  }, html, { hasPeriod: () => 'no' });
+  assert.deepEqual(result, {
+    status: 'ignored',
+    reason: 'Der Beitrag kündigt nur den Livestream „Brief des Produzenten LIVE“ an.',
+  });
 });
 
 test('a community contest announcement with an event keyword is ignored', async () => {

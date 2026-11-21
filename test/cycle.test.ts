@@ -512,6 +512,57 @@ test('an ignored topic retracts its stored Discord post and scheduled event', as
   }
 });
 
+test('a previously stored single-source LIVE-letter topic is retracted when classified ignored', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const title = 'Brief des Produzenten LIVE Teil 94 erscheint am 4. Dezember!';
+  const eventKey = 'generic:Brief des Produzenten LIVE Teil 94';
+  const topicPath = '/lodestone/topics/detail/live-letter-94';
+  const sourceUrl = `https://de.finalfantasyxiv.com${topicPath}`;
+  const detailHtml = '<article class="news__detail"><header class="news__header"><h1>Brief des Produzenten LIVE Teil 94</h1></header><div class="news__detail__wrapper"><p>Schaut beim Livestream zu!</p></div></article>';
+  const fetchText = controlledFetcher({
+    topicList: topicListHtml([{ title, url: topicPath }]),
+    maintenanceList: maintenanceListHtml([{
+      tag: 'Wartung', title: 'Wartung der Mogry-Station', url: '/lodestone/news/detail/ignored-maintenance',
+    }]),
+    feedBody: '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+    intercept: async (url) => new URL(url).pathname === topicPath
+      ? { status: 200, body: detailHtml, finalUrl: url }
+      : undefined,
+  });
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  markFirstRunDone(db);
+  try {
+    const eventId = createEvent(db, { eventKey, eventType: 'topic-generic', title });
+    attachSource(db, { eventId, url: sourceUrl, kind: 'topic', firstSeenAt: NOW.toISOString() });
+    applyField(db, eventId, 'start', { status: 'ok', value: '2026-12-04T16:00:00.000Z' }, sourceUrl);
+    applyField(db, eventId, 'end', { status: 'ok', value: '2026-12-04T17:00:00.000Z' }, sourceUrl);
+    markSeen(db, sourceUrl, 'classified', NOW.toISOString());
+
+    const options = { ...cycleOptions(db, discord), fetchText };
+    await runGuildSyncFromStoredData(options, 'guild');
+    const post = discord.messages.find((message) => message.embeds.some((embed) => embed.title === title));
+    const schedule = discord.scheduledEvents.find((candidate) => candidate.name === title);
+    assert.ok(post, 'the previously stored topic event should have a Discord post');
+    assert.ok(schedule, 'the previously stored topic event should have a scheduled event');
+    assert.equal(getEventSources(db, eventId).length, 1);
+
+    await runCycle(options);
+    assert.ok(getAllEvents(db).some((event) => event.id === eventId), 'the first ignored classification should leave the event intact');
+    assert.equal(discord.deletedMessages.length + discord.deletedScheduledEvents.length, 0);
+
+    await runCycle(options);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM events WHERE id = ?').get(eventId) as { count: number }).count, 0);
+    assert.ok(discord.deletedMessages.some(({ channelId, messageId }) => channelId === 'events' && messageId === post.id));
+    assert.ok(discord.deletedScheduledEvents.some(({ guildId, eventId }) => guildId === 'guild' && eventId === schedule.id));
+    assert.ok(discord.logs.includes(
+      `Event zurückgezogen: „${title}“ (<${sourceUrl}>) — Der Beitrag kündigt nur den Livestream „Brief des Produzenten LIVE“ an.`,
+    ));
+  } finally {
+    db.close();
+  }
+});
+
 test('forum retraction deletes the stored thread and reminder thread channels', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
@@ -1364,7 +1415,7 @@ test('first-run replay of live list fixtures posts only All Saints, Fall Guys, a
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Mog Mog-Kollektion/);
     assert.deepEqual(discord.logs, [
       'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404. (<https://de.finalfantasyxiv.com/lodestone/special/fallguys/>)',
-      'Erststart: 5 erfasst, 3 gepostet, 14 unklassifiziert, 40 ignoriert',
+      'Erststart: 4 erfasst, 3 gepostet, 14 unklassifiziert, 42 ignoriert',
     ]);
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 3);
 

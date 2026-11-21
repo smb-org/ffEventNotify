@@ -17,7 +17,6 @@ export interface ClassificationOptions {
 }
 
 const keywords = [
-  'Brief des Produzenten LIVE',
   'Patch',
 ];
 
@@ -63,6 +62,10 @@ function normalizeSpecialPath(link: string): string | undefined {
   }
 }
 
+export function isLiveLetterTopicTitle(title: string): boolean {
+  return /Brief des Produzenten LIVE/i.test(title);
+}
+
 export async function classifyEntry(
   entry: ListEntry,
   detailHtml: string | undefined,
@@ -84,6 +87,10 @@ export async function classifyEntry(
       return { status: 'classified', eventType: 'seasonal-special' };
     }
     return { status: 'ignored', reason: 'Auf der Sonderseite steht kein Zeitraum.' };
+  }
+
+  if (entry.source === 'topic' && isLiveLetterTopicTitle(entry.title)) {
+    return { status: 'ignored', reason: 'Der Beitrag kündigt nur den Livestream „Brief des Produzenten LIVE“ an.' };
   }
 
   if (entry.source === 'topic' && detailHtml !== undefined) {
@@ -118,8 +125,7 @@ export async function classifyEntry(
     if (detailHtml !== undefined && articleBodyLinks(detailHtml).some((link) => /sqex\.to\/ffxivstore|store\.finalfantasyxiv\.com/i.test(link))) {
       return { status: 'ignored', reason: 'Der Beitrag bewirbt Artikel aus dem Online Store.' };
     }
-    if (entry.title.includes('Patch') && !entry.title.includes('Brief des Produzenten LIVE')
-      && detailHtml !== undefined && extractGeneric(detailHtml).date.status !== 'ok') {
+    if (entry.title.includes('Patch') && detailHtml !== undefined && extractGeneric(detailHtml).date.status !== 'ok') {
       return { status: 'ignored', reason: 'Der Patch-Beitrag nennt keinen Termin.' };
     }
     return { status: 'classified', eventType: 'topic-generic' };

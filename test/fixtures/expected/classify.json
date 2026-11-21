@@ -214,7 +214,7 @@
     }
   ],
   "keywordEvidence": [
-    {"keyword":"Brief des Produzenten LIVE","title":"Der Brief des Produzenten LIVE Teil 91 erscheint am Freitag, den 13. März!","expected":"topic-generic"},
+    {"keyword":"Brief des Produzenten LIVE","title":"Der Brief des Produzenten LIVE Teil 91 erscheint am Freitag, den 13. März!","expected":"ignore"},
     {"keyword":"Fan Festival","title":"Ankündigung des Bühnen- und Streamprogramms für das Fan Festival 2026 in Tokyo","url":"/lodestone/topics/detail/02288c94ccfb267ca6df2a31770cd164a4ceb2ce","expected":"ignore","fixture":"lists/topics-p1.html"},
     {"keyword":"Patch","title":"Veröffentlichung der Details zu Patch 7.57!","expected":"topic-generic"},
     {"keyword":"Kampagne","title":"Ankündigung der neuen „Support-A-Streamer“-Twitch-Kampagne","url":"/lodestone/topics/detail/6fc8fd8a97febb08e7c4b8a1c358a7e799d16c74","expected":"ignore","fixture":"lists/topics-p3.html"},
