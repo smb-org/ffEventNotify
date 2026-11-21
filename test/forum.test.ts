@@ -835,8 +835,8 @@ test('the status button toggles guild follow and adds or removes the user from e
   const discord = new ForumDiscord();
   setupGuild(db);
   const running = [
-    storeEvent(db, { eventKey: 'topic-generic:sidebar-a', eventType: 'topic-generic', title: 'Läuft A', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/a', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-11-20T14:59:00.000Z' }),
-    storeEvent(db, { eventKey: 'topic-generic:sidebar-b', eventType: 'topic-generic', title: 'Läuft B', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/b', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-11-21T14:59:00.000Z' }),
+    storeEvent(db, { eventKey: 'topic-generic:sidebar-a', eventType: 'topic-generic', title: 'Läuft A', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/a', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2099-11-20T14:59:00.000Z' }),
+    storeEvent(db, { eventKey: 'topic-generic:sidebar-b', eventType: 'topic-generic', title: 'Läuft B', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/b', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2099-11-21T14:59:00.000Z' }),
   ];
   const ended = storeEvent(db, { eventKey: 'topic-generic:sidebar-ended', eventType: 'topic-generic', title: 'Beendet', sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/ended', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z' });
   const userId = 'user-sidebar';
@@ -882,7 +882,7 @@ test('/ffevents folgen applies an explicit on or off choice to the same guild pr
   const event = storeEvent(db, {
     eventKey: 'topic-generic:command-follow', eventType: 'topic-generic', title: 'Befehl-Event',
     sourceUrl: 'https://de.finalfantasyxiv.com/lodestone/topics/detail/command-follow',
-    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-11-20T14:59:00.000Z',
+    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2099-11-20T14:59:00.000Z',
   });
   const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [], discord, store: db, now: NOW });
   const replies: Array<{ content?: string }> = [];

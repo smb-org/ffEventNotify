@@ -21,14 +21,7 @@ test('LL93 date comes from the article schedule, not the later update time', () 
   if (result.title.status === 'ok') assert.equal(result.title.value, expected.topics[0].title);
   assert.deepEqual(result.date, { status: 'ok', value: expected.startUtc });
   assert.equal(result.period.status, 'unsicher');
-});
-
-test('duplicate LL93 topics share a key based on their part number', () => {
-  const first = fixture(`./fixtures/${expected.topics[0].fixture}`);
-  const second = fixture(`./fixtures/${expected.topics[1].fixture}`);
-  assert.equal(deriveGenericEventKey(entry, first), 'Brief des Produzenten LIVE Teil 93');
-  assert.equal(deriveGenericEventKey({ ...entry, title: expected.topics[1].title }, second), 'Brief des Produzenten LIVE Teil 93');
-  assert.deepEqual(extractGenericTopic(entry, first).date, { status: 'ok', value: expected.startUtc });
+  assert.deepEqual(extractGenericTopic(entry, html).date, { status: 'ok', value: expected.startUtc });
 });
 
 test('the generic event key normalizes the title and uses the parsed article date', () => {

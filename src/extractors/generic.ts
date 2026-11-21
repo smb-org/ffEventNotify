@@ -84,9 +84,6 @@ export function extractGenericTopic(entry: ListEntry, detailHtml: string): Gener
 
 export function deriveGenericEventKey(entry: ListEntry, detailHtml: string): string {
   const title = entry.title.trim();
-  const liveLetter = title.match(/Brief des Produzenten LIVE\s+Teil\s*(\d+)/i);
-  if (liveLetter) return `Brief des Produzenten LIVE Teil ${liveLetter[1]}`;
-
   const extractedDate = extractGeneric(detailHtml).date;
   const datePart = extractedDate.status === 'ok' ? extractedDate.value.slice(0, 10) : undefined;
   const cleanTitle = title.replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/g, ' ').trim();
