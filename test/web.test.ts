@@ -10,13 +10,31 @@ import {
   getSkippedAllKeys, getSkippedKeys, listChars, recordUserGuild, renameChar, reorderChars, rotateToken, setCharRemind,
   setItemDone, setItemSkipped, setItemSkippedAll,
 } from '../src/web/data.ts';
-import { eventHash, renderPage } from '../src/web/render.ts';
+import { eventHash, renderPage, splitEvents } from '../src/web/render.ts';
 import { createWebServer } from '../src/web/server.ts';
 import { createTokenCodec } from '../src/web/token.ts';
 
 const codec = createTokenCodec(Buffer.alloc(32, 9).toString('base64'));
 const NOW = new Date('2026-10-17T12:00:00.000Z');
 const BASE = 'https://ffe.example.de';
+
+test('PvP seasons appear on the web event list without a checklist', () => {
+  const db = fresh();
+  try {
+    const eventKey = 'pvp:series:12';
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pvp-series-12';
+    const id = createEvent(db, { eventKey, eventType: 'pvp-season', title: 'PvP-Serie 12' });
+    db.prepare('INSERT INTO event_sources (url, event_id, kind) VALUES (?, ?, ?)').run(sourceUrl, id, 'topic');
+    applyField(db, id, 'start', { status: 'ok', value: '2026-10-16T12:00:00Z' }, sourceUrl);
+    const events = getAllEvents(db);
+    assert.deepEqual(splitEvents(events, NOW).current.map((event) => event.eventKey), [eventKey]);
+    const html = renderPage({ store: db, events, chars: [], done: new Set(), skipped: new Set(), skippedAll: new Set(), now: NOW });
+    assert.match(html, /PvP-Serie 12/);
+    assert.doesNotMatch(html, /class="tablewrap"|data-item=/);
+  } finally {
+    db.close();
+  }
+});
 
 function seedEvent(db: Store, key: string, title: string, endUtc: string, itemCount = 3, startUtc = '2026-10-01T08:00:00.000Z') {
   const eventKey = `seasonal-special:/lodestone/special/${key}/`;
@@ -219,7 +237,7 @@ test('migration turns old per-guild checklist rows into a Hauptchar', () => {
     db.close();
 
     db = openDb(path);
-    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 12);
+    assert.equal((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version, 13);
     const one = listChars(db, 'user-1');
     assert.deepEqual(one.map(({ name, remind }) => [name, remind]), [['Hauptchar', true]]);
     assert.deepEqual([...getDoneKeys(db, 'user-1')].sort(), [`${one[0]!.id}|${eventKey}|m-1`, `${one[0]!.id}|${eventKey}|m-2`]);

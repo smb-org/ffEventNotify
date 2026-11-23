@@ -47,13 +47,17 @@ export function hasChecklist(event: StoreEvent): boolean {
   return event.eventType === 'seasonal-special' && event.rewardsStatus === 'ok' && event.rewards.length > 0;
 }
 
+function isDisplayedEvent(event: StoreEvent): boolean {
+  return hasChecklist(event) || event.eventType === 'pvp-season';
+}
+
 function hasEnded(event: StoreEvent, nowMs: number): boolean {
   return event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) <= nowMs;
 }
 
 export function splitEvents(events: readonly StoreEvent[], now: Date): { current: StoreEvent[]; archive: StoreEvent[] } {
   const nowMs = now.getTime();
-  const usable = events.filter(hasChecklist);
+  const usable = events.filter(isDisplayedEvent);
   const endOf = (event: StoreEvent) => (event.endUtc ? Date.parse(event.endUtc) : Number.POSITIVE_INFINITY);
   const current = usable.filter((event) => !hasEnded(event, nowMs)).sort((a, b) => endOf(a) - endOf(b));
   const archive = usable
@@ -156,7 +160,9 @@ function eventSection(input: PageInput, event: StoreEvent, mode: 'panel' | 'clos
   const linkBox = links ? `<span class="links">${links}</span>` : '';
   const titleHtml = lodestone ? `<a href="${esc(lodestone)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
   const head2 = `${banner}<span class="meta"><span class="title">${titleHtml}</span><span class="period">${esc(period(event))}</span></span>${linkBox}<span class="state s-${hasEnded(event, nowMs) ? 'ended' : 'live'}">${stateLabel(event, nowMs)}</span>`;
-  const body = `${empty}<div class="tablewrap"><table><thead><tr><th class="item" scope="col">Belohnung</th>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  const body = event.eventType === 'pvp-season'
+    ? ''
+    : `${empty}<div class="tablewrap"><table><thead><tr><th class="item" scope="col">Belohnung</th>${head}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   if (mode === 'panel') return `<div class="event" data-event="${hash}"><div class="evhead">${head2}</div>
   ${body}
 </div>`;

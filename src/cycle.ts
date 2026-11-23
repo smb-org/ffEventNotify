@@ -46,6 +46,7 @@ import {
 import { classifyEntry, maintenanceStem, maintenanceTarget } from './classify.ts';
 import { extractGenericTopic, deriveGenericEventKey } from './extractors/generic.ts';
 import { extractMaintenance } from './extractors/maintenance.ts';
+import { extractPvpSeasonUpdates } from './extractors/pvp.ts';
 import { extractSeasonal, extractSeasonalPeriod, hasDeclaredPeriod, hasPeriod } from './extractors/seasonal.ts';
 import { fetchNewsFeed, parseNewsFeed } from './sources/feed.ts';
 import {
@@ -244,6 +245,14 @@ function rememberPendingDiscovery(context: CycleContext, entry: ListEntry): void
 
 function hasVerifiedPatchBoundEnd(event: StoreEvent): boolean {
   return event.startStatus === 'ok' && event.startUtc !== null && event.endStatus === 'unsicher' && event.endPatch !== null;
+}
+
+function hasCurrentOpenPvpPeriod(event: StoreEvent, now: Date): boolean {
+  return event.eventType === 'pvp-season'
+    && event.startStatus === 'ok'
+    && event.startUtc !== null
+    && event.endStatus === 'unsicher'
+    && (event.endUtc === null || Date.parse(event.endUtc) > now.getTime());
 }
 
 function finishPendingDiscovery(context: CycleContext, url: string, eventId?: number): void {
@@ -519,9 +528,24 @@ function resolveBoundEndsFromMaintenance(
     for (const event of getAllEvents(context.store)) {
       if (event.endPatch !== patch || event.endStatus !== 'unsicher' || event.endUtc !== null) continue;
       if (!resolvePatchBoundEnd(context.store, event.id, patch, input.period.value.startUtc, input.sourceUrl, input.sourceTime)) continue;
+      warnForPvPPatchDateMismatch(event, input.period.value.startUtc);
       const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
       log.info(`Ende für „${title}“ aus der Wartung zu Patch ${patch} übernommen (Quelle: ${input.sourceUrl}).`);
     }
+  }
+}
+
+function warnForPvPPatchDateMismatch(event: StoreEvent, maintenanceStartUtc: string): void {
+  if (event.eventType !== 'pvp-season' || !event.endExpectedDate) return;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(maintenanceStartUtc));
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const actualDate = `${values.year}-${values.month}-${values.day}`;
+  const expectedDay = Date.parse(`${event.endExpectedDate}T00:00:00Z`);
+  const actualDay = Date.parse(`${actualDate}T00:00:00Z`);
+  if (Number.isFinite(expectedDay) && Number.isFinite(actualDay) && Math.abs(actualDay - expectedDay) > 86_400_000) {
+    log.warn(`Das angekündigte Ende von „${event.title}“ am ${event.endExpectedDate} weicht um mehr als einen Tag vom Wartungsbeginn am ${actualDate} ab.`);
   }
 }
 
@@ -541,6 +565,7 @@ function resolveBoundEndsFromStoredMaintenance(context: CycleContext): void {
       for (const event of getAllEvents(context.store)) {
         if (event.endPatch !== patch || event.endStatus !== 'unsicher' || event.endUtc !== null) continue;
         if (!resolvePatchBoundEnd(context.store, event.id, patch, maintenance.startUtc, sourceUrl, sourceTime)) continue;
+        warnForPvPPatchDateMismatch(event, maintenance.startUtc);
         const title = event.titleStatus === 'ok' ? event.title : 'FFXIV-Event';
         log.info(`Ende für „${title}“ aus der Wartung zu Patch ${patch} übernommen (Quelle: ${sourceUrl}).`);
       }
@@ -940,6 +965,68 @@ async function processTopic(
     return eventId;
   }
 
+  if (classification.eventType === 'pvp-season') {
+    const sourceMoment = publishedAt(entry, context.currentTime);
+    const updates = extractPvpSeasonUpdates(entry.title, detailHtml, sourceMoment);
+    const successor = updates.filter((update) => update.startUtc !== undefined).at(-1) ?? updates.at(-1);
+    if (!successor) {
+      finishPendingDiscovery(context, sourceUrl);
+      return undefined;
+    }
+
+    const successorExistingId = findEventByKey(context.store, successor.eventKey);
+    const sourceOwnerId = findEventBySourceUrl(context.store, sourceUrl);
+    if (sourceOwnerId !== undefined && sourceOwnerId !== successorExistingId) {
+      const sourceOwner = getAllEvents(context.store).find((event) => event.id === sourceOwnerId);
+      await logWarningToEstablishedGuilds(
+        context,
+        `pvp-source-collision:${sourceUrl}`,
+        `PvP-Ankündigung nicht übernommen: Die Quelle ist bereits Event ${sourceOwner?.eventKey ?? sourceOwnerId} zugeordnet (${sourceUrl}).`,
+      );
+      finishPendingDiscovery(context, sourceUrl);
+      return undefined;
+    }
+    const successorId = successorExistingId === undefined
+      ? createEvent(context.store, { eventKey: successor.eventKey, eventType: 'pvp-season', title: successor.title })
+      : restoreEventIfRetracting(context, successorExistingId);
+    attachSource(context.store, {
+      eventId: successorId,
+      url: sourceUrl,
+      kind: 'topic',
+      publishedAt: entry.publishedAt ?? (entry.publishedEpoch === undefined ? undefined : new Date(entry.publishedEpoch * 1_000).toISOString()),
+      firstSeenAt: context.currentTime.toISOString(),
+    });
+
+    for (const update of updates) {
+      const isSuccessor = update.eventKey === successor.eventKey;
+      const existingId = isSuccessor ? successorId : findEventByKey(context.store, update.eventKey);
+      if (existingId === undefined) continue;
+      const eventId = isSuccessor ? existingId : restoreEventIfRetracting(context, existingId);
+
+      if (isSuccessor) {
+        applyField(context.store, eventId, 'title', { status: 'ok', value: update.title }, sourceUrl, sourceMoment);
+        if (update.startUtc) {
+          applyField(context.store, eventId, 'start', { status: 'ok', value: update.startUtc }, sourceUrl, sourceMoment);
+        }
+        if (update.endUtc) {
+          applyField(context.store, eventId, 'end', { status: 'ok', value: update.endUtc }, sourceUrl, sourceMoment);
+        } else if (update.endPatch) {
+          bindEventEndToPatch(context.store, eventId, update.endPatch, sourceUrl, sourceMoment, update.expectedEndDate);
+        }
+      } else if (update.endUtc) {
+        const current = getAllEvents(context.store).find((event) => event.id === eventId);
+        const isChangePostFallback = update.endUtc === sourceMoment && successor.startUtc === sourceMoment;
+        const hasNoEndInformation = current?.endStatus === 'unsicher' && current.endUtc === null && current.endPatch === null;
+        if (current && (!isChangePostFallback || hasNoEndInformation)) {
+          applyField(context.store, eventId, 'end', { status: 'ok', value: update.endUtc }, sourceUrl, sourceMoment);
+        }
+      }
+      rememberEvent(context, eventId);
+    }
+    finishPendingDiscovery(context, sourceUrl, successorId);
+    return successorId;
+  }
+
   const keyText = deriveGenericEventKey(entry, detailHtml);
   const eventKey = 'generic:' + keyText;
   const initialResult = extractGenericTopic(entry, detailHtml);
@@ -1059,6 +1146,10 @@ async function refreshStoredSource(context: CycleContext, event: StoreEvent, sou
   context.processedSources.add(source.url);
   const eventId = event.id;
   const sourceMoment = source.publishedAt ?? source.firstSeenAt;
+
+  // A maintenance source on a PvP season only supplies its patch-bound end; its period belongs to the maintenance event.
+  // Topic refresh needs the original title to distinguish change announcements; they are reprocessed from the live topic list.
+  if (event.eventType === 'pvp-season' && (source.kind === 'maintenance' || source.kind === 'topic')) return;
 
   if (event.eventType === 'seasonal-special' && (source.kind === 'special' || source.kind === 'banner')) {
     const html = await getSpecialPage(context, source.url);
@@ -1283,6 +1374,7 @@ const eventTypeLabels: Record<EventType, string> = {
   'seasonal-special': 'Saison-Event',
   maintenance: 'Wartung',
   'topic-generic': 'Meldung',
+  'pvp-season': 'PvP-Saison',
 };
 
 function berlinTime(utc: string | null, status: 'ok' | 'unsicher'): string {
@@ -1325,8 +1417,9 @@ function logEventChanges(store: Store, before: ReadonlyMap<number, StoreEvent>):
 function shouldPostToGuild(event: StoreEvent, guildId: string, now: Date, firstRun: boolean, store: Store): boolean {
   const object = getGuildEventObject(store, guildId, event.eventKey);
   const patchBound = hasVerifiedPatchBoundEnd(event);
-  if (object?.firstRunSuppressed && !(event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime()) && !patchBound) return false;
-  if (firstRun) return (event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime()) || patchBound;
+  const currentOpenPvp = hasCurrentOpenPvpPeriod(event, now);
+  if (object?.firstRunSuppressed && !(event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime()) && !patchBound && !currentOpenPvp) return false;
+  if (firstRun) return (event.endStatus === 'ok' && event.endUtc !== null && Date.parse(event.endUtc) > now.getTime()) || patchBound || currentOpenPvp;
   if (object?.messageId) return true;
   if (event.endUtc !== null && Date.parse(event.endUtc) <= now.getTime()) return false;
   return event.endStatus === 'unsicher' || event.endUtc !== null;

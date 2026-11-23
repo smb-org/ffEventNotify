@@ -20,6 +20,10 @@ const keywords = [
   'Patch',
 ];
 
+function isPvpSeasonTopicTitle(title: string): boolean {
+  return /letzte Phase der \d+\. Saison von Crystalline Conflict|\b\d+\. Saison von Crystalline Conflict ist abgeschlossen.*?\b\d+\. Saison|Die PvP-Serie \d+ endet mit der Veröffentlichung von Patch \d+\.\d+|Die PvP-Serie \d+ ist zu Ende und Serie \d+ hat begonnen|^Startdatum für Saison \d+ auf dem Brett der Bestie$|^Zum Start der \d+\. Saison auf dem Brett der Bestie$|^Die \d+\. Saison der Ranglisten für das Brett der Bestie hat begonnen!?$|^Das Ende von Saison \d+ und der Start von Saison \d+ auf dem Brett der Bestie$/iu.test(title);
+}
+
 const topicExclusions = [
   ['Kampagne', 'Der Beitrag betrifft eine Kampagne ohne Ingame-Zeitraum.'],
   ['Kollaboration', 'Der Beitrag betrifft eine Kollaboration ohne Ingame-Zeitraum.'],
@@ -111,20 +115,25 @@ export async function classifyEntry(
     }
   }
 
-  if (entry.source === 'topic' && keywords.some((keyword) => entry.title.includes(keyword))) {
-    // Patch special-page announcements are not event announcements.
+  if (entry.source === 'topic') {
     if (/^(?:Die )?Sonderseite zu Patch\b/.test(entry.title)) {
       return { status: 'ignored', reason: 'Der Beitrag kündigt nur eine Patch-Sonderseite an.' };
     }
-    // Community contest announcements reuse event keywords ("Fan Festival") but are no in-game events.
     if (/gewinnspiel|wettbewerb/i.test(entry.title)) {
       return { status: 'ignored', reason: 'Der Beitrag kündigt ein Community-Gewinnspiel an.' };
     }
-    // Shop announcements reuse event keywords ("Neue Gegenstände zum Fan Festival …") but are no in-game events.
-    // Only pure shop posts link the store itself; patch notes merely mention it.
-    if (detailHtml !== undefined && articleBodyLinks(detailHtml).some((link) => /sqex\.to\/ffxivstore|store\.finalfantasyxiv\.com/i.test(link))) {
+    if ((entry.title.includes('Patch') || isPvpSeasonTopicTitle(entry.title))
+      && detailHtml !== undefined
+      && articleBodyLinks(detailHtml).some((link) => /sqex\.to\/ffxivstore|store\.finalfantasyxiv\.com/i.test(link))) {
       return { status: 'ignored', reason: 'Der Beitrag bewirbt Artikel aus dem Online Store.' };
     }
+  }
+
+  if (entry.source === 'topic' && isPvpSeasonTopicTitle(entry.title)) {
+    return { status: 'classified', eventType: 'pvp-season' };
+  }
+
+  if (entry.source === 'topic' && keywords.some((keyword) => entry.title.includes(keyword))) {
     if (entry.title.includes('Patch') && detailHtml !== undefined && extractGeneric(detailHtml).date.status !== 'ok') {
       return { status: 'ignored', reason: 'Der Patch-Beitrag nennt keinen Termin.' };
     }

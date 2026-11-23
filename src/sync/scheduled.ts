@@ -40,16 +40,23 @@ function orderedUrls(sourceUrls: readonly string[]): string[] {
   ];
 }
 
+function isSchedulingEligible(event: StoreEvent): boolean {
+  const startCanUseNow = event.eventType === 'pvp-season' && event.startStatus === 'unsicher';
+  return (startCanUseNow || event.startStatus === 'ok' && event.startUtc !== null)
+    && event.endStatus === 'ok' && event.endUtc !== null;
+}
+
 export function scheduledEventPayloadFor(
   event: StoreEvent,
   sourceUrls: readonly string[],
   now: Date,
   cardJumpLink?: string,
 ): ScheduledEventPayload | undefined {
-  if (event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
+  const startCanUseNow = event.eventType === 'pvp-season' && event.startStatus === 'unsicher';
+  if (!isSchedulingEligible(event)) return undefined;
   const nowMs = now.getTime();
-  const endMs = Date.parse(event.endUtc);
-  const startMs = Date.parse(event.startUtc);
+  const endMs = Date.parse(event.endUtc!);
+  const startMs = startCanUseNow ? nowMs : Date.parse(event.startUtc!);
   if (!Number.isFinite(nowMs) || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= nowMs || endMs <= startMs) return undefined;
 
   const urls = orderedUrls(sourceUrls);
@@ -63,34 +70,35 @@ export function scheduledEventPayloadFor(
     `#${eventMarkerFragment(event.eventKey)}`,
   ].join('\n');
 
-  const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
+  const scheduledStart = startCanUseNow || startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
   if (!(nowMs < scheduledStart && scheduledStart < endMs)) return undefined;
 
   return {
     name: (event.titleStatus === 'ok' ? event.title : 'FFXIV-Event').slice(0, 100),
     startUtc: new Date(scheduledStart).toISOString(),
-    endUtc: event.endUtc,
+    endUtc: event.endUtc!,
     location: selectedLocation || LOCATION_FALLBACK,
     description,
   };
 }
 
 export function scheduledEventUnavailableReason(event: StoreEvent, now: Date): string {
-  if (event.startStatus !== 'ok' || !event.startUtc) {
+  const startCanUseNow = event.eventType === 'pvp-season' && event.startStatus === 'unsicher';
+  if (!startCanUseNow && (event.startStatus !== 'ok' || !event.startUtc)) {
     return `Start ist unsicher${event.startReason ? `: ${event.startReason}` : '.'}`;
   }
   if (event.endStatus !== 'ok' || !event.endUtc) {
     return `Ende ist unsicher${event.endReason ? `: ${event.endReason}` : '.'}`;
   }
   const nowMs = now.getTime();
-  const startMs = Date.parse(event.startUtc);
+  const startMs = startCanUseNow ? nowMs : Date.parse(event.startUtc!);
   const endMs = Date.parse(event.endUtc);
   if (!Number.isFinite(nowMs) || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
     return 'Start- oder Endzeit ist kein gültiges Datum.';
   }
   if (endMs <= nowMs) return 'Das Event ist bereits beendet.';
   if (endMs <= startMs) return 'Das Ende liegt nicht nach dem Start.';
-  const scheduledStart = startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
+  const scheduledStart = startCanUseNow || startMs < nowMs ? nowMs + 2 * 60_000 : startMs;
   if (!(nowMs < scheduledStart && scheduledStart < endMs)) return 'Der gültige Start läge nicht vor dem Ende.';
   return 'Es konnte kein passender Discord-Event-Zeitraum berechnet werden.';
 }
@@ -188,7 +196,7 @@ async function syncScheduledEventUnlocked({
   now = new Date(),
   clock,
 }: SyncScheduledEventOptions): Promise<string | undefined> {
-  if (isEventRetracting(store, event.id) || event.startStatus !== 'ok' || event.endStatus !== 'ok' || !event.startUtc || !event.endUtc) return undefined;
+  if (isEventRetracting(store, event.id) || !isSchedulingEligible(event)) return undefined;
 
   const guild = getGuild(store, guildId);
   const guildEventObject = getGuildEventObject(store, guildId, event.eventKey);
@@ -229,7 +237,8 @@ async function syncScheduledEventUnlocked({
 
   const editTime = clock?.() ?? currentTime;
   const basePayload = scheduledEventPayloadFor(event, sourceUrls, editTime, cardJumpLink);
-  const preserveStart = matched.status === 'ACTIVE' || Date.parse(event.startUtc) < editTime.getTime();
+  const preserveStart = matched.status === 'ACTIVE' || event.startStatus === 'unsicher'
+    || event.startUtc !== null && Date.parse(event.startUtc) < editTime.getTime();
   const payload = basePayload && preserveStart ? { ...basePayload, startUtc: matched.startUtc } : basePayload;
   if (!payload || sameSchedule(matched, payload)) return matched.id;
 

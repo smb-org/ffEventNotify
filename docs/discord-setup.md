@@ -35,7 +35,7 @@ Du brauchst Admin- bzw. „Server verwalten“-Rechte auf dem Server. Dauer: ca.
 | **Create Public Threads** | Erinnerungs-Thread unter der Event-Karte |
 | **Send Messages in Threads** | Erinnerungen im Thread |
 | **Manage Threads** | Erinnerungs-Threads archivieren und aufräumen |
-| **Manage Channels** | Tags im Event-Forum anlegen (Saison-Event, Wartung, Schatzkammer, läuft/beendet) |
+| **Manage Channels** | Tags im Event-Forum anlegen (Saison-Event, PvP, Wartung, Schatzkammer, läuft/beendet) |
 | **Create Private Threads** | für spätere Funktionen vorgesehen |
 | **Add Reactions** | für spätere Funktionen vorgesehen |
 | **Use Application Commands** | Slash-Befehle wie `/ffevents setup` |

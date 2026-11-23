@@ -10,7 +10,7 @@ export interface NotApplicable {
 
 export type PeriodEvidence = 'yes' | 'no' | 'unsicher';
 
-export type EventType = 'seasonal-special' | 'maintenance' | 'topic-generic';
+export type EventType = 'seasonal-special' | 'maintenance' | 'topic-generic' | 'pvp-season';
 
 export interface Period {
   startUtc: string;
