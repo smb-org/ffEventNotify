@@ -31,6 +31,7 @@ import type {
 export const FORUM_TAG_NAMES = [
   'Saison-Event', 'Kollabo', 'Mog Mog-Kollektion', 'Wartung', 'Notwartung', 'Welt-Wartung',
   'Live-Letter', 'Fan Festival', 'Patch', 'Kampagne', 'Angekündigt', 'Läuft', 'Beendet',
+  'PvP',
 ] as const;
 
 export const FORUM_AUTO_ARCHIVE_DURATION = 10_080;
@@ -79,6 +80,7 @@ function hasPath(sourceUrls: readonly string[], fragment: string): boolean {
 export function classifyForumTypeTags(event: Pick<StoreEvent, 'eventType' | 'title' | 'titleStatus'>, sourceUrls: readonly string[]): string[] {
   const tags: string[] = [];
   if (hasPath(sourceUrls, '/lodestone/special/mogmog-collection/')) tags.push('Mog Mog-Kollektion');
+  if (event.eventType === 'pvp-season') return [...tags, 'PvP'];
   if (event.titleStatus !== 'ok') return tags;
   const title = event.title;
   if (event.eventType === 'maintenance') {

@@ -36,8 +36,20 @@ function timestamp(utc: string, style: 'f' | 'R'): string {
 }
 
 function timeFields(event: StoreEvent): EmbedField[] {
-  if (!event.startUtc) return [];
-  const fields: EmbedField[] = [{ name: 'Beginn', value: timestamp(event.startUtc, 'f'), inline: true }];
+  if (event.eventType === 'pvp-season') {
+    const endValue = event.endUtc
+      ? timestamp(event.endUtc, 'f')
+      : event.endPatch
+        ? `mit der Wartung zu Patch ${event.endPatch} (Datum folgt)`
+        : 'mit der nächsten PvP-Saison (Datum folgt)';
+    return [
+      { name: 'Beginn', value: event.startStatus === 'ok' && event.startUtc ? timestamp(event.startUtc, 'f') : 'Datum folgt', inline: true },
+      { name: 'Ende', value: endValue, inline: true },
+      { name: 'Endet', value: event.endUtc ? timestamp(event.endUtc, 'R') : 'Datum folgt', inline: true },
+    ];
+  }
+  const fields: EmbedField[] = [];
+  if (event.startUtc) fields.push({ name: 'Beginn', value: timestamp(event.startUtc, 'f'), inline: true });
   if (event.endUtc) {
     fields.push(
       { name: 'Ende', value: timestamp(event.endUtc, 'f'), inline: true },
@@ -50,12 +62,14 @@ function timeFields(event: StoreEvent): EmbedField[] {
 }
 
 function eventDescription(event: StoreEvent): string | undefined {
+  if (event.eventType === 'pvp-season') return undefined;
   if (event.startStatus !== 'ok' || !event.startUtc) return 'Zeitraum: siehe Lodestone';
   if (event.endStatus !== 'ok' || !event.endUtc) return 'Ende: siehe Lodestone';
   return undefined;
 }
 
 function eventPresentation(event: StoreEvent, sourceUrl: string | undefined): { author: string; color: number } {
+  if (event.eventType === 'pvp-season') return { author: 'PvP-Saison · Lodestone', color: 0x3498DB };
   if (event.eventType === 'seasonal-special') {
     let isMogMog = false;
     try {

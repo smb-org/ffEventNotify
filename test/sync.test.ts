@@ -612,6 +612,31 @@ test('maintenance and generic embeds omit the not-applicable rewards field', () 
   }
 });
 
+test('PvP season embeds have a dedicated author and explain the open end without a Lodestone fallback', () => {
+  const db = openDb(':memory:');
+  try {
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pvp-season';
+    const id = createEvent(db, { eventKey: 'pvp:series:12', eventType: 'pvp-season', title: 'PvP-Serie 12' });
+    attachSource(db, { eventId: id, url: sourceUrl, kind: 'topic' });
+    applyField(db, id, 'start', { status: 'ok', value: '2026-10-16T12:00:00Z' }, sourceUrl);
+    const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
+    const embed = buildEventEmbed(event, [sourceUrl], NOW);
+
+    assert.equal(embed.author?.name, 'PvP-Saison · Lodestone');
+    assert.equal(embed.color, 0x3498DB);
+    assert.match(embed.fields?.find((field) => field.name === 'Ende')?.value ?? '', /mit der nächsten PvP-Saison/);
+    assert.doesNotMatch(embed.description ?? '', /siehe Lodestone/);
+    assert.deepEqual(embed.fields?.map((field) => field.name), ['Beginn', 'Ende', 'Endet']);
+
+    applyField(db, id, 'end', { status: 'ok', value: '2026-10-20T12:00:00Z' }, sourceUrl);
+    const updated = getOpenEvents(db, NOW).find((candidate) => candidate.id === id)!;
+    const updatedEmbed = buildEventEmbed(updated, [sourceUrl], NOW);
+    assert.deepEqual(updatedEmbed.fields?.map((field) => field.name), embed.fields?.map((field) => field.name));
+  } finally {
+    db.close();
+  }
+});
+
 test('Discord embed snapshots with normalized field order do not cause repeat edits', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
@@ -788,6 +813,68 @@ test('scheduled event uses a short preferred source URL and moves a running star
     assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(`#ffe-${stableEventIdentity(event.eventKey)}`));
     assert.match(discord.scheduledEvents[0]?.description ?? '', new RegExp(specialUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(discord.scheduledEvents[0]?.description ?? '', /Event-ID/i);
+  } finally {
+    db.close();
+  }
+});
+
+test('pvp-season sync schedules a future end from now when its start is still uncertain', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pvp-current-season';
+    const pvpId = createEvent(db, { eventKey: 'pvp:cc:21', eventType: 'pvp-season', title: 'Crystalline Conflict – 21. Saison' });
+    upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+    attachSource(db, { eventId: pvpId, url: sourceUrl, kind: 'topic' });
+    applyField(db, pvpId, 'start', { status: 'ok', value: '2026-10-15T12:00:00Z' }, sourceUrl);
+    applyField(db, pvpId, 'start', { status: 'unsicher', reason: 'Der Start ist nicht mehr bestätigt.' }, sourceUrl);
+    applyField(db, pvpId, 'end', { status: 'ok', value: '2026-10-20T12:00:00Z' }, sourceUrl);
+    const pvp = getOpenEvents(db, NOW).find((event) => event.id === pvpId)!;
+
+    assert.equal(pvp.startStatus, 'unsicher');
+    assert.equal(pvp.startUtc, '2026-10-15T12:00:00Z');
+    assert.equal(scheduledEventPayloadFor(pvp, [sourceUrl], NOW)?.startUtc, '2026-10-16T12:02:00.000Z');
+    await syncEventEmbed({ event: pvp, sourceUrls: [sourceUrl], guildId: 'guild', channelId: 'events', discord, store: db, now: NOW });
+    const scheduledId = await syncScheduledEvent({ event: pvp, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    assert.ok(scheduledId);
+    assert.equal(discord.createScheduledCount, 1);
+    assert.equal(discord.scheduledEvents[0]?.startUtc, '2026-10-16T12:02:00.000Z');
+
+    const genericId = createEvent(db, { eventKey: 'generic:unknown-start', eventType: 'topic-generic', title: 'Normale News' });
+    const genericUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/generic-unknown-start';
+    attachSource(db, { eventId: genericId, url: genericUrl, kind: 'topic' });
+    applyField(db, genericId, 'end', { status: 'ok', value: '2026-10-20T12:00:00Z' }, genericUrl);
+    const generic = getOpenEvents(db, NOW).find((event) => event.id === genericId)!;
+    assert.equal(scheduledEventPayloadFor(generic, [genericUrl], NOW), undefined);
+  } finally {
+    db.close();
+  }
+});
+
+test('an existing PvP scheduled event keeps its fallback start while the start stays uncertain', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    const sourceUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pvp-uncertain-start';
+    upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+    const eventId = createEvent(db, { eventKey: 'pvp:cc:23', eventType: 'pvp-season', title: 'Crystalline Conflict – 23. Saison' });
+    attachSource(db, { eventId, url: sourceUrl, kind: 'topic' });
+    applyField(db, eventId, 'title', { status: 'ok', value: 'Crystalline Conflict – 23. Saison' }, sourceUrl);
+    applyField(db, eventId, 'start', { status: 'unsicher', reason: 'Start noch nicht bekannt.' }, sourceUrl);
+    applyField(db, eventId, 'end', { status: 'ok', value: '2026-10-20T12:00:00Z' }, sourceUrl);
+    const event = getOpenEvents(db, NOW).find((candidate) => candidate.id === eventId)!;
+
+    await syncScheduledWithCard({ event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db, now: NOW });
+    const initialStart = discord.scheduledEvents[0]?.startUtc;
+    assert.equal(initialStart, '2026-10-16T12:02:00.000Z');
+    await syncScheduledWithCard({
+      event, sourceUrls: [sourceUrl], guildId: 'guild', discord, store: db,
+      now: new Date(NOW.getTime() + 60_000),
+    });
+
+    assert.equal(discord.scheduledEvents[0]?.startUtc, initialStart);
+    assert.equal(discord.editScheduledCount, 0);
+    assert.equal(discord.createScheduledCount, 1);
   } finally {
     db.close();
   }

@@ -36,6 +36,7 @@ export interface StoreEvent {
   endStatus: 'ok' | 'unsicher';
   endReason: string | null;
   endPatch: string | null;
+  endExpectedDate: string | null;
   rewards: Reward[];
   rewardsStatus: 'ok' | 'unsicher' | 'n/a';
   rewardsReason: string | null;
@@ -132,7 +133,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_key TEXT NOT NULL UNIQUE,
-    event_type TEXT NOT NULL CHECK (event_type IN ('seasonal-special', 'maintenance', 'topic-generic')),
+    event_type TEXT NOT NULL CHECK (event_type IN ('seasonal-special', 'maintenance', 'topic-generic', 'pvp-season')),
     title TEXT NOT NULL,
     title_status TEXT NOT NULL DEFAULT 'ok' CHECK (title_status IN ('ok', 'unsicher')),
     title_reason TEXT,
@@ -153,7 +154,8 @@ const SCHEMA = `
     description_status TEXT NOT NULL DEFAULT 'unsicher' CHECK (description_status IN ('ok', 'unsicher')),
     description_reason TEXT DEFAULT 'Nicht extrahiert',
     image_url TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    end_expected_date TEXT
   );
 
   CREATE TABLE IF NOT EXISTS guilds (
@@ -358,7 +360,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_checklist_reminder_users ON checklist_reminder_preferences(guild_id, event_key, enabled);
 `;
 
-const CURRENT_SCHEMA_VERSION = 12;
+const CURRENT_SCHEMA_VERSION = 13;
 
 function tableExists(db: Store, name: string): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
@@ -574,6 +576,45 @@ function migrateV11ToV12(db: Store): void {
   }
 }
 
+function migrateV12ToV13(db: Store): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'events'").get() as { sql: string } | undefined;
+  if (!row) throw new Error('Cannot migrate schema v12: events table is missing.');
+  const eventSequence = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'events'").get() as { seq: number } | undefined;
+  const widenedEvents = row.sql
+    .replace(/^CREATE TABLE (?:"events"|events)(?=\s|\()/, 'CREATE TABLE events_v13')
+    .replace(
+      "CHECK (event_type IN ('seasonal-special', 'maintenance', 'topic-generic'))",
+      "CHECK (event_type IN ('seasonal-special', 'maintenance', 'topic-generic', 'pvp-season'))",
+    );
+  const hasExpectedDateColumn = /\bend_expected_date\b/u.test(row.sql);
+  const finalParen = widenedEvents.lastIndexOf(')');
+  const widenedSchema = hasExpectedDateColumn || finalParen < 0 ? widenedEvents
+    : `${widenedEvents.slice(0, finalParen)},\n    end_expected_date TEXT${widenedEvents.slice(finalParen)}`;
+  if (!widenedEvents.includes("CHECK (event_type IN ('seasonal-special', 'maintenance', 'topic-generic', 'pvp-season'))")) {
+    throw new Error('Cannot migrate schema v12: event_type constraint was not found.');
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON; BEGIN IMMEDIATE;');
+  try {
+    db.exec(`${widenedSchema};
+      INSERT INTO events_v13 SELECT *${hasExpectedDateColumn ? '' : ', NULL'} FROM events;
+      DROP TABLE events;
+      ALTER TABLE events_v13 RENAME TO events;`);
+    if (eventSequence) {
+      const updated = db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'events'").run(eventSequence.seq);
+      if (updated.changes === 0) db.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ?)").run(eventSequence.seq);
+    }
+    db.prepare('DELETE FROM schema_version').run();
+    db.prepare('INSERT INTO schema_version (version) VALUES (13)').run();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;');
+  }
+}
+
 function initializeSchema(db: Store): void {
   const hadEvents = tableExists(db, 'events');
   const version = tableExists(db, 'schema_version')
@@ -586,7 +627,7 @@ function initializeSchema(db: Store): void {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
     return;
   }
-  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10, migrateV10ToV11, migrateV11ToV12];
+  const steps = [migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7, migrateV7ToV8, migrateV8ToV9, migrateV9ToV10, migrateV10ToV11, migrateV11ToV12, migrateV12ToV13];
   for (const step of steps.slice(Math.max(0, version - 1))) step(db);
   db.exec(SCHEMA);
   // Added later without a version bump: the guild name for the web page's Discord links.
@@ -1096,9 +1137,9 @@ export function applyField(
     const source = db.prepare(`
       SELECT kind, published_at AS publishedAt, first_seen_at AS firstSeenAt
       FROM event_sources
-      WHERE url = ? AND event_id = ?
-    `).get(sourceUrl, eventId) as SourceRecord | undefined;
-    if (!source) throw new Error(`Source ${sourceUrl} is not attached to event ${eventId}`);
+      WHERE url = ?
+    `).get(sourceUrl) as SourceRecord | undefined;
+    if (!source) throw new Error(`Source ${sourceUrl} is not attached to a stored event`);
 
     const event = db.prepare('SELECT id FROM events WHERE id = ?').get(eventId) as { id: number } | undefined;
     if (!event) throw new Error(`Event ${eventId} does not exist`);
@@ -1123,7 +1164,7 @@ export function applyField(
     const eventResult = update.status === 'ok'
       ? db.prepare(`
           UPDATE events
-          SET ${columns.value} = ?, ${columns.status} = 'ok', ${columns.reason} = NULL${field === 'end' ? ', end_patch = NULL, end_patch_source_url = NULL' : ''}
+          SET ${columns.value} = ?, ${columns.status} = 'ok', ${columns.reason} = NULL${field === 'end' ? ', end_patch = NULL, end_expected_date = NULL, end_patch_source_url = NULL' : ''}
           WHERE id = ? AND (${columns.value} IS NOT ? OR ${columns.status} IS NOT 'ok' OR ${columns.reason} IS NOT NULL)
         `).run(serializedValue(field, update.value), eventId, serializedValue(field, update.value))
       : db.prepare(`
@@ -1156,7 +1197,14 @@ function putEndProvenance(db: Store, eventId: number, sourceUrl: string, sourceT
 }
 
 /** Retains a verified start while marking an end that will be resolved by matching patch maintenance. */
-export function bindEventEndToPatch(db: Store, eventId: number, patch: string, sourceUrl: string, sourceTime?: string): boolean {
+export function bindEventEndToPatch(
+  db: Store,
+  eventId: number,
+  patch: string,
+  sourceUrl: string,
+  sourceTime?: string,
+  expectedEndDate?: string,
+): boolean {
   if (!/^\d+\.\d+$/.test(patch)) throw new Error(`Invalid patch version: ${patch}`);
   return runTransaction(db, () => {
     const source = db.prepare(`SELECT kind, published_at AS publishedAt, first_seen_at AS firstSeenAt
@@ -1174,10 +1222,10 @@ export function bindEventEndToPatch(db: Store, eventId: number, patch: string, s
       WHERE field_provenance.event_id = ? AND field_provenance.field = 'end'`).get(eventId) as ProvenanceRecord | undefined;
     if (!candidateWins(db, eventId, 'end', candidate, current)) return false;
 
-    const reason = `Wird mit der Wartung zu Patch ${patch} festgelegt.`;
-    const updated = db.prepare(`UPDATE events SET end_status = 'unsicher', end_reason = ?, end_patch = ?, end_patch_source_url = NULL
-      WHERE id = ? AND end_utc IS NULL AND (end_patch IS NOT ? OR end_status IS NOT 'unsicher' OR end_reason IS NOT ?)`)
-      .run(reason, patch, eventId, patch, reason).changes > 0;
+    const reason = `Wird mit der Wartung zu Patch ${patch} festgelegt.${expectedEndDate ? ` (Angekündigtes Datum: ${expectedEndDate}.)` : ''}`;
+    const updated = db.prepare(`UPDATE events SET end_status = 'unsicher', end_reason = ?, end_patch = ?, end_expected_date = ?, end_patch_source_url = NULL
+      WHERE id = ? AND end_utc IS NULL AND (end_patch IS NOT ? OR end_status IS NOT 'unsicher' OR end_reason IS NOT ? OR end_expected_date IS NOT ?)`)
+      .run(reason, patch, expectedEndDate ?? null, eventId, patch, reason, expectedEndDate ?? null).changes > 0;
     return putEndProvenance(db, eventId, sourceUrl, candidate.sourceTime) || updated;
   });
 }
@@ -1199,7 +1247,7 @@ export function resolvePatchBoundEnd(
     const event = db.prepare(`SELECT end_patch AS endPatch, end_status AS endStatus, end_utc AS endUtc
       FROM events WHERE id = ?`).get(eventId) as { endPatch: string | null; endStatus: 'ok' | 'unsicher'; endUtc: string | null } | undefined;
     if (!event || event.endPatch !== patch || event.endStatus !== 'unsicher' || event.endUtc !== null) return false;
-    const resolved = db.prepare(`UPDATE events SET end_utc = ?, end_status = 'ok', end_reason = NULL, end_patch_source_url = ?
+    const resolved = db.prepare(`UPDATE events SET end_utc = ?, end_status = 'ok', end_reason = NULL, end_expected_date = NULL, end_patch_source_url = ?
       WHERE id = ? AND end_patch = ? AND end_status = 'unsicher' AND end_utc IS NULL`)
       .run(maintenanceStartUtc, sourceUrl, eventId, patch).changes > 0;
     const provenance = putEndProvenance(db, eventId, sourceUrl, sourceTime ?? source.publishedAt ?? source.firstSeenAt);
@@ -1237,6 +1285,7 @@ export function getOpenEvents(db: Store, now: Date | string = new Date()): Store
            end_status AS endStatus,
            end_reason AS endReason,
            end_patch AS endPatch,
+           end_expected_date AS endExpectedDate,
            rewards_json AS rewardsJson,
            rewards_status AS rewardsStatus,
            rewards_reason AS rewardsReason,
@@ -1270,6 +1319,7 @@ export function getAllEvents(db: Store): StoreEvent[] {
            end_status AS endStatus,
            end_reason AS endReason,
            end_patch AS endPatch,
+           end_expected_date AS endExpectedDate,
            rewards_json AS rewardsJson,
            rewards_status AS rewardsStatus,
            rewards_reason AS rewardsReason,
@@ -1301,6 +1351,7 @@ export function getRetractingEvents(db: Store): RetractingEvent[] {
            end_status AS endStatus,
            end_reason AS endReason,
            end_patch AS endPatch,
+           end_expected_date AS endExpectedDate,
            rewards_json AS rewardsJson,
            rewards_status AS rewardsStatus,
            rewards_reason AS rewardsReason,

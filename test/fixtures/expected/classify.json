@@ -2,13 +2,15 @@
   "summary": {
     "topics-p1": {
       "topic-generic": 0,
-      "unclassified": 14,
+      "unclassified": 11,
+      "pvp-season": 3,
       "seasonal-special": 3,
       "ignore": 3
     },
     "topics-p1-ifOnlyLiteralHrefs": {
       "topic-generic": 2,
-      "unclassified": 15,
+      "unclassified": 12,
+      "pvp-season": 3,
       "ignore": 3
     },
     "maintenance-p1": {
@@ -50,8 +52,8 @@
       "fixture": "topics/7bf7d30ca5cd6a070407c97c2cd3c04f57430c40.html",
       "bodyDirectSpecialHref": false,
       "bodySqexToResolvesToSpecial": [],
-      "expected": "unclassified",
-      "expectedIfOnlyLiteralHrefs": "unclassified"
+      "expected": "pvp-season",
+      "expectedIfOnlyLiteralHrefs": "pvp-season"
     },
     {
       "title": "Veröffentlichung der Details zu Patch 7.57!",
@@ -139,8 +141,8 @@
       "fixture": "topics/53d4157970ebb40da02ab46190cfb3ab27e31c45.html",
       "bodyDirectSpecialHref": false,
       "bodySqexToResolvesToSpecial": [],
-      "expected": "unclassified",
-      "expectedIfOnlyLiteralHrefs": "unclassified"
+      "expected": "pvp-season",
+      "expectedIfOnlyLiteralHrefs": "pvp-season"
     },
     {
       "title": "Das Kollaborations-Event „FINAL FANTASY XIV & FINAL FANTASY XV“ kehrt zurück!",
@@ -200,8 +202,8 @@
       "fixture": "topics/0aa579530ee986a480f0e48688a64bf791deb09d.html",
       "bodyDirectSpecialHref": false,
       "bodySqexToResolvesToSpecial": [],
-      "expected": "unclassified",
-      "expectedIfOnlyLiteralHrefs": "unclassified"
+      "expected": "pvp-season",
+      "expectedIfOnlyLiteralHrefs": "pvp-season"
     },
     {
       "title": "Veröffentlichung der Details zu Patch 7.56!",

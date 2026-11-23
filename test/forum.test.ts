@@ -474,6 +474,7 @@ test('forum type tags map fixture and live titles only when the rule is certain'
   assert.deepEqual(fixtureTag('[Wartung]Notwartung aller Welten (17. Sep.)', 'maintenance', 'https://de.finalfantasyxiv.com/lodestone/news/detail/b'), ['Notwartung']);
   assert.deepEqual(fixtureTag('[Wartung][Crystal] Notwartung der Welt Diabolos (11. Sep.)', 'maintenance', 'https://de.finalfantasyxiv.com/lodestone/news/detail/c'), ['Welt-Wartung']);
   assert.deepEqual(fixtureTag('[Folge-News]Wartung aller Welten (12-13. Okt.)', 'maintenance', 'https://de.finalfantasyxiv.com/lodestone/news/detail/d'), []);
+  assert.deepEqual(fixtureTag('PvP-Serie 12', 'pvp-season', 'https://de.finalfantasyxiv.com/lodestone/topics/detail/pvp'), ['PvP']);
   assert.deepEqual(forumTagIdsForEvent(
     { eventType: 'topic-generic', title: 'Kampagne', titleStatus: 'unsicher' } as StoreEvent,
     [], NOW, FORUM_TAG_NAMES.map((name) => ({ id: name, name })),

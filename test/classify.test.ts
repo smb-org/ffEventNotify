@@ -98,6 +98,76 @@ test('topic classification follows the fixture expectations and filters specials
   }
 });
 
+test('PvP season topic fixtures are classified before patch keywords, while tournaments stay unclassified', async (t) => {
+  const fixtures = [
+    '377ccb56749da916d62a8d0ac10907d6b77ab11e',
+    'e0aabd6871cdda42b7edbd07b4543e61172feb9c',
+    '2854fb25991c1cab6f03ae0e7d390ccaa7cd1a02',
+    'fcc352bde94a3d42acebce5cd8233bca09bcc716',
+    '4769450afe53ac24710d5c28ad1e6e9c94fc7f73',
+    '0aa579530ee986a480f0e48688a64bf791deb09d',
+    '1695818e251893e210bc4aab92f2b7a2164a7b0b',
+    'e1432cb0adb2c59d841fdbde19406820d4a49cc3',
+    '7bf7d30ca5cd6a070407c97c2cd3c04f57430c40',
+  ];
+  for (const id of fixtures) {
+    await t.test(id, async () => {
+      const html = detailHtml(`topics/${id}.html`);
+      const title = /<title>(.*?)<\/title>/s.exec(html)?.[1]?.replace(/\s*\|\s*FINAL FANTASY XIV.*$/, '').trim();
+      assert.ok(title, `fixture ${id} has a Lodestone title`);
+      const result = await classify({
+        title,
+        url: `/lodestone/topics/detail/${id}`,
+        source: 'topic',
+      }, html);
+      assert.deepEqual(result, { status: 'classified', eventType: 'pvp-season' }, title);
+    });
+  }
+
+  const tournament = await classify({
+    title: 'Crystalline Conflict Regional Championship 2026',
+    url: '/lodestone/topics/detail/regional-championship',
+    source: 'topic',
+  });
+  assert.equal(tournament.status, 'unclassified');
+
+  const patchTitleWithoutBody = await classifyEntry({
+    title: 'Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56!',
+    url: '/lodestone/topics/detail/pvp-series-end',
+    source: 'topic',
+  }, undefined, { hasPeriod: () => 'no' });
+  assert.deepEqual(patchTitleWithoutBody, { status: 'classified', eventType: 'pvp-season' });
+});
+
+test('PvP title rules preserve existing exclusions and match only Brett announcements', async () => {
+  const ignoredTitles = [
+    'Sonderseite zu Patch 8.0: 2. Saison auf dem Brett der Bestie',
+    'Fan Festival 2026 – Rückblick auf die 1. Saison auf dem Brett der Bestie',
+  ];
+  for (const title of ignoredTitles) {
+    const result = await classifyEntry({ title, url: '/lodestone/topics/detail/ignored-pvp', source: 'topic' }, undefined, { hasPeriod: () => 'no' });
+    assert.equal(result.status, 'ignored', title);
+  }
+
+  const broadTitle = await classifyEntry({
+    title: 'Details zur 10. Saison auf dem Brett der Bestie',
+    url: '/lodestone/topics/detail/broad-pvp-title',
+    source: 'topic',
+  }, undefined, { hasPeriod: () => 'no' });
+  assert.equal(broadTitle.status, 'unclassified');
+});
+
+test('a dated generic Patch campaign keeps its HEAD topic-generic classification', async () => {
+  const html = `<article class="news__detail"><header class="news__header"><h1>Patch 8.0 – Kampagne für Rückkehrer</h1></header><div class="news__detail__wrapper"><h4>Datum und Uhrzeit</h4><p>Freitag, den 20. November 2026 um 12:00 Uhr (MEZ)</p></div></article>`;
+  const result = await classify({
+    title: 'Patch 8.0 – Kampagne für Rückkehrer',
+    url: '/lodestone/topics/detail/patch-80-return-campaign',
+    source: 'topic',
+  }, html);
+
+  assert.deepEqual(result, { status: 'classified', eventType: 'topic-generic' });
+});
+
 test('maintenance classification follows every maintenance-p1 expected value', async () => {
   for (const item of classifyFixture.maintenanceP1) {
     const entry = maintenanceEntries.find((candidate) => listPath(candidate.url) === item.url);
@@ -206,7 +276,6 @@ test('patch topics without fetched detail remain topic-generic', async (t) => {
   for (const title of [
     'Veröffentlichung der Details zu Patch 7.57!',
     'Vorab-Details zu Patch 7.5',
-    'Die PvP-Serie 11 endet mit der Veröffentlichung von Patch 7.56!',
   ]) {
     await t.test(title, async () => {
       const result = await classifyEntry({

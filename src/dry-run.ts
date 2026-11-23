@@ -390,6 +390,7 @@ function eventTypeName(event: StoreEvent): string {
     case 'seasonal-special': return 'Sonderseite';
     case 'maintenance': return 'Wartung';
     case 'topic-generic': return 'Themenbeitrag';
+    case 'pvp-season': return 'PvP-Saison';
   }
 }
 

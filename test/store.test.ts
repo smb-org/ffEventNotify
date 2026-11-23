@@ -6,10 +6,12 @@ import { test } from 'node:test';
 import {
   applyField,
   attachSource,
+  bindEventEndToPatch,
   cacheItem,
   createEvent,
   findEventByKey,
   findEventBySourceUrl,
+  getAllEvents,
   getCachedItem,
   getConfiguredGuilds,
   ensureGuildEventFirstPostAttemptAt,
@@ -91,7 +93,9 @@ test('creates the storage tables and enforces one event per source URL', () => {
     const url = 'https://example.test/event';
     assert.equal(attachSource(db, { eventId: first, url, kind: 'topic' }), true);
     assert.equal(attachSource(db, { eventId: second, url, kind: 'topic' }), false);
+    assert.equal(attachSource(db, { eventId: first, url, kind: 'topic' }), false);
     assert.equal(findEventBySourceUrl(db, url), first);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM event_sources WHERE url = ?').get(url) as { count: number }).count, 1);
   } finally {
     db.close();
   }
@@ -125,6 +129,23 @@ test('translates legacy field reasons before they can appear in admin logs', () 
   } finally {
     db.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('an older patch announcement cannot replace the winning expected maintenance date', () => {
+  const db = openDb(':memory:');
+  try {
+    const eventId = createEvent(db, { eventKey: 'pvp:cc:21', eventType: 'pvp-season', title: 'Crystalline Conflict – 21. Saison' });
+    const newerUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/newer-patch-date';
+    const olderUrl = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/older-patch-date';
+    attachSource(db, { eventId, url: newerUrl, kind: 'topic', publishedAt: '2026-11-02T12:00:00Z' });
+    attachSource(db, { eventId, url: olderUrl, kind: 'topic', publishedAt: '2026-10-30T12:00:00Z' });
+
+    assert.equal(bindEventEndToPatch(db, eventId, '7.58', newerUrl, '2026-11-02T12:00:00Z', '2026-11-14'), true);
+    assert.equal(bindEventEndToPatch(db, eventId, '7.58', olderUrl, '2026-10-30T12:00:00Z', '2026-11-10'), false);
+    assert.equal(getAllEvents(db).find((event) => event.id === eventId)?.endExpectedDate, '2026-11-14');
+  } finally {
+    db.close();
   }
 });
 
