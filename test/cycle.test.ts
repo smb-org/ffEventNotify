@@ -1415,11 +1415,7 @@ test('first-run replay posts active events and open PvP seasons, while keeping e
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Fall Guys/);
     assert.match(status?.embeds.find((embed) => embed.title === 'Läuft gerade')?.description ?? '', /Mog Mog-Kollektion/);
     assert.deepEqual(discord.logs, [
-      'Unsicheres Feld „Ende“ bei „PvP-Serie 12“: Nicht extrahiert (<https://de.finalfantasyxiv.com/lodestone/topics/detail/0aa579530ee986a480f0e48688a64bf791deb09d>)',
-      'Unsicheres Feld „Beschreibung“ bei „PvP-Serie 12“: Nicht extrahiert (<https://de.finalfantasyxiv.com/lodestone/topics/detail/0aa579530ee986a480f0e48688a64bf791deb09d>)',
       'Unsicheres Feld „Belohnungen“ bei „Kollabo-Event: FINAL FANTASY XIV x Fall Guys“: Gegenstand bbf686f52b7: Die Gegenstandsseite antwortete mit Status 404. (<https://de.finalfantasyxiv.com/lodestone/special/fallguys/>)',
-      'Unsicheres Feld „Ende“ bei „Brett der Bestie – 1. Saison“: Nicht extrahiert (<https://de.finalfantasyxiv.com/lodestone/topics/detail/7bf7d30ca5cd6a070407c97c2cd3c04f57430c40>)',
-      'Unsicheres Feld „Beschreibung“ bei „Brett der Bestie – 1. Saison“: Nicht extrahiert (<https://de.finalfantasyxiv.com/lodestone/topics/detail/7bf7d30ca5cd6a070407c97c2cd3c04f57430c40>)',
       'Erststart: 6 erfasst, 5 gepostet, 11 unklassifiziert, 42 ignoriert',
     ]);
     assert.deepEqual(getOpenEvents(db, NOW).filter((event) => getGuildEventObject(db, 'guild', event.eventKey)?.messageId).length, 5);
