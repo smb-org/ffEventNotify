@@ -256,7 +256,7 @@ const FORUM_EVENT_TYPE_ICONS: Record<StoreEvent['eventType'], string> = {
 };
 
 function forumPostName(event: StoreEvent, status: ReturnType<typeof forumEventStatus>): string {
-  const prefix = `${FORUM_STATUS_ICONS[status]}${FORUM_EVENT_TYPE_ICONS[event.eventType]} `;
+  const prefix = `${FORUM_STATUS_ICONS[status]} ${FORUM_EVENT_TYPE_ICONS[event.eventType]} `;
   const titleLimit = 100 - prefix.length;
   let title = '';
   for (const character of eventTitle(event)) {

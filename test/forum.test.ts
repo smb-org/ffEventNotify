@@ -448,12 +448,12 @@ test('forum post names use the status and event type icons while embed titles st
     endUtc: string;
     expectedName: string;
   }> = [
-    { eventType: 'pvp-season', title: 'PvP-Saison', startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '📅⚔️ PvP-Saison' },
-    { eventType: 'maintenance', title: 'Wartung', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '▶️🛠️ Wartung' },
-    { eventType: 'seasonal-special', title: 'Saison-Event', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z', expectedName: '✅🎉 Saison-Event' },
-    { eventType: 'topic-generic', title: 'Allgemeines Thema', startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '📅📢 Allgemeines Thema' },
-    { eventType: 'topic-generic', title: 'Laufendes Thema', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '▶️📢 Laufendes Thema' },
-    { eventType: 'topic-generic', title: 'Beendetes Thema', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z', expectedName: '✅📢 Beendetes Thema' },
+    { eventType: 'pvp-season', title: 'PvP-Saison', startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '📅 ⚔️ PvP-Saison' },
+    { eventType: 'maintenance', title: 'Wartung', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '▶️ 🛠️ Wartung' },
+    { eventType: 'seasonal-special', title: 'Saison-Event', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z', expectedName: '✅ 🎉 Saison-Event' },
+    { eventType: 'topic-generic', title: 'Allgemeines Thema', startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '📅 📢 Allgemeines Thema' },
+    { eventType: 'topic-generic', title: 'Laufendes Thema', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '▶️ 📢 Laufendes Thema' },
+    { eventType: 'topic-generic', title: 'Beendetes Thema', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z', expectedName: '✅ 📢 Beendetes Thema' },
   ];
 
   for (const [index, scenario] of cases.entries()) {
@@ -493,12 +493,12 @@ test('a forum post status transition renames once', async () => {
   });
   try {
     const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
-    assert.equal(discord.posts.get(postId)?.name, '📅⚔️ PvP-Saison');
+    assert.equal(discord.posts.get(postId)?.name, '📅 ⚔️ PvP-Saison');
 
     discord.operations.length = 0;
     const runningNow = new Date('2026-10-17T12:00:00.000Z');
     await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: runningNow });
-    assert.equal(discord.posts.get(postId)?.name, '▶️⚔️ PvP-Saison');
+    assert.equal(discord.posts.get(postId)?.name, '▶️ ⚔️ PvP-Saison');
     assert.equal(discord.operations.filter((operation) => operation === 'set-name').length, 1);
 
     discord.operations.length = 0;
@@ -522,7 +522,7 @@ test('an archived ended post is not unarchived only to migrate its name', async 
   try {
     const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
     const post = discord.posts.get(postId)!;
-    post.name = '▶️🎉 Abgeschlossenes Event';
+    post.name = '▶️ 🎉 Abgeschlossenes Event';
     discord.operations.length = 0;
 
     await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
@@ -547,7 +547,7 @@ test('forum post name truncation includes both icons in the 100 character limit'
     const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
     const name = discord.posts.get(postId)!.name;
     assert.equal(name.length, 100);
-    assert.ok(name.startsWith('▶️📢 '));
+    assert.ok(name.startsWith('▶️ 📢 '));
   } finally {
     db.close();
   }
