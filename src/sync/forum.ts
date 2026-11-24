@@ -242,6 +242,30 @@ function eventTitle(event: StoreEvent): string {
   return Array.from(title.replace(/\s+/g, ' ').trim()).slice(0, 100).join('') || 'FFXIV-Event';
 }
 
+const FORUM_STATUS_ICONS: Record<ReturnType<typeof forumEventStatus>, string> = {
+  Angekündigt: '📅',
+  Läuft: '▶️',
+  Beendet: '✅',
+};
+
+const FORUM_EVENT_TYPE_ICONS: Record<StoreEvent['eventType'], string> = {
+  'pvp-season': '⚔️',
+  maintenance: '🛠️',
+  'seasonal-special': '🎉',
+  'topic-generic': '📢',
+};
+
+function forumPostName(event: StoreEvent, status: ReturnType<typeof forumEventStatus>): string {
+  const prefix = `${FORUM_STATUS_ICONS[status]}${FORUM_EVENT_TYPE_ICONS[event.eventType]} `;
+  const titleLimit = 100 - prefix.length;
+  let title = '';
+  for (const character of eventTitle(event)) {
+    if (title.length + character.length > titleLimit) break;
+    title += character;
+  }
+  return `${prefix}${title}`;
+}
+
 function starterMatches(post: DiscordForumPostSnapshot, event: StoreEvent): boolean {
   return messageHasEventMarker(post.starterMessage, event);
 }
@@ -484,7 +508,7 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
     const firstPostAttemptAt = ensureGuildEventFirstPostAttemptAt(store, guildId, event.eventKey, now.toISOString());
     if (!firstPostAttemptAt) throw new Error('Der erste Forum-Post-Versuch konnte nicht gespeichert werden.');
     if (isEventRetracting(store, event.id)) return '';
-    post = await discord.createForumPost(channelId, eventTitle(event), payload, appliedTags, FORUM_AUTO_ARCHIVE_DURATION);
+    post = await discord.createForumPost(channelId, forumPostName(event, eventStatus), payload, appliedTags, FORUM_AUTO_ARCHIVE_DURATION);
     createdPost = true;
     if (eventObject?.messageId) logAction(guildId, 'postRecreated', `Beitrag „${eventTitle(event)}“ neu angelegt (vorher gelöscht)`);
     else logAction(guildId, 'postCreated', `Beitrag „${eventTitle(event)}“ angelegt`);
@@ -552,13 +576,16 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
     });
   }
 
-  const nameChanged = !createdPost && post.name !== eventTitle(event) && Boolean(discord.setForumPostName);
+  const desiredName = forumPostName(event, eventStatus);
+  const nameDiffers = !createdPost && post.name !== desiredName && Boolean(discord.setForumPostName);
   const tagsChanged = !createdPost && JSON.stringify([...post.appliedTags].sort()) !== JSON.stringify([...appliedTags].sort()) && Boolean(discord.setForumPostTags);
   const starterChanged = !createdPost && !samePayload(post.starterMessage, payload);
   const continuationPlan = await planContinuations(post.id, event, sourceUrls, card.continuationBodies, discord, store, guildId);
   const durationChanged = eventStatus === 'Beendet' && post.autoArchiveDuration !== FORUM_AUTO_ARCHIVE_DURATION && Boolean(discord.setForumPostAutoArchiveDuration);
   const continuationChanged = continuationPlan.actions.length > 0 || continuationPlan.deletes.length > 0;
-  const hasPostChanges = nameChanged || tagsChanged || starterChanged || continuationChanged || durationChanged;
+  const nonNameChanges = tagsChanged || starterChanged || continuationChanged || durationChanged;
+  const nameChanged = nameDiffers && !(eventStatus === 'Beendet' && post.archived && !nonNameChanges);
+  const hasPostChanges = nameChanged || nonNameChanges;
 
   if (eventStatus === 'Beendet' && post.archived && hasPostChanges) {
     if (!discord.setForumPostArchived) throw new Error('Dieser Discord-Adapter kann Forum-Posts nicht entarchivieren.');
@@ -571,7 +598,7 @@ async function syncForumEventUnlocked({ guildId, channelId, logChannelId, event,
   let edited = false;
   if (!createdPost) {
     if (nameChanged && discord.setForumPostName) {
-      await editThread(() => discord.setForumPostName!(post.id, eventTitle(event)));
+      await editThread(() => discord.setForumPostName!(post.id, desiredName));
       edited = true;
     }
     if (tagsChanged && discord.setForumPostTags) {

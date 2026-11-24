@@ -440,6 +440,119 @@ test('forum starter content does not cause repeat edits and migrates an old star
   }
 });
 
+test('forum post names use the status and event type icons while embed titles stay plain', async (t) => {
+  const cases: Array<{
+    eventType: StoreEvent['eventType'];
+    title: string;
+    startUtc: string;
+    endUtc: string;
+    expectedName: string;
+  }> = [
+    { eventType: 'pvp-season', title: 'PvP-Saison', startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '📅⚔️ PvP-Saison' },
+    { eventType: 'maintenance', title: 'Wartung', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '▶️🛠️ Wartung' },
+    { eventType: 'seasonal-special', title: 'Saison-Event', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z', expectedName: '✅🎉 Saison-Event' },
+    { eventType: 'topic-generic', title: 'Allgemeines Thema', startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '📅📢 Allgemeines Thema' },
+    { eventType: 'topic-generic', title: 'Laufendes Thema', startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z', expectedName: '▶️📢 Laufendes Thema' },
+    { eventType: 'topic-generic', title: 'Beendetes Thema', startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z', expectedName: '✅📢 Beendetes Thema' },
+  ];
+
+  for (const [index, scenario] of cases.entries()) {
+    await t.test(scenario.expectedName, async () => {
+      const db = openDb(':memory:');
+      const discord = new ForumDiscord();
+      setupGuild(db);
+      const url = `https://de.finalfantasyxiv.com/lodestone/topics/detail/status-prefix-${index}`;
+      const event = storeEvent(db, {
+        eventKey: `topic-generic:/lodestone/topics/detail/status-prefix-${index}`,
+        eventType: scenario.eventType,
+        title: scenario.title,
+        sourceUrl: url,
+        startUtc: scenario.startUtc,
+        endUtc: scenario.endUtc,
+      });
+      try {
+        const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+        const post = discord.posts.get(postId)!;
+        assert.equal(post.name, scenario.expectedName);
+        assert.equal(post.starterMessage.embeds[0]?.title, scenario.title);
+      } finally {
+        db.close();
+      }
+    });
+  }
+});
+
+test('a forum post status transition renames once', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/status-transition';
+  const event = storeEvent(db, {
+    eventKey: 'pvp-season:status-transition', eventType: 'pvp-season', title: 'PvP-Saison', sourceUrl: url,
+    startUtc: '2026-10-17T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    assert.equal(discord.posts.get(postId)?.name, '📅⚔️ PvP-Saison');
+
+    discord.operations.length = 0;
+    const runningNow = new Date('2026-10-17T12:00:00.000Z');
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: runningNow });
+    assert.equal(discord.posts.get(postId)?.name, '▶️⚔️ PvP-Saison');
+    assert.equal(discord.operations.filter((operation) => operation === 'set-name').length, 1);
+
+    discord.operations.length = 0;
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: runningNow });
+    assert.equal(discord.operations.filter((operation) => operation === 'set-name').length, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('an archived ended post is not unarchived only to migrate its name', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/special/2026/archived-name-only';
+  const event = storeEvent(db, {
+    eventKey: 'seasonal-special:/lodestone/special/2026/archived-name-only', eventType: 'seasonal-special',
+    title: 'Abgeschlossenes Event', sourceUrl: url,
+    startUtc: '2026-10-10T08:00:00.000Z', endUtc: '2026-10-15T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    const post = discord.posts.get(postId)!;
+    post.name = '▶️🎉 Abgeschlossenes Event';
+    discord.operations.length = 0;
+
+    await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+
+    assert.equal(post.archived, true);
+    assert.deepEqual(discord.operations, []);
+  } finally {
+    db.close();
+  }
+});
+
+test('forum post name truncation includes both icons in the 100 character limit', async () => {
+  const db = openDb(':memory:');
+  const discord = new ForumDiscord();
+  setupGuild(db);
+  const url = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/long-title';
+  const event = storeEvent(db, {
+    eventKey: 'topic-generic:long-title', eventType: 'topic-generic', title: 'L'.repeat(140), sourceUrl: url,
+    startUtc: '2026-10-15T08:00:00.000Z', endUtc: '2026-10-20T14:59:00.000Z',
+  });
+  try {
+    const postId = await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event, sourceUrls: [url], discord, store: db, now: NOW });
+    const name = discord.posts.get(postId)!.name;
+    assert.equal(name.length, 100);
+    assert.ok(name.startsWith('▶️📢 '));
+  } finally {
+    db.close();
+  }
+});
+
 test('forum type tags map fixture and live titles only when the rule is certain', () => {
   const liveTitles = new Set<string>();
   for (const report of reports) {
@@ -699,7 +812,7 @@ test('an archived ended event is unarchived before changes and archived again af
 
     await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
 
-    assert.deepEqual(discord.operations, ['unarchive', 'set-tags', 'edit-starter', 'archive']);
+    assert.deepEqual(discord.operations, ['unarchive', 'set-name', 'set-tags', 'edit-starter', 'archive']);
     assert.equal(discord.posts.get(postId)?.archived, true);
     assert.match(discord.posts.get(postId)?.starterMessage.content ?? '', /^✅ Beendet/);
     assert.equal(captured.messages().filter((message) => message.includes('bearbeitet')).length, 1);
@@ -756,7 +869,7 @@ test('a 50083 from an edit unarchives once and retries when the fetched archive 
 
     await syncForumEvent({ guildId: 'guild-1', channelId: 'forum-1', event: ended, sourceUrls: [url], discord, store: db, now: NOW });
 
-    assert.deepEqual(discord.operations, ['set-tags', 'edit-starter-50083', 'unarchive', 'edit-starter', 'archive']);
+    assert.deepEqual(discord.operations, ['set-name', 'set-tags', 'edit-starter-50083', 'unarchive', 'edit-starter', 'archive']);
     assert.equal(discord.starterEditAttempts, 2);
     assert.equal(discord.posts.get(postId)?.archived, true);
   } finally {
