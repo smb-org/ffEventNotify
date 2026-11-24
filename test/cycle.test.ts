@@ -407,7 +407,7 @@ function controlledFetcher(options: {
   const base = fixtureFetcher();
   return async (url, fetchOptions) => {
     const parsed = new URL(url);
-    if (parsed.pathname === '/lodestone/topics/' && parsed.searchParams.get('page') === null && options.topicList !== undefined) {
+    if (parsed.pathname === '/lodestone/topics/' && options.topicList !== undefined) {
       return { status: 200, body: options.topicList, finalUrl: url };
     }
     if (parsed.pathname === '/lodestone/news/category/2' && parsed.searchParams.get('page') === null && options.maintenanceList !== undefined) {
@@ -2365,8 +2365,10 @@ function pvpCycleFetcher(
   topics: Array<{ id: string; title: string; publishedAt?: string }>,
   maintenance?: { title: string; url: string; fixture: string; body?: string },
   topicBodyOverrides: Record<string, string> = {},
+  topicPages: Partial<Record<number, Array<{ id: string; title: string; publishedAt?: string }>>> = {},
 ): FetchText {
-  const pages = new Map(topics.map(({ id }) => [`/lodestone/topics/detail/${id}`, `topics/${id}.html`]));
+  const pages = new Map([...topics, ...Object.values(topicPages).flatMap((entries) => entries ?? [])]
+    .map(({ id }) => [`/lodestone/topics/detail/${id}`, `topics/${id}.html`]));
   if (maintenance && !maintenance.body) pages.set(maintenance.url, maintenance.fixture);
   const base = fixtureFetcher();
   return async (url, options) => {
@@ -2374,6 +2376,10 @@ function pvpCycleFetcher(
     const pageNumber = parsed.searchParams.get('page');
     if (parsed.pathname === '/lodestone/topics/' && (pageNumber === null || pageNumber === '1')) {
       return { status: 200, body: topicListHtml(topics.map(({ id, title, publishedAt }) => ({ title, url: `/lodestone/topics/detail/${id}`, publishedAt })), []), finalUrl: url };
+    }
+    if (parsed.pathname === '/lodestone/topics/' && pageNumber !== null && /^\d+$/.test(pageNumber)) {
+      const pageTopics = Object.hasOwn(topicPages, Number(pageNumber)) ? topicPages[Number(pageNumber)] ?? [] : topics;
+      return { status: 200, body: topicListHtml(pageTopics.map(({ id, title, publishedAt }) => ({ title, url: `/lodestone/topics/detail/${id}`, publishedAt })), []), finalUrl: url };
     }
     if (parsed.pathname === '/lodestone/news/category/2' && (pageNumber === null || pageNumber === '1')) {
       return { status: 200, body: maintenanceListHtml(maintenance ? [{ tag: 'Wartung', title: maintenance.title, url: maintenance.url }] : [{
@@ -2400,6 +2406,181 @@ const cc21LastPhaseTopic = {
   title: 'Auf in die letzte Phase der 21. Saison von Crystalline Conflict!',
   publishedAt: '2026-10-27T08:00:00.000Z',
 };
+
+const pvpBackfillTopic = {
+  id: '0aa579530ee986a480f0e48688a64bf791deb09d',
+  title: 'Die PvP-Serie 11 ist zu Ende und Serie 12 hat begonnen',
+  publishedAt: '2026-09-08T08:00:00.000Z',
+};
+const pvpBackfillFirstPageTopic = { id: 'pvp-backfill-live-letter', title: 'Brief des Produzenten LIVE #100' };
+const pvpBackfillNoiseTopic = { id: 'backfill-noise', title: 'Eine sonstige Mitteilung' };
+const pvpBackfillArticle = '<article class="news__detail"><div class="news__detail__wrapper"><p>Die PvP-Serie hat begonnen.</p></div></article>';
+
+test('one-time PvP backfill imports a page-3 series change using its publication time', async () => {
+  const db = openDb(':memory:');
+  const pageFetches = new Map<number, number>();
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const base = pvpCycleFetcher([pvpBackfillFirstPageTopic], undefined, {
+    [pvpBackfillFirstPageTopic.id]: pvpBackfillArticle, [pvpBackfillTopic.id]: pvpBackfillArticle,
+  }, { 2: [pvpBackfillNoiseTopic], 3: [pvpBackfillTopic], 4: [pvpBackfillNoiseTopic], 5: [pvpBackfillNoiseTopic] });
+  const fetchText: FetchText = async (url, options) => {
+    const parsed = new URL(url);
+    const page = parsed.pathname === '/lodestone/topics/' ? Number(parsed.searchParams.get('page')) : 0;
+    if (page >= 2 && page <= 5) pageFetches.set(page, (pageFetches.get(page) ?? 0) + 1);
+    return base(url, options);
+  };
+  try {
+    const options = { store: db, discord: new FakeDiscordPort(), fetchText, guilds: [], now: () => new Date(NOW) };
+    await runCycle(options);
+
+    const series12 = getAllEvents(db).find((event) => event.eventKey === 'pvp:series:12');
+    assert.ok(series12);
+    assert.equal(series12.startUtc, pvpBackfillTopic.publishedAt);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), 'true');
+    await runCycle(options);
+    assert.deepEqual([...pageFetches.entries()].sort(([left], [right]) => left - right), [[2, 1], [3, 1], [4, 1], [5, 1]]);
+  } finally {
+    db.close();
+  }
+});
+
+test('PvP backfill retries a topic after its detail page fails without saving it as pending', async () => {
+  const db = openDb(':memory:');
+  let failBackfillDetail = true;
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const base = pvpCycleFetcher([pvpBackfillFirstPageTopic], undefined, {
+    [pvpBackfillFirstPageTopic.id]: pvpBackfillArticle, [pvpBackfillTopic.id]: pvpBackfillArticle,
+  }, { 2: [pvpBackfillNoiseTopic], 3: [pvpBackfillTopic], 4: [pvpBackfillNoiseTopic], 5: [pvpBackfillNoiseTopic] });
+  const fetchText: FetchText = async (url, options) => {
+    if (new URL(url).pathname === `/lodestone/topics/detail/${pvpBackfillTopic.id}` && failBackfillDetail) {
+      failBackfillDetail = false;
+      return { status: 503, body: '', finalUrl: url };
+    }
+    return base(url, options);
+  };
+  try {
+    const options = { ...cycleOptions(db, new FakeDiscordPort()), fetchText, now: () => new Date(NOW) };
+    await runCycle(options);
+    assert.equal(getMetaValue(db, 'pending_discoveries'), undefined);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), undefined);
+
+    await runCycle(options);
+    const series12 = getAllEvents(db).find((event) => event.eventKey === 'pvp:series:12');
+    assert.ok(series12);
+    assert.equal(series12.eventType, 'pvp-season');
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), 'true');
+  } finally {
+    db.close();
+  }
+});
+
+test('PvP backfill leaves non-PvP page entries unseen', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const nonPvp = { id: 'backfill-unclassified', title: 'Eine Meldung ohne Klassifikation' };
+  markFirstRunDone(db);
+  upsertGuildSetup(db, { guildId: 'guild', eventChannelId: 'events', logChannelId: 'logs' });
+  markGuildFirstRunDone(db, 'guild');
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  try {
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([pvpBackfillFirstPageTopic], undefined, {
+        [pvpBackfillFirstPageTopic.id]: pvpBackfillArticle, [nonPvp.id]: pvpBackfillArticle,
+      }, { 2: [nonPvp], 3: [pvpBackfillNoiseTopic], 4: [pvpBackfillNoiseTopic], 5: [pvpBackfillNoiseTopic] }),
+      now: () => new Date(NOW),
+    });
+
+    assert.equal(isSeen(db, `https://de.finalfantasyxiv.com/lodestone/topics/detail/${nonPvp.id}`), false);
+    assert.equal(discord.logs.some((message) => message.includes(nonPvp.title)), false);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), 'true');
+  } finally {
+    db.close();
+  }
+});
+
+test('PvP backfill retries after a page error without marking completion', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const captured = captureLog();
+  let page4Attempts = 0;
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const base = pvpCycleFetcher([pvpBackfillFirstPageTopic], undefined, {
+    [pvpBackfillFirstPageTopic.id]: pvpBackfillArticle,
+  }, { 2: [pvpBackfillNoiseTopic], 3: [pvpBackfillNoiseTopic], 4: [pvpBackfillNoiseTopic], 5: [pvpBackfillNoiseTopic] });
+  const fetchText: FetchText = async (url, options) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/lodestone/topics/' && parsed.searchParams.get('page') === '4') {
+      page4Attempts += 1;
+      if (page4Attempts === 1) return { status: 503, body: '', finalUrl: url };
+      if (page4Attempts === 2) return { status: 200, body: '<html><body></body></html>', finalUrl: url };
+    }
+    return base(url, options);
+  };
+  const options = { ...cycleOptions(db, discord), fetchText, now: () => new Date(NOW) };
+  try {
+    await runCycle(options);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), undefined);
+    assert.equal(captured.messages().filter((message) => /PvP-Backfill/i.test(message)).length, 1);
+
+    await runCycle(options);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), undefined);
+    assert.equal(captured.messages().filter((message) => /PvP-Backfill/i.test(message)).length, 2);
+    assert.equal(discord.logs.some((message) => /PvP-Backfill|page=4/i.test(message)), false);
+
+    await runCycle(options);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), 'true');
+    assert.equal(page4Attempts, 3);
+  } finally {
+    captured.restore();
+    db.close();
+  }
+});
+
+test('PvP backfill retries after a blind cycle and completes once processing resumes', async () => {
+  const db = openDb(':memory:');
+  const pageFetches = new Map<number, number>();
+  let blindFirstPage = true;
+  markFirstRunDone(db);
+  setMetaValue(db, 'wiki_checked_utc_day', NOW.toISOString().slice(0, 10));
+  const base = pvpCycleFetcher([pvpBackfillFirstPageTopic], undefined, {
+    [pvpBackfillFirstPageTopic.id]: pvpBackfillArticle, [pvpBackfillTopic.id]: pvpBackfillArticle,
+  }, { 2: [pvpBackfillNoiseTopic], 3: [pvpBackfillTopic], 4: [pvpBackfillNoiseTopic], 5: [pvpBackfillNoiseTopic] });
+  const fetchText: FetchText = async (url, options) => {
+    const parsed = new URL(url);
+    const pageNumber = parsed.searchParams.get('page');
+    const page = parsed.pathname === '/lodestone/topics/' ? Number(pageNumber) : 0;
+    if (page >= 2 && page <= 5) pageFetches.set(page, (pageFetches.get(page) ?? 0) + 1);
+    if (parsed.pathname === '/lodestone/topics/' && (pageNumber === null || pageNumber === '1') && blindFirstPage) {
+      blindFirstPage = false;
+      return { status: 200, body: '<html><body></body></html>', finalUrl: url };
+    }
+    return base(url, options);
+  };
+  try {
+    const options = { store: db, discord: new FakeDiscordPort(), fetchText, guilds: [], now: () => new Date(NOW) };
+    await runCycle(options);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), undefined);
+    assert.equal(getAllEvents(db).some((event) => event.eventKey === 'pvp:series:12'), false);
+    assert.deepEqual([...pageFetches.entries()].sort(([left], [right]) => left - right), [[2, 1], [3, 1], [4, 1], [5, 1]]);
+
+    await runCycle(options);
+    assert.equal(getMetaValue(db, 'pvp-backfill-done'), 'true');
+    const series12 = getAllEvents(db).find((event) => event.eventKey === 'pvp:series:12');
+    assert.ok(series12);
+    assert.equal(series12.startUtc, pvpBackfillTopic.publishedAt);
+    assert.deepEqual([...pageFetches.entries()].sort(([left], [right]) => left - right), [[2, 2], [3, 2], [4, 2], [5, 2]]);
+
+    await runCycle(options);
+    assert.deepEqual([...pageFetches.entries()].sort(([left], [right]) => left - right), [[2, 2], [3, 2], [4, 2], [5, 2]]);
+  } finally {
+    db.close();
+  }
+});
 
 test('Crystalline Conflict predecessor closes at the successor start when maintenance is not stored', async () => {
   const db = openDb(':memory:');

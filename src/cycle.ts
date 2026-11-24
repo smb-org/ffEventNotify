@@ -171,6 +171,8 @@ interface CycleContext extends Omit<CycleOptions, 'health'> {
   specialPages: Map<string, Promise<string | undefined>>;
   pendingDiscoveries: Map<string, PendingDiscovery>;
   pendingRetractions: Map<string, string>;
+  pvpBackfillUrls: Set<string>;
+  pvpBackfillFailed: boolean;
   allowRetractions: boolean;
 }
 
@@ -232,6 +234,11 @@ function persistPendingDiscoveries(context: CycleContext): void {
 
 function rememberPendingDiscovery(context: CycleContext, entry: ListEntry): void {
   const normalizedEntry = { ...entry, url: normalizeLodestoneUrl(entry.url) };
+  if (context.pvpBackfillUrls.has(normalizedEntry.url)) {
+    context.pvpBackfillFailed = true;
+    if (context.pendingDiscoveries.delete(normalizedEntry.url)) persistPendingDiscoveries(context);
+    return;
+  }
   const previous = context.pendingDiscoveries.get(normalizedEntry.url);
   const firstRunGuildIds = new Set(previous?.firstRunGuildIds ?? []);
   for (const guild of context.guilds) if (guild.firstRun) firstRunGuildIds.add(guild.guildId);
@@ -960,6 +967,8 @@ async function processTopic(
       return html === undefined ? 'no' : hasPeriod(html, context.currentTime);
     },
   });
+  if (context.pvpBackfillUrls.has(sourceUrl)
+    && (classification.status !== 'classified' || classification.eventType !== 'pvp-season')) return undefined;
   await classifyAndLog(context, entry, classification);
   context.processedSources.add(entry.url);
   if (classification.status !== 'classified') {
@@ -1623,6 +1632,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     specialPages: new Map(),
     pendingDiscoveries: loadPendingDiscoveries(options.store),
     pendingRetractions: new Map(),
+    pvpBackfillUrls: new Set(),
+    pvpBackfillFailed: false,
     allowRetractions: false,
   };
   await drainPendingWarnings(context);
@@ -1630,6 +1641,35 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const actionsBefore = snapshotActions();
 
   const lists = await readLists(context, globalFirstRun);
+  let pvpBackfillFetched = false;
+  if (!options.skipGlobalFirstRunMark && getMetaValue(options.store, 'pvp-backfill-done') !== 'true') {
+    if (globalFirstRun) setMetaValue(options.store, 'pvp-backfill-done', 'true');
+    else {
+      const backfill: LoadedLists['topicEntries'] = [];
+      let page = 2;
+      try {
+        for (; page <= 5; page += 1) {
+          const entries = parseTopicList(await fetchTopicListPage(page, context.fetchText));
+          if (entries.length === 0) throw new Error('Keine Themen auf der Seite erkannt');
+          for (const entry of entries) {
+            const classification = await classifyEntry(asEntry(entry, 'topic'), undefined, { hasPeriod: () => 'no' });
+            if (classification.status === 'classified' && classification.eventType === 'pvp-season') backfill.push(entry);
+          }
+        }
+        for (const entry of backfill) context.pvpBackfillUrls.add(normalizeLodestoneUrl(entry.url));
+        const urls = new Set(lists.topicEntries.map((entry) => normalizeLodestoneUrl(entry.url)));
+        lists.topicEntries.push(...backfill.filter((entry) => {
+          const url = normalizeLodestoneUrl(entry.url);
+          if (urls.has(url)) return false;
+          urls.add(url);
+          return true;
+        }));
+        pvpBackfillFetched = true;
+      } catch (error) {
+        log.warn(`PvP-Backfill konnte Seite ${page} nicht laden; erneuter Versuch im nächsten Zyklus.`, error);
+      }
+    }
+  }
   const health = context.health.recordCycleHealth(lists.counts, lists.succeeded, currentTime);
   context.allowRetractions = lists.succeeded && !health.isBlind;
   await logHealthTransition(context);
@@ -1648,6 +1688,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     resolveBoundEndsFromStoredMaintenance(context);
     resolveOpenPvpPredecessorEnds(context);
     await warnForUnmatchedFollowups(context);
+    if (pvpBackfillFetched && !context.pvpBackfillFailed) setMetaValue(options.store, 'pvp-backfill-done', 'true');
   }
   await decideRetractions(context);
   await cleanupRetractingEvents(context);
@@ -1762,6 +1803,8 @@ async function runGuildSyncFromStoredDataUnlocked(options: CycleOptions, guildId
     specialPages: new Map(),
     pendingDiscoveries: loadPendingDiscoveries(options.store),
     pendingRetractions: new Map(),
+    pvpBackfillUrls: new Set(),
+    pvpBackfillFailed: false,
     allowRetractions: false,
   };
   await drainPendingWarnings(context);
