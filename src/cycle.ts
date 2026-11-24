@@ -573,6 +573,34 @@ function resolveBoundEndsFromStoredMaintenance(context: CycleContext): void {
   }
 }
 
+function resolveOpenPvpPredecessorEnds(context: CycleContext): void {
+  const events = getAllEvents(context.store);
+  const eventsByKey = new Map(events.map((event) => [event.eventKey, event]));
+  for (const event of events) {
+    if (event.eventType !== 'pvp-season' || isEventRetracting(context.store, event.id)) continue;
+    const match = /^pvp:([^:]+):(\d+)$/.exec(event.eventKey);
+    if (!match) continue;
+    const season = Number(match[2]);
+    if (!Number.isSafeInteger(season)) continue;
+    const successor = eventsByKey.get(`pvp:${match[1]}:${season + 1}`);
+    if (!successor || successor.eventType !== 'pvp-season' || successor.startStatus !== 'ok' || !successor.startUtc) continue;
+    const predecessorEndIsLater = event.endUtc !== null && Date.parse(event.endUtc) > Date.parse(successor.startUtc);
+    if (event.endStatus === 'ok' && !predecessorEndIsLater) continue;
+    const sourceUrl = getFieldProvenanceSourceUrl(context.store, successor.id, 'start');
+    if (!sourceUrl) continue;
+    if (applyField(
+      context.store,
+      event.id,
+      'end',
+      { status: 'ok', value: successor.startUtc },
+      sourceUrl,
+      context.currentTime.toISOString(),
+    )) {
+      rememberEvent(context, event.id);
+    }
+  }
+}
+
 function applyGeneric(
   context: CycleContext,
   eventId: number,
@@ -1618,6 +1646,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     await logNewUnclassifiedTopics(context);
     await refreshOpenEvents(context);
     resolveBoundEndsFromStoredMaintenance(context);
+    resolveOpenPvpPredecessorEnds(context);
     await warnForUnmatchedFollowups(context);
   }
   await decideRetractions(context);

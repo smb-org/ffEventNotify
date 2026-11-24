@@ -377,10 +377,11 @@ function cycleOptions(store: Store, discord: FakeDiscordPort, health = new Sourc
 
 type FetchResult = Awaited<ReturnType<FetchText>>;
 
-function topicListHtml(entries: Array<{ title: string; url: string }>, bannerUrls: string[] = []): string {
-  const list = entries.map(({ title, url }) =>
-    `<li class="news__list--topics"><header class="news__list--header"><p class="news__list--title"><a href="${url}">${title}</a></p></header></li>`,
-  ).join('');
+function topicListHtml(entries: Array<{ title: string; url: string; publishedAt?: string }>, bannerUrls: string[] = []): string {
+  const list = entries.map(({ title, url, publishedAt }) => {
+    const published = publishedAt === undefined ? '' : `<time><script>ldst_strftime(${Math.floor(Date.parse(publishedAt) / 1_000)}, 'YMD')</script></time>`;
+    return `<li class="news__list--topics"><header class="news__list--header"><p class="news__list--title"><a href="${url}">${title}</a></p>${published}</header></li>`;
+  }).join('');
   const banners = bannerUrls.map((url) => `<div class="mb10"><a href="${url}">Banner</a></div>`).join('');
   return `<html><body><ul>${list}</ul><div class="ldst__side">${banners}</div></body></html>`;
 }
@@ -2361,7 +2362,7 @@ test('an existing seasonal event keeps its verified terminal period after expira
 });
 
 function pvpCycleFetcher(
-  topics: Array<{ id: string; title: string }>,
+  topics: Array<{ id: string; title: string; publishedAt?: string }>,
   maintenance?: { title: string; url: string; fixture: string; body?: string },
   topicBodyOverrides: Record<string, string> = {},
 ): FetchText {
@@ -2372,7 +2373,7 @@ function pvpCycleFetcher(
     const parsed = new URL(url);
     const pageNumber = parsed.searchParams.get('page');
     if (parsed.pathname === '/lodestone/topics/' && (pageNumber === null || pageNumber === '1')) {
-      return { status: 200, body: topicListHtml(topics.map(({ id, title }) => ({ title, url: `/lodestone/topics/detail/${id}` })), []), finalUrl: url };
+      return { status: 200, body: topicListHtml(topics.map(({ id, title, publishedAt }) => ({ title, url: `/lodestone/topics/detail/${id}`, publishedAt })), []), finalUrl: url };
     }
     if (parsed.pathname === '/lodestone/news/category/2' && (pageNumber === null || pageNumber === '1')) {
       return { status: 200, body: maintenanceListHtml(maintenance ? [{ tag: 'Wartung', title: maintenance.title, url: maintenance.url }] : [{
@@ -2388,6 +2389,79 @@ function pvpCycleFetcher(
     return page ? { status: 200, body: topicBodyOverrides[topicId] ?? fixture(`./fixtures/${page}`), finalUrl: url } : base(url, options);
   };
 }
+
+const cc21ChangeTopic = {
+  id: '2854fb25991c1cab6f03ae0e7d390ccaa7cd1a02',
+  title: 'Die 21. Saison von Crystalline Conflict ist abgeschlossen, Ring frei für die 22. Saison!',
+  publishedAt: '2026-11-10T09:30:00.000Z',
+};
+const cc21LastPhaseTopic = {
+  id: '377ccb56749da916d62a8d0ac10907d6b77ab11e',
+  title: 'Auf in die letzte Phase der 21. Saison von Crystalline Conflict!',
+  publishedAt: '2026-10-27T08:00:00.000Z',
+};
+
+test('Crystalline Conflict predecessor closes at the successor start when maintenance is not stored', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([cc21ChangeTopic, cc21LastPhaseTopic]),
+      guilds: [],
+      now: () => new Date('2026-11-24T12:00:00.000Z'),
+    });
+
+    const predecessor = getAllEvents(db).find((event) => event.eventKey === 'pvp:cc:21');
+    const successor = getAllEvents(db).find((event) => event.eventKey === 'pvp:cc:22');
+    assert.ok(predecessor && successor);
+    assert.equal(predecessor.endStatus, 'ok');
+    assert.equal(predecessor.endUtc, successor.startUtc);
+    assert.equal(
+      getFieldProvenanceSourceUrl(db, predecessor.id, 'end'),
+      getFieldProvenanceSourceUrl(db, successor.id, 'start'),
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('stored maintenance takes precedence over a PvP successor start', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  try {
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([{
+        id: 'ac72281cca93b18d1b3a53bd6aac33404cfb76b1',
+        title: 'Neue optionale Gegenstände erhältlich!',
+      }], {
+        title: 'Wartung aller Welten (9-10. Nov.)',
+        url: '/lodestone/news/detail/all-worlds-7.58',
+        fixture: 'maintenance/all-worlds-7.58.html',
+      }),
+      guilds: [],
+      now: () => new Date('2026-11-03T12:00:00.000Z'),
+    });
+
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([cc21ChangeTopic, cc21LastPhaseTopic]),
+      guilds: [],
+      now: () => new Date('2026-11-24T12:00:00.000Z'),
+    });
+
+    const predecessor = getAllEvents(db).find((event) => event.eventKey === 'pvp:cc:21');
+    assert.ok(predecessor);
+    assert.equal(predecessor.endStatus, 'ok');
+    assert.equal(predecessor.endUtc, '2026-11-09T10:00:00Z');
+  } finally {
+    db.close();
+  }
+});
 
 test('Crystalline Conflict patch end resolves from maintenance without attaching its source to the season', async () => {
   const db = openDb(':memory:');
@@ -2481,7 +2555,7 @@ test('PvP patch end resolves and warns when maintenance starts over a day from t
   }
 });
 
-test('PvP-Serie change leaves a patch-bound predecessor for the maintenance resolver', async () => {
+test('PvP-Serie predecessor closes at the successor start when its end was patch-bound', async () => {
   const db = openDb(':memory:');
   const discord = new FakeDiscordPort();
   const topic = {
@@ -2498,10 +2572,10 @@ test('PvP-Serie change leaves a patch-bound predecessor for the maintenance reso
     const newSeries = getAllEvents(db).find((event) => event.eventKey === 'pvp:series:12');
     assert.ok(oldSeries && newSeries, JSON.stringify(getAllEvents(db)));
     assert.equal(oldSeries.title, 'PvP-Serie 11');
-    assert.equal(oldSeries.endUtc, null);
-    assert.equal(oldSeries.endPatch, '7.56');
-    assert.equal(oldSeries.endStatus, 'unsicher');
-    assert.equal(getFieldProvenanceSourceUrl(db, oldSeries.id, 'end'), previousSource);
+    assert.equal(oldSeries.endUtc, NOW.toISOString());
+    assert.equal(oldSeries.endPatch, null);
+    assert.equal(oldSeries.endStatus, 'ok');
+    assert.equal(getFieldProvenanceSourceUrl(db, oldSeries.id, 'end'), `https://de.finalfantasyxiv.com/lodestone/topics/detail/${topic.id}`);
     assert.equal(newSeries.startUtc, NOW.toISOString());
     assert.equal(newSeries.endStatus, 'unsicher');
     assert.deepEqual(getEventSources(db, oldSeries.id).map((source) => source.url).sort(), [
@@ -2511,23 +2585,6 @@ test('PvP-Serie change leaves a patch-bound predecessor for the maintenance reso
       `https://de.finalfantasyxiv.com/lodestone/topics/detail/${topic.id}`,
     ]);
 
-    const maintenanceBody = fixture('./fixtures/maintenance/all-worlds-7.58.html').replaceAll('7.58', '7.56');
-    await runCycle({
-      store: db,
-      discord,
-      fetchText: pvpCycleFetcher([topic], {
-        title: 'Wartung aller Welten (9-10. Nov.)',
-        url: '/lodestone/news/detail/all-worlds-7.56',
-        fixture: 'maintenance/all-worlds-7.58.html',
-        body: maintenanceBody,
-      }),
-      guilds: [],
-      now: () => new Date(NOW),
-    });
-    const resolved = getAllEvents(db).find((event) => event.eventKey === 'pvp:series:11');
-    assert.ok(resolved);
-    assert.equal(resolved.endUtc, '2026-11-09T10:00:00Z');
-    assert.equal(resolved.endPatch, '7.56');
   } finally {
     db.close();
   }
@@ -2613,6 +2670,101 @@ test('Brett transition updates an existing predecessor and attaches its topic on
     assert.equal(second.endStatus, 'unsicher');
     assert.deepEqual(getEventSources(db, second.id).map((source) => source.url), [topicUrl]);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM event_sources WHERE url = ?').get(topicUrl) as { count: number }).count, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('PvP predecessor end follows a successor start that moves one day earlier', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const topic = {
+    id: 'e1432cb0adb2c59d841fdbde19406820d4a49cc3',
+    title: 'Das Ende von Saison 1 und der Start von Saison 2 auf dem Brett der Bestie',
+    publishedAt: '2026-12-01T12:00:00.000Z',
+  };
+  const topicUrl = `https://de.finalfantasyxiv.com/lodestone/topics/detail/${topic.id}`;
+  const predecessorId = createEvent(db, {
+    eventKey: 'pvp:crucible:1', eventType: 'pvp-season', title: 'Brett der Bestie – 1. Saison',
+  });
+  const articleWithoutExactPredecessorEnd = fixture(`./fixtures/topics/${topic.id}.html`).replace(
+    /<h4[^>]*>Ende der 1\. Saison<\/h4>[\s\S]*?(?=<h4[^>]*>Zeitraum der 2\. Saison<\/h4>)/u,
+    '',
+  );
+  const articleWithEarlierSuccessorStart = articleWithoutExactPredecessorEnd.replace(
+    'Von Dienstag, den 8. Dezember 2026',
+    'Von Montag, den 7. Dezember 2026',
+  );
+  try {
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([topic], undefined, { [topic.id]: articleWithoutExactPredecessorEnd }),
+      guilds: [],
+      now: () => new Date('2026-12-02T12:00:00.000Z'),
+    });
+
+    const predecessorBefore = getAllEvents(db).find((event) => event.id === predecessorId);
+    const successor = getAllEvents(db).find((event) => event.eventKey === 'pvp:crucible:2');
+    assert.ok(predecessorBefore && successor);
+    assert.equal(successor.startUtc, '2026-12-08T05:00:00Z');
+    assert.equal(predecessorBefore.endStatus, 'ok');
+    assert.equal(predecessorBefore.endUtc, successor.startUtc);
+
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([topic], undefined, { [topic.id]: articleWithEarlierSuccessorStart }),
+      guilds: [],
+      now: () => new Date('2026-12-03T12:00:00.000Z'),
+    });
+
+    const predecessorAfter = getAllEvents(db).find((event) => event.id === predecessorId);
+    const updatedSuccessor = getAllEvents(db).find((event) => event.eventKey === 'pvp:crucible:2');
+    assert.ok(predecessorAfter && updatedSuccessor);
+    assert.equal(updatedSuccessor.startUtc, '2026-12-07T05:00:00Z');
+    assert.equal(predecessorAfter.endUtc, updatedSuccessor.startUtc);
+    assert.equal(getFieldProvenanceSourceUrl(db, predecessorAfter.id, 'end'), topicUrl);
+  } finally {
+    db.close();
+  }
+});
+
+test('an exact PvP predecessor end before the successor start remains unchanged', async () => {
+  const db = openDb(':memory:');
+  const discord = new FakeDiscordPort();
+  const topic = {
+    id: 'e1432cb0adb2c59d841fdbde19406820d4a49cc3',
+    title: 'Das Ende von Saison 1 und der Start von Saison 2 auf dem Brett der Bestie',
+  };
+  const exactEnd = '2026-12-01T04:59:00Z';
+  const exactEndSource = 'https://de.finalfantasyxiv.com/lodestone/topics/detail/brett-season-1-end';
+  const predecessorId = createEvent(db, {
+    eventKey: 'pvp:crucible:1', eventType: 'pvp-season', title: 'Brett der Bestie – 1. Saison',
+  });
+  const articleWithoutExactPredecessorEnd = fixture(`./fixtures/topics/${topic.id}.html`).replace(
+    /<h4[^>]*>Ende der 1\. Saison<\/h4>[\s\S]*?(?=<h4[^>]*>Zeitraum der 2\. Saison<\/h4>)/u,
+    '',
+  );
+  attachSource(db, { eventId: predecessorId, url: exactEndSource, kind: 'topic', publishedAt: '2026-11-30T12:00:00.000Z' });
+  applyField(db, predecessorId, 'end', { status: 'ok', value: exactEnd }, exactEndSource);
+  try {
+    await runCycle({
+      store: db,
+      discord,
+      fetchText: pvpCycleFetcher([topic], undefined, { [topic.id]: articleWithoutExactPredecessorEnd }),
+      guilds: [],
+      now: () => new Date('2026-12-02T12:00:00.000Z'),
+    });
+
+    const predecessor = getAllEvents(db).find((event) => event.id === predecessorId);
+    const successor = getAllEvents(db).find((event) => event.eventKey === 'pvp:crucible:2');
+    assert.ok(predecessor && successor);
+    assert.equal(successor.startUtc, '2026-12-08T05:00:00Z');
+    assert.ok(Date.parse(exactEnd) < Date.parse(successor.startUtc));
+    assert.equal(predecessor.endStatus, 'ok');
+    assert.equal(predecessor.endUtc, exactEnd);
+    assert.equal(getFieldProvenanceSourceUrl(db, predecessor.id, 'end'), exactEndSource);
   } finally {
     db.close();
   }
