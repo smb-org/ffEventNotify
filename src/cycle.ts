@@ -1362,8 +1362,10 @@ async function warnForUncertainFields(
     ['Belohnungen', 'rewards', event.rewardsStatus === 'unsicher' ? event.rewardsReason : null],
     ['Beschreibung', 'description', event.descriptionStatus === 'unsicher' ? event.descriptionReason : null],
   ];
+  // PvP seasons: open end is by design, no description is extracted.
+  const skip = event.eventType === 'pvp-season' ? ['end', 'description'] : [];
   for (const [field, storeField, reason] of fields) {
-    if (reason) {
+    if (reason && !skip.includes(storeField)) {
       const url = getFieldProvenanceSourceUrl(context.store, event.id, storeField)
         ?? getEventSources(context.store, event.id)[0]?.url;
       await logWarning(context, `event:${event.eventKey}:field:${field}`,
